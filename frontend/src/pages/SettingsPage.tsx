@@ -12,6 +12,7 @@ import {
 import { useAuthStore } from '@/stores/authStore';
 import { userApi } from '@/api/users';
 import ThemeToggle from '@/components/ThemeToggle';
+import LocaleToggle from '@/components/LocaleToggle';
 
 /* ─── Tab navigation ─── */
 const TABS = [
@@ -167,8 +168,9 @@ export default function SettingsPage() {
                 <ThemeToggle />
               </div>
               <div>
-                <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-1">Density</h3>
-                <p className="text-sm text-slate-500 dark:text-slate-400">Compact mode will be available in a future update.</p>
+                <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-1">Language</h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">Choose your preferred language</p>
+                <LocaleToggle />
               </div>
             </div>
           )}
