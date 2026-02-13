@@ -578,10 +578,122 @@ rpa-automation-engine/
 - **Auth**: JWT (access 30min + refresh 7d), DB-verified, auto-refresh + token queue in frontend
 - **Docker**: 6 services: postgres, redis, backend, celery-worker, celery-beat, frontend
 
+## Checkpoint #12 — WebSocket + Real-time + All Routes Wired (Сесия 5)
+**Дата**: 2026-02-13
+**Какво е направено**:
+
+### 12a. WebSocket Real-time Updates
+- **`backend/api/routes/ws.py`** — WebSocket endpoint `/ws?token=<jwt>`:
+  - JWT authentication via query parameter
+  - Ping/pong keepalive
+  - Uses existing ConnectionManager for org/user-scoped event delivery
+  - Events: execution.status_changed, execution.log, notification, trigger.fired
+- **`frontend/src/hooks/useWebSocket.ts`** — React hook:
+  - Auto-connects when authenticated
+  - Exponential back-off reconnection (1s → 30s max)
+  - Keepalive ping every 25s
+  - Typed event system with on/off subscriber API
+  - Clean unmount handling
+
+### 12b. Dashboard Stats API
+- **`backend/api/routes/dashboard.py`** — `/api/v1/dashboard/stats`:
+  - Org-scoped real SQL queries
+  - Returns: total_workflows, active_workflows, total_executions, running/completed/failed counts
+  - Uses `get_current_active_user` (DB-verified auth)
+
+### 12c. Analytics Routes — Real SQL Queries
+- **`backend/api/routes/analytics.py`** fully rewritten:
+  - `GET /analytics/overview` — total/success/failed/avg_duration/success_rate (time-filtered)
+  - `GET /analytics/executions/timeline` — grouped by hour/day/week via `date_trunc()`
+  - `GET /analytics/workflows/performance` — per-workflow metrics with join, CASE aggregation
+
+### 12d. Credentials Routes — Full CRUD + Vault Encryption
+- **`backend/api/routes/credentials.py`** fully rewritten:
+  - Pydantic request/response schemas with field validation
+  - `GET /credentials/` — paginated, searchable, filterable by type (values excluded)
+  - `POST /credentials/` — encrypts value via AES-256 vault, duplicate name check
+  - `GET /credentials/{id}?include_value=true` — optional decryption (audit-logged)
+  - `PUT /credentials/{id}` — re-encrypts value if changed, duplicate name check
+  - `DELETE /credentials/{id}` — soft-delete with audit log
+  - All operations org-scoped + audit-logged
+
+### 12e. Schedules Routes — Full CRUD + Cron Validation
+- **`backend/api/routes/schedules.py`** fully rewritten:
+  - Pydantic schemas with cron expression validation
+  - `GET /schedules/` — paginated, filterable by workflow_id and is_enabled, includes workflow_name via JOIN
+  - `POST /schedules/` — validates cron, verifies workflow ownership, computes next_run_at via croniter
+  - `GET /schedules/{id}` — with workflow name
+  - `PUT /schedules/{id}` — re-validates cron, recalculates next_run
+  - `DELETE /schedules/{id}` — soft-delete
+  - `POST /schedules/{id}/toggle` — enable/disable with next_run recalculation
+
+### 12f. Frontend API Modules
+- **`api/dashboard.ts`** — fetchDashboardStats()
+- **`api/credentials.ts`** — full CRUD (list, get, create, update, delete)
+- **`api/schedules.ts`** — full CRUD + toggle
+- **`api/analytics.ts`** — overview, timeline, workflow performance
+
+### 12g. Build Verification
+- `tsc -b` — zero errors
+- `vite build` — production bundle (240KB main, 147KB flow, 49KB ui, 47KB react, 25KB query)
+
+---
+
+## Файлова структура (текущо състояние)
+```
+rpa-automation-engine/
+├── SESSION_LOG.md, README.md, ROADMAP.md
+├── docker-compose.yml (backend + frontend + workers)
+├── backend/
+│   ├── Dockerfile, requirements.txt, pytest.ini
+│   ├── alembic.ini, alembic/ (initial migration)
+│   ├── app/ (main.py + ws_router mount, config.py, dependencies.py)
+│   ├── api/
+│   │   ├── v1/router.py (16 route groups + dashboard)
+│   │   ├── routes/ — ALL ROUTES FULLY WIRED:
+│   │   │   ├── ws.py (WebSocket + JWT auth)          ← NEW
+│   │   │   ├── dashboard.py (org-scoped stats)       ← NEW
+│   │   │   ├── analytics.py (real SQL queries)        ← REWRITTEN
+│   │   │   ├── credentials.py (vault encryption)      ← REWRITTEN
+│   │   │   ├── schedules.py (cron validation)         ← REWRITTEN
+│   │   │   ├── auth, users, workflows, executions, triggers — wired
+│   │   │   ├── agents, ai, integrations, notifications, task_types
+│   │   ├── schemas/, websockets/
+│   ├── core/ (security, middleware, logging, exceptions)
+│   ├── db/ (base.py, database.py, models/ 17+)
+│   ├── integrations/, notifications/, services/, scripts/
+│   ├── tasks/, triggers/, worker/, workflow/
+│   └── tests/ (conftest, 5 test modules)
+├── frontend/
+│   ├── Dockerfile, nginx.conf, .dockerignore
+│   ├── package.json, vite.config.ts
+│   └── src/
+│       ├── main.tsx, App.tsx, index.css
+│       ├── api/ (client, auth, workflows, executions, triggers, users,
+│       │         dashboard, credentials, schedules, analytics)   ← 4 NEW
+│       ├── hooks/
+│       │   └── useWebSocket.ts                                   ← NEW
+│       ├── stores/ (authStore)
+│       ├── types/ (index.ts)
+│       ├── components/layout/ (Sidebar, AppLayout, ProtectedRoute)
+│       └── pages/ (Login, Register, Dashboard, WorkflowList,
+│                   WorkflowEditor, Executions, Triggers, Users, Settings)
+```
+
+## Технически бележки
+- **Git**: `git push` директно с token в URL
+- **Git credentials**: `~/.git-credentials` с token `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`
+- **DB**: SQLite + aiosqlite (dev/test), PostgreSQL + asyncpg (prod)
+- **API**: `/api/v1/` prefix, 16 route groups, 80+ endpoints, ALL ROUTES FULLY WIRED
+- **Frontend**: React 19 + TypeScript + Vite 7 + Tailwind 4 + React Flow 11 + Zustand 5
+- **WebSocket**: `/ws?token=<jwt>`, auto-reconnect, typed event system
+- **Vault**: AES-256 (Fernet), audit-logged access
+- **Docker**: 6 services: postgres, redis, backend, celery-worker, celery-beat, frontend
+
 ## Какво следва (приоритет)
-1. **WebSocket real-time updates** — Live execution status push to frontend
-2. **Wire remaining backend routes** — agents, credentials, schedules, analytics
-3. **Prometheus metrics** — /metrics endpoint за monitoring
-4. **Browser automation tasks** — Playwright-based web scraping/form filling
-5. **E2E tests** — Cypress or Playwright для frontend integration tests
-6. **CI/CD pipeline** — GitHub Actions for lint, test, build, deploy
+1. **Prometheus metrics** — /metrics endpoint за monitoring
+2. **Browser automation tasks** — Playwright-based web scraping/form filling
+3. **E2E tests** — Cypress or Playwright для frontend integration tests
+4. **CI/CD pipeline** — GitHub Actions for lint, test, build, deploy
+5. **Admin panel** — Multi-tenant admin with role management
+6. **Kubernetes manifests** — k8s deployment configs

@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from api.v1.router import api_v1_router
 from api.routes import health
+from api.routes.ws import router as ws_router
 from db.database import init_db
 from integrations.claude_client import get_claude_client
 from integrations.registry import get_integration_registry
@@ -124,6 +125,9 @@ def create_app() -> FastAPI:
 
     # Versioned API — all business endpoints under /api/v1
     app.include_router(api_v1_router, prefix=settings.API_V1_PREFIX)
+
+    # WebSocket endpoint (not under /api/v1 — mounted directly on the app)
+    app.include_router(ws_router)
 
     return app
 

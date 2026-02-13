@@ -17,6 +17,7 @@ from api.routes import (
     schedules,
     analytics,
     ai,
+    dashboard,
 )
 from api.routes import integrations as integrations_routes
 from api.routes import triggers
@@ -85,6 +86,12 @@ api_v1_router.include_router(
     analytics.router,
     prefix="/analytics",
     tags=["Analytics"],
+)
+
+# Dashboard
+api_v1_router.include_router(
+    dashboard.router,
+    tags=["Dashboard"],
 )
 
 # AI — Claude Integration
