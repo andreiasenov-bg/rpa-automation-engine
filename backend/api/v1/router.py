@@ -20,6 +20,8 @@ from api.routes import (
 )
 from api.routes import integrations as integrations_routes
 from api.routes import triggers
+from api.routes import notifications
+from api.routes import task_types
 
 api_v1_router = APIRouter()
 
@@ -104,4 +106,18 @@ api_v1_router.include_router(
     triggers.router,
     prefix="/triggers",
     tags=["Triggers"],
+)
+
+# Notifications
+api_v1_router.include_router(
+    notifications.router,
+    prefix="/notifications",
+    tags=["Notifications"],
+)
+
+# Task Types (for workflow editor)
+api_v1_router.include_router(
+    task_types.router,
+    prefix="/task-types",
+    tags=["Task Types"],
 )

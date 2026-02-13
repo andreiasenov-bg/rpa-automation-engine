@@ -211,9 +211,113 @@ rpa-automation-engine/
 - **API Versioning**: Всички бизнес endpoints на `/api/v1/`, health на `/api/`
 - **Config**: Всички properties фиксирани, ready for .env
 
+## Checkpoint #7 — Celery + Notifications + Tasks + Logging (Сесия 2)
+**Дата**: 2026-02-13
+**Статус**: ЗАВЪРШЕН
+**Какво е направено**:
+
+### 7a. Celery Worker Setup
+- **Нов пакет**: `backend/worker/`
+  - `celery_app.py` — Celery config с Redis broker, 5 task queues (workflows, triggers, notifications, health, default)
+  - Beat schedule: health checks на 5мин, agent heartbeats на 2мин, cleanup daily 3AM
+  - Task routing: различни queues за различни workloads
+- **Worker tasks**: `backend/worker/tasks/`
+  - `workflow.py` — `execute_workflow` + `resume_workflow` Celery tasks (bridge async engine ↔ sync Celery)
+  - `triggers.py` — `execute_trigger` (called by Celery beat for scheduled triggers)
+  - `health.py` — `check_all_integrations` + `check_agent_heartbeats`
+  - `maintenance.py` — `cleanup_old_data` (daily housekeeping)
+  - `notifications.py` — `send_notification` async via Celery
+
+### 7b. Notification System
+- **Нов пакет**: `backend/notifications/`
+  - `channels.py` — 4 канала:
+    - `EmailChannel` — SMTP с HTML templates, TLS support
+    - `SlackChannel` — Webhook с Block Kit formatting, priority emojis
+    - `WebhookChannel` — Arbitrary HTTP endpoints
+    - `WebSocketChannel` — Real-time push чрез ConnectionManager
+  - `manager.py` — NotificationManager singleton с:
+    - Multi-channel dispatch
+    - Convenience methods: `notify_workflow_completed`, `notify_workflow_failed`, `notify_integration_down`, `notify_agent_disconnected`
+- **Нов route**: `backend/api/routes/notifications.py` — /status, /send, /channels/configure, /test
+
+### 7c. Task Implementations
+- **HTTP tasks** (`backend/tasks/implementations/http_task.py`):
+  - `HttpRequestTask` — Full HTTP client (all methods, auth types, response validation, JSON path extraction)
+  - `HttpDownloadTask` — File downloads with progress
+- **Script tasks** (`backend/tasks/implementations/script_task.py`):
+  - `PythonScriptTask` — Python code execution in subprocess (sandboxed, with variable injection)
+  - `ShellCommandTask` — Shell commands with dangerous pattern blocking
+  - `DataTransformTask` — Data operations: filter, map, sort, group_by, aggregate, flatten, unique
+- **Task Registry** обновен: 15+ task типа общо (8 AI + 2 integration + 2 HTTP + 3 script/data)
+- **Нов route**: `backend/api/routes/task_types.py` — list all task types, get schema by type
+
+### 7d. Structured Logging
+- **Нов файл**: `backend/core/logging_config.py`
+  - structlog с JSON output за production, colored console за development
+  - Noise reduction за 3rd-party libs (uvicorn, sqlalchemy, httpx)
+  - Configurable via `LOG_LEVEL` и `LOG_FORMAT` env vars
+
+### 7e. Trigger→Engine Wiring
+- `main.py` `_handle_trigger_event` вече:
+  - Зарежда Workflow от DB
+  - Създава Execution record
+  - Dispatch-ва към Celery worker (`execute_workflow.delay()`)
+  - Full error handling с logging
+
+---
+
+## Файлова структура (текущо състояние)
+```
+rpa-automation-engine/
+├── SESSION_LOG.md, README.md, ROADMAP.md
+├── docker-compose.yml, .gitignore
+├── backend/
+│   ├── Dockerfile, requirements.txt, .env.example
+│   ├── alembic.ini, alembic/
+│   ├── app/
+│   │   ├── config.py, main.py, dependencies.py
+│   ├── api/
+│   │   ├── v1/router.py           # 13 route groups
+│   │   ├── routes/
+│   │   │   ├── health, auth, users, workflows, executions
+│   │   │   ├── agents, credentials, schedules, analytics, ai
+│   │   │   ├── integrations, triggers, notifications, task_types
+│   │   ├── schemas/, websockets/
+│   ├── core/
+│   │   ├── constants, exceptions, security, utils, logging_config
+│   ├── db/
+│   │   ├── base.py (BaseModel + SoftDeleteMixin)
+│   │   ├── database.py, session.py
+│   │   └── models/ (17 models)
+│   ├── integrations/ (claude_client, registry)
+│   ├── notifications/              ← NEW
+│   │   ├── channels.py (4 channels)
+│   │   └── manager.py (NotificationManager)
+│   ├── tasks/
+│   │   ├── base_task, registry (15+ types)
+│   │   └── implementations/ (ai, integration, http, script)
+│   ├── triggers/
+│   │   ├── base, manager
+│   │   └── handlers/ (webhook, schedule, event_bus)
+│   ├── worker/                     ← NEW
+│   │   ├── celery_app.py (5 queues, beat schedule)
+│   │   └── tasks/ (workflow, triggers, health, maintenance, notifications)
+│   └── workflow/
+│       ├── checkpoint, recovery, engine
+```
+
+## Технически бележки
+- **Git**: `git push` директно с token в URL
+- **DB**: SQLite + aiosqlite (dev), PostgreSQL + asyncpg (prod)
+- **Всички модели**: BaseModel → SoftDeleteMixin (id, created/updated/deleted_at, is_deleted)
+- **API**: `/api/v1/` prefix, 13 route groups, 60+ endpoints
+- **Task types**: 15+ (8 AI, 2 integration, 2 HTTP, 3 script/data)
+- **Celery**: 5 queues (workflows, triggers, notifications, health, default)
+- **Notifications**: 4 канала (email, slack, webhook, websocket)
+
 ## Какво следва (приоритет)
-1. **Celery worker setup** — background task execution
-2. **Notification система** — email, Slack, webhook notifications
-3. **Storage/Files** — file upload/download за workflow attachments
-4. **Frontend** — React 18 + TypeScript + Vite + React Flow visual editor
-5. **Monitoring** — Prometheus metrics, structured logging
+1. **Frontend** — React 18 + TypeScript + Vite + React Flow visual workflow editor
+2. **Storage/Files** — file upload/download за workflow attachments
+3. **Prometheus metrics** — /metrics endpoint за monitoring
+4. **Browser automation tasks** — Playwright-based web scraping/form filling
+5. **Email trigger handler** — IMAP polling за email-triggered workflows

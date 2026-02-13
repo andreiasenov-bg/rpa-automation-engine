@@ -15,6 +15,8 @@ from workflow.checkpoint import CheckpointManager
 from workflow.recovery import RecoveryService
 from workflow.engine import get_workflow_engine
 from triggers.manager import get_trigger_manager
+from notifications.manager import get_notification_manager
+from core.logging_config import setup_logging
 
 
 @asynccontextmanager
@@ -22,7 +24,13 @@ async def lifespan(app: FastAPI):
     """Application startup and shutdown events."""
     # Startup
     settings = get_settings()
+    setup_logging()
     await init_db()
+
+    # Initialize Notification Manager
+    notif_mgr = get_notification_manager()
+    # Channels are configured via environment or admin API later
+    print("[startup] Notification manager ready")
 
     # Connect to Claude AI
     claude = await get_claude_client()
@@ -116,7 +124,8 @@ def create_app() -> FastAPI:
 async def _handle_trigger_event(event, engine) -> str:
     """Bridge between TriggerManager and WorkflowEngine.
 
-    Called when a trigger fires. Creates an execution and runs the workflow.
+    Called when a trigger fires. Dispatches workflow execution
+    to Celery worker for async background processing.
 
     Args:
         event: TriggerEvent from the trigger manager
@@ -125,12 +134,62 @@ async def _handle_trigger_event(event, engine) -> str:
     Returns:
         execution_id
     """
+    import logging
     from uuid import uuid4
+    from db.session import AsyncSessionLocal
+    from sqlalchemy import select
+
+    logger = logging.getLogger(__name__)
     execution_id = str(uuid4())
 
-    # TODO: Load workflow definition from DB
-    # TODO: Create Execution record in DB
-    # TODO: Run engine.execute() in background task
+    try:
+        # Load workflow definition from DB
+        async with AsyncSessionLocal() as session:
+            from db.models.workflow import Workflow
+            from db.models.execution import Execution
+
+            result = await session.execute(
+                select(Workflow).where(
+                    Workflow.id == event.workflow_id,
+                    Workflow.is_deleted == False,
+                )
+            )
+            workflow = result.scalar_one_or_none()
+
+            if not workflow:
+                logger.error(f"Trigger fired for non-existent workflow: {event.workflow_id}")
+                return execution_id
+
+            if not workflow.is_enabled:
+                logger.warning(f"Trigger fired for disabled workflow: {event.workflow_id}")
+                return execution_id
+
+            # Create Execution record
+            execution = Execution(
+                id=execution_id,
+                organization_id=event.organization_id,
+                workflow_id=event.workflow_id,
+                trigger_type=event.trigger_type,
+                status="pending",
+            )
+            session.add(execution)
+            await session.commit()
+
+            # Dispatch to Celery worker
+            from worker.tasks.workflow import execute_workflow
+            execute_workflow.delay(
+                execution_id=execution_id,
+                workflow_id=event.workflow_id,
+                organization_id=event.organization_id,
+                definition=workflow.definition or {},
+                variables={},
+                trigger_payload=event.payload,
+            )
+
+            logger.info(f"Trigger dispatched: {event.trigger_id} -> execution {execution_id}")
+
+    except Exception as e:
+        logger.error(f"Trigger event handling failed: {e}", exc_info=True)
 
     return execution_id
 
