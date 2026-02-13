@@ -1,19 +1,32 @@
-FROM python:3.11-slim AS base
+# ── Stage 1: Build dependencies ──
+FROM python:3.11-slim AS builder
 
-WORKDIR /app
+WORKDIR /build
 
-# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+# ── Stage 2: Runtime ──
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install only runtime system deps (no build-essential)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
     curl \
     postgresql-client \
     redis-tools \
+    tini \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy pre-built Python packages from builder
+COPY --from=builder /install /usr/local
 
 # Copy application code
 COPY . .
@@ -28,4 +41,5 @@ USER appuser
 
 EXPOSE 8000
 
-ENTRYPOINT ["scripts/entrypoint.sh"]
+# Use tini as init process for proper signal handling
+ENTRYPOINT ["tini", "--", "scripts/entrypoint.sh"]
