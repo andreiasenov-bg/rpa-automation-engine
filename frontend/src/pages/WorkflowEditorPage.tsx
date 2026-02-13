@@ -12,6 +12,7 @@ import {
   type Edge,
   type Connection,
   type NodeTypes,
+  type ReactFlowInstance,
   Handle,
   Position,
   Panel,
@@ -150,6 +151,8 @@ export default function WorkflowEditorPage() {
   const [selectedStep, setSelectedStep] = useState<string | null>(null);
   const [showRunDialog, setShowRunDialog] = useState(false);
   const counterRef = useRef(0);
+  const reactFlowWrapper = useRef<HTMLDivElement>(null);
+  const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
 
   // Fetch workflow
   useEffect(() => {
@@ -258,6 +261,43 @@ export default function WorkflowEditorPage() {
     );
   }, [setNodes]);
 
+  // Drag & drop from palette to canvas
+  const onDragOver = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+  }, []);
+
+  const onDrop = useCallback(
+    (event: React.DragEvent) => {
+      event.preventDefault();
+      const taskType = event.dataTransfer.getData('application/rpa-task-type');
+      if (!taskType || !reactFlowInstance) return;
+
+      const position = reactFlowInstance.screenToFlowPosition({
+        x: event.clientX,
+        y: event.clientY,
+      });
+
+      counterRef.current += 1;
+      const taskDef = TASK_TYPES.find((t) => t.type === taskType);
+      if (!taskDef) return;
+
+      const newNode: Node = {
+        id: `step_${Date.now()}_${counterRef.current}`,
+        type: 'stepNode',
+        position,
+        data: {
+          label: `${taskDef.label} ${counterRef.current}`,
+          type: taskType,
+          config: {},
+          color: taskDef.color,
+        },
+      };
+      setNodes((nds) => [...nds, newNode]);
+    },
+    [reactFlowInstance, setNodes],
+  );
+
   const handleDeleteSelected = () => {
     setNodes((nds) => nds.filter((n) => !n.selected));
     setEdges((eds) => {
@@ -359,7 +399,7 @@ export default function WorkflowEditorPage() {
       </div>
 
       {/* Canvas */}
-      <div className="flex-1 relative">
+      <div className="flex-1 relative" ref={reactFlowWrapper}>
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -367,6 +407,9 @@ export default function WorkflowEditorPage() {
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           onNodeClick={handleNodeClick}
+          onInit={setReactFlowInstance}
+          onDrop={onDrop}
+          onDragOver={onDragOver}
           nodeTypes={nodeTypes}
           fitView
           deleteKeyCode={['Backspace', 'Delete']}
@@ -381,35 +424,46 @@ export default function WorkflowEditorPage() {
             className="!bg-white !border-slate-200 !rounded-lg"
           />
 
-          {/* Add step button */}
+          {/* Dockable step palette */}
           <Panel position="top-left">
-            <div className="relative">
+            <div className="flex flex-col gap-1">
               <button
                 onClick={() => setShowPalette(!showPalette)}
                 className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium bg-white rounded-lg border border-slate-200 shadow-sm hover:bg-slate-50 transition"
               >
                 <Plus className="w-4 h-4 text-indigo-500" />
-                Add Step
+                {showPalette ? 'Hide' : 'Add Step'}
               </button>
 
               {showPalette && (
-                <div className="absolute top-11 left-0 z-30 w-52 bg-white rounded-xl border border-slate-200 shadow-lg py-2">
+                <div className="w-48 bg-white rounded-xl border border-slate-200 shadow-lg py-2 max-h-[60vh] overflow-y-auto">
+                  <p className="px-3 py-1 text-[10px] font-medium text-slate-400 uppercase tracking-wider">
+                    Drag to canvas or click
+                  </p>
                   {TASK_TYPES.map((task) => {
                     const Icon = task.icon;
                     return (
-                      <button
+                      <div
                         key={task.type}
+                        draggable
+                        role="button"
+                        tabIndex={0}
                         onClick={() => addNode(task.type)}
-                        className="flex items-center gap-2.5 px-3 py-2 w-full hover:bg-slate-50 transition-colors"
+                        onKeyDown={(e) => { if (e.key === 'Enter') addNode(task.type); }}
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData('application/rpa-task-type', task.type);
+                          e.dataTransfer.effectAllowed = 'move';
+                        }}
+                        className="flex items-center gap-2.5 px-3 py-2 w-full hover:bg-slate-50 transition-colors cursor-grab active:cursor-grabbing select-none"
                       >
                         <div
-                          className="w-6 h-6 rounded flex items-center justify-center"
+                          className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
                           style={{ backgroundColor: `${task.color}15`, color: task.color }}
                         >
                           <Icon className="w-3.5 h-3.5" />
                         </div>
-                        <span className="text-sm text-slate-700">{task.label}</span>
-                      </button>
+                        <span className="text-xs font-medium text-slate-700">{task.label}</span>
+                      </div>
                     );
                   })}
                 </div>
