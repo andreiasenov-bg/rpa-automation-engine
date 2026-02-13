@@ -1750,12 +1750,63 @@ rpa-automation-engine/
 - **Docker**: 6 services + monitoring stack + production overlay
 - **Общо**: ~170+ файла, ~28,000+ реда код
 
+## Checkpoint #31 — Step Config + Execution Variables + Live Logs (Сесия 8)
+**Дата**: 2026-02-14
+**Commit**: `b854c4f`
+**Какво е направено**:
+
+### 31a. Step Config Editor
+- **Нов файл**: `frontend/src/components/StepConfigEditor.tsx`
+  - Slide-out panel opens on node click in workflow editor
+  - Type-specific config fields for all 10 task types:
+    - Web Scraping: URL, CSS selector, wait, timeout, JS execution
+    - API Request: URL, method, headers JSON, body JSON, expected status
+    - Form Fill: URL, fields JSON, submit selector, screenshot
+    - Email: to, subject, body template, HTML toggle
+    - Database: connection string, SQL query, credential ID
+    - File Ops: operation type, source/destination paths
+    - Custom Script: language selector, code editor, timeout
+    - Conditional: condition expression, true/false branch step IDs
+    - Loop: type (for_each/while/count), items expression, max iterations
+    - Delay: duration ms, until datetime
+  - Error handling: on_error step routing dropdown, retry policy selector (none/fixed/exponential/linear), max attempts
+  - Read-only step ID display
+
+### 31b. Execution Run Dialog
+- **Нов файл**: `frontend/src/components/ExecutionRunDialog.tsx`
+  - Modal triggered by "Run" button in workflow editor
+  - Fetches workflow variable schema, pre-fills defaults
+  - Type-aware inputs: text, number, boolean checkbox, JSON/list textarea, secret (password)
+  - Server-side validation via `/workflow-variables/{id}/variables/validate`
+  - Required field indicators (*), per-field error messages
+  - General error display for execution failures
+
+### 31c. Live Log Viewer
+- **Нов файл**: `frontend/src/components/LiveLogViewer.tsx`
+  - WebSocket-powered real-time log streaming via `execution.log` events
+  - Initial log fetch + live WebSocket append
+  - Search filter (text) + level filter (DEBUG/INFO/WARNING/ERROR)
+  - Auto-scroll with manual scroll detection
+  - Export logs as `.txt` file
+  - WebSocket status indicator (Live/Offline), streaming pulse indicator
+  - Replaces static LogViewer in ExecutionsPage
+
+### 31d. Integration
+- WorkflowEditorPage: node click opens StepConfigEditor, Run opens RunDialog
+- ExecutionsPage: expanded rows now use LiveLogViewer
+- workflows.ts: `execute()` accepts optional variables parameter
+
+---
+
 ## Какво следва (приоритет)
 1. ~~Lazy loading~~ ✅
 2. ~~Global search~~ ✅
 3. ~~Notification center~~ ✅
 4. ~~User roles UI~~ ✅
 5. ~~Workflow variables~~ ✅
-6. **Step config editor** — Config panel per step in workflow editor
-7. **Execution input variables** — Pass variables when starting execution
-8. **WebSocket live logs** — Real-time log streaming in execution detail
+6. ~~Step config editor~~ ✅
+7. ~~Execution input variables~~ ✅
+8. ~~WebSocket live logs~~ ✅
+9. **Drag & drop step reorder** — Drag steps in palette to canvas
+10. **Execution detail page** — Full execution detail with step-by-step view
+11. **Dashboard widgets** — Customizable dashboard widget layout
