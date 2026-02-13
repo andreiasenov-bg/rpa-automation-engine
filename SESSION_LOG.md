@@ -1590,9 +1590,49 @@ rpa-automation-engine/
 - **Code Splitting**: 8 chunks (main 347KB, charts 382KB, flow 134KB)
 - **Общо**: ~160+ файла, ~25,000+ реда код
 
+## Checkpoint #29 — Lazy Loading + Global Search + Notification Center (Сесия 7)
+**Дата**: 2026-02-13
+**Commit**: `f555cf7`
+**Какво е направено**:
+
+### 29a. React Lazy Loading
+- Rewrote App.tsx: React.lazy() + Suspense for 15 pages
+- Only Login, Register, Dashboard eagerly loaded
+- PageLoader spinner as Suspense fallback
+- Main bundle reduced: 347KB → **237KB** (32% reduction)
+- Each page now loads as separate chunk on demand
+
+### 29b. Global Search (Cmd/Ctrl+K)
+- **Нов файл**: `frontend/src/components/GlobalSearch.tsx`
+  - Command palette activated by ⌘K / Ctrl+K
+  - Debounced search (300ms) across workflows, executions, agents
+  - Keyboard navigation (↑↓ to navigate, ↵ to select, Esc to close)
+  - Result type icons and color coding
+  - Backdrop overlay, auto-focus
+
+### 29c. Notification Center
+- **Нов файл**: `frontend/src/components/NotificationCenter.tsx`
+  - Bell icon with unread count badge
+  - Dropdown with recent notifications
+  - Mark read / mark all read (optimistic updates)
+  - 30s polling interval
+  - Type icons: success, error, warning, info
+
+### 29d. TopBar + Layout Update
+- **Нов файл**: `frontend/src/components/layout/TopBar.tsx`
+  - Global header with search trigger + NotificationCenter
+  - Keyboard shortcut hint (⌘K)
+- Updated AppLayout: added TopBar, GlobalSearch state management
+
+### 29e. i18n Keys
+- search.placeholder, search.hint, search.shortcutHint (EN + BG)
+- notifications.title, notifications.markAllRead, notifications.empty, notifications.viewAll (EN + BG)
+
+---
+
 ## Какво следва (приоритет)
-1. **Lazy loading** — React.lazy() for heavy pages (WorkflowEditor, Analytics)
-2. **Search & filtering** — Global search across workflows, executions, agents
-3. **Notification center** — In-app bell + unread count
+1. ~~Lazy loading~~ ✅
+2. ~~Global search~~ ✅
+3. ~~Notification center~~ ✅
 4. **User roles UI** — Assign/manage roles from Admin panel
 5. **Workflow variables** — Variable passing between steps
