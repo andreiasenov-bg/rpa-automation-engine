@@ -1,0 +1,102 @@
+groups:
+  - name: rpa_engine_alerts
+    rules:
+      # ─── API Health ───
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High 5xx error rate ({{ $value | humanizePercentage }})"
+          description: "More than 5% of requests are failing with 5xx errors for 5 minutes."
+
+      - alert: HighLatency
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High API latency (p95 = {{ $value }}s)"
+          description: "95th percentile response time exceeds 2 seconds."
+
+      - alert: HighRateLimitHits
+        expr: rate(http_requests_total{status="429"}[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High rate limit rejection rate"
+          description: "More than 10 rate-limited requests per second for 5 minutes."
+
+      # ─── Workflows ───
+      - alert: WorkflowExecutionFailures
+        expr: rate(workflow_executions_total{status="failed"}[15m]) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Elevated workflow execution failures"
+          description: "More than 0.5 workflow failures per second for 10 minutes."
+
+      - alert: WorkflowExecutionStuck
+        expr: workflow_executions_running > 0 and changes(workflow_executions_running[30m]) == 0
+        for: 30m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Stuck workflow executions detected"
+          description: "Running executions count hasn't changed in 30 minutes."
+
+      # ─── Agents ───
+      - alert: AgentDisconnected
+        expr: agents_online < agents_total * 0.5
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "More than 50% of agents are offline"
+          description: "{{ $value }} agents online out of {{ with query \"agents_total\" }}{{ . | first | value }}{{ end }} total."
+
+      - alert: AgentHeartbeatMissed
+        expr: time() - agent_last_heartbeat_seconds > 300
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Agent heartbeat missed for >5 minutes"
+
+      # ─── Celery ───
+      - alert: CeleryQueueBacklog
+        expr: celery_queue_length > 100
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Celery queue backlog ({{ $value }} tasks)"
+          description: "Queue has more than 100 pending tasks for 10 minutes."
+
+      - alert: CeleryWorkerDown
+        expr: celery_workers_active < 1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No active Celery workers"
+
+      # ─── Infrastructure ───
+      - alert: HighMemoryUsage
+        expr: process_resident_memory_bytes / 1024 / 1024 > 512
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage ({{ $value }}MB)"
+
+      - alert: DatabaseConnectionPoolExhausted
+        expr: db_pool_checked_out / db_pool_size > 0.9
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Database connection pool near exhaustion ({{ $value | humanizePercentage }})"
