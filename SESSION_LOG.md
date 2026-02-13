@@ -1905,6 +1905,58 @@ rpa-automation-engine/
 
 ---
 
+## Checkpoint #38 — Execution Detail Improvements (Сесия 9)
+**Дата**: 2026-02-14
+**Commit**: `2a7d525`
+**Какво е направено**:
+- `CopyButton` компонент с copied/check feedback (Check icon)
+- `ElapsedTimer` за running executions (live counter с animate-pulse)
+- `ProgressBar` — overall step progress с percentage и color-coded за failures
+- `StepDurationBar` — relative duration визуализация per step
+- Collapsible `StepTimeline` cards: click to expand, step numbering (#1, #2...), type icon, timestamps, error с copy button, input/output като `<details>` с JSON
+- Auto-refresh 3s + re-fetch on WebSocket status change
+
+---
+
+## Checkpoint #39 — Workflow Editor Drag & Drop (Сесия 9)
+**Дата**: 2026-02-14
+**Commit**: `bbf3048`
+**Какво е направено**:
+- Undo/Redo с 50-step history (Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y)
+- Custom smooth-step edges с hover delete button и arrow markers
+- Auto-connect: drop node near existing → automatic edge
+- Snap-to-grid (16px)
+- Keyboard shortcuts modal (?, Ctrl+S, Ctrl+Z, Escape, Delete)
+- Enhanced handle hover states (scale + color change)
+- MiniMap с zoom/pan
+- Step + edge count в top-right panel
+
+---
+
+## Checkpoint #40 — Dashboard Widget Customization (Сесия 9)
+**Дата**: 2026-02-14
+**Commit**: `6a1d7f1`
+**Какво е направено**:
+- Settings2 gear button в dashboard header
+- `WidgetCustomizer` dropdown panel с toggle switches за 7 widgets
+- Widget visibility: stats, quick actions, success rate, system health, recent executions, analytics, activity
+- localStorage persistence (`rpa_dashboard_widgets`)
+- Reset to defaults button
+- Merge с defaults при нови widgets
+- Click-outside за затваряне на customizer
+
+---
+
+## Checkpoint #41 — E2E Tests Expansion (Сесия 9)
+**Дата**: 2026-02-14
+**Commit**: `91d7c5e`
+**Какво е направено**:
+- `dashboard-customization.spec.ts` — 7 теста: customize button, panel open, 7 widgets listed, 7/7 count, toggle off, reset, close
+- `workflow-editor-enhanced.spec.ts` — 10 теста: undo/redo buttons, disabled states, shortcuts button, shortcuts modal, Escape close, step+edge count, palette, add step, undo enabled after add
+- **Общо: 123 Playwright теста** на chromium + webkit + mobile-chrome
+
+---
+
 ## Roadmap — Завършен ✅
 1. ~~Lazy loading~~ ✅
 2. ~~Global search~~ ✅
@@ -1917,14 +1969,19 @@ rpa-automation-engine/
 9. ~~Drag & drop step reorder~~ ✅
 10. ~~Execution detail page~~ ✅
 11. ~~Dashboard widgets~~ ✅
-12. ~~E2E tests~~ ✅ (51 Playwright теста)
+12. ~~E2E tests~~ ✅ (123 Playwright теста)
 13. ~~Docker production config~~ ✅
 14. ~~Documentation~~ ✅
 
+### Подобрения от Сесия 9 ✅
+- ~~Execution detail: step-by-step view подобрения~~ ✅ (#38)
+- ~~Drag & drop: edge connections, undo/redo, auto-connect~~ ✅ (#39)
+- ~~Dashboard widget customization~~ ✅ (#40)
+- ~~E2E tests expansion (123 теста)~~ ✅ (#41)
+
 ### Потенциални подобрения (бъдещи)
-- Execution detail page: step-by-step view подобрения
-- Drag & drop: edge connections, step reordering
-- Dashboard widget customization
-- E2E tests с реална DB (integration tests)
 - Kubernetes Helm chart
 - CI/CD pipeline (GitHub Actions)
+- Backend unit tests (>80% coverage)
+- Workflow import/export
+- Dark mode polish
