@@ -9,6 +9,8 @@ from app.config import get_settings
 from api.routes import auth, health, workflows, executions, agents, users, credentials, schedules, analytics, ai
 from db.database import init_db
 from integrations.claude_client import get_claude_client
+from workflow.checkpoint import CheckpointManager
+from workflow.recovery import RecoveryService
 
 
 @asynccontextmanager
@@ -24,6 +26,19 @@ async def lifespan(app: FastAPI):
         print(f"🤖 Claude AI connected (model: {settings.CLAUDE_MODEL})")
     else:
         print("⚠️  Claude AI not configured (set ANTHROPIC_API_KEY to enable)")
+
+    # Recover interrupted executions from previous run
+    try:
+        checkpoint_mgr = CheckpointManager()
+        recovery_svc = RecoveryService(checkpoint_manager=checkpoint_mgr)
+        results = await recovery_svc.recover_all()
+        recovered = sum(1 for r in results if r.recovered)
+        if recovered > 0:
+            print(f"🔄 Recovered {recovered} interrupted execution(s)")
+        else:
+            print("✅ No interrupted executions to recover")
+    except Exception as e:
+        print(f"⚠️  Recovery scan skipped: {e}")
 
     print(f"🚀 {settings.APP_NAME} v{settings.APP_VERSION} started")
     yield
