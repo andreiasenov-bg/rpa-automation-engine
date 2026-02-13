@@ -15,6 +15,7 @@ import {
   RotateCcw,
   Wifi,
   WifiOff,
+  ExternalLink,
 } from 'lucide-react';
 import type { Execution, ExecutionLog } from '@/types';
 import { executionApi } from '@/api/executions';
@@ -154,6 +155,13 @@ function ExecutionRow({
         <StatusBadge status={execution.status} />
 
         <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+          <Link
+            to={`/executions/${execution.id}`}
+            className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-indigo-600 transition-colors"
+            title="View details"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+          </Link>
           {(execution.status === 'failed' || execution.status === 'cancelled') && (
             <button
               onClick={() => onRetry(execution.id)}
