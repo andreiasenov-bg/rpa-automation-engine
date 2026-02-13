@@ -244,11 +244,114 @@ rpa-automation-engine/
 - **Services**: BaseService generic CRUD, AuthService, WorkflowService, ExecutionService, TriggerService
 - **Tests**: pytest + pytest-asyncio, in-memory SQLite, rollback per test
 
+## Checkpoint #9 — Wire Services into API Routes (Сесия 3)
+**Дата**: 2026-02-13
+**Какво е направено**:
+
+### 9a. Auth Routes — Fully Wired
+- `POST /auth/register` → AuthService.register() → създава Org + User → връща JWT tokens
+- `POST /auth/login` → AuthService.login() → верифицира парола → обновява last_login → JWT
+- `POST /auth/refresh` → верифицира refresh token + проверява user в DB → нови tokens
+- `GET /auth/me` → get_current_active_user (DB проверка) → връща пълен профил с roles
+
+### 9b. Workflow Routes — Fully Wired
+- `GET /workflows/` → WorkflowService.list() с pagination, org scope
+- `POST /workflows/` → WorkflowService.create_workflow()
+- `GET /workflows/{id}` → WorkflowService.get_by_id_and_org()
+- `PUT /workflows/{id}` → update_definition() (version bump) или update()
+- `DELETE /workflows/{id}` → soft_delete()
+- `POST /workflows/{id}/publish` → publish (status→published, is_enabled→true)
+- `POST /workflows/{id}/archive` → archive (status→archived, is_enabled→false)
+- `POST /workflows/{id}/execute` → execute() → Celery dispatch → 202 Accepted
+
+### 9c. Execution Routes — Fully Wired
+- `GET /executions/` → ExecutionService.list() с filters (workflow_id, status)
+- `GET /executions/{id}` → get_by_id_and_org()
+- `GET /executions/{id}/logs` → ExecutionLog query
+- `POST /executions/{id}/retry` → creates new execution за failed/cancelled
+- `POST /executions/{id}/cancel` → update_status("cancelled")
+
+### 9d. Trigger Routes — Fully Wired with CRUD
+- `GET /triggers/` → TriggerService.list() с optional workflow_id filter
+- `POST /triggers/` → create_trigger() с auto_start
+- `GET /triggers/{id}` → get_by_id_and_org()
+- `PUT /triggers/{id}` → update name/config
+- `DELETE /triggers/{id}` → delete_trigger() (stop + soft-delete)
+- `POST /triggers/{id}/toggle` → toggle() (enable/disable + start/stop manager)
+- `POST /triggers/{id}/fire` → manual fire (auth required)
+- Webhook receiver остава unauthenticated (за external systems)
+
+### 9e. User Routes — Fully Wired
+- `GET /users/` → UserService.list_by_org() с pagination
+- `GET /users/{id}` → get_by_id_and_org()
+- `PUT /users/{id}` → update_profile() (safe fields only)
+- `DELETE /users/{id}` → deactivate (soft-delete, cannot deactivate self)
+
+### 9f. Infrastructure Improvements
+- **Нов файл**: `backend/services/user_service.py` — UserService with org-scoped queries
+- **decode_access_token()** добавена в security.py (за tests)
+- **get_current_active_user** вече проверява user в DB (is_active + is_deleted)
+- **get_db** вече auto-commits on success, rollback on error
+- **DB import consistency**: всички файлове ползват `db.database`, не `db.session`
+- **Test fixtures фиксирани**: password_hash (не hashed_password), subscription_plan (не plan)
+- **Test assertions фиксирани**: match actual AuthService return types
+
+---
+
+## Файлова структура (текущо състояние)
+```
+rpa-automation-engine/
+├── SESSION_LOG.md, README.md, ROADMAP.md
+├── docker-compose.yml (YAML anchors, multi-service)
+├── backend/
+│   ├── Dockerfile, requirements.txt, pytest.ini
+│   ├── alembic.ini, alembic/
+│   ├── app/
+│   │   ├── config.py, main.py (middleware), dependencies.py (DB-verified auth)
+│   ├── api/
+│   │   ├── v1/router.py (15 route groups)
+│   │   ├── routes/ — ALL WIRED TO SERVICES:
+│   │   │   ├── auth.py (register/login/refresh/me)
+│   │   │   ├── users.py (CRUD + deactivate)
+│   │   │   ├── workflows.py (CRUD + publish/archive/execute)
+│   │   │   ├── executions.py (list/get/logs/retry/cancel)
+│   │   │   ├── triggers.py (CRUD + toggle/fire + webhook)
+│   │   │   ├── agents, credentials, schedules, analytics, ai
+│   │   │   ├── integrations, notifications, task_types
+│   │   ├── schemas/, websockets/
+│   ├── core/
+│   │   ├── constants, exceptions, security (+decode_access_token)
+│   │   ├── utils, logging_config, middleware
+│   ├── db/
+│   │   ├── base.py, database.py, session.py
+│   │   └── models/ (17+ models)
+│   ├── integrations/ (claude_client, registry)
+│   ├── notifications/ (channels × 4, manager)
+│   ├── services/
+│   │   ├── base.py (BaseService generic CRUD)
+│   │   ├── auth_service.py, user_service.py (NEW)
+│   │   ├── workflow_service.py, trigger_service.py
+│   ├── scripts/ (seed.py, entrypoint.sh)
+│   ├── tasks/ (15+ types)
+│   ├── triggers/ (base, manager, handlers × 3)
+│   ├── worker/ (celery_app, tasks × 5)
+│   ├── workflow/ (checkpoint, recovery, engine)
+│   └── tests/ (conftest, 5 test modules)
+```
+
+## Технически бележки
+- **Git**: `git push` директно с token в URL
+- **Git credentials**: `~/.git-credentials` с token `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`
+- **DB**: SQLite + aiosqlite (dev/test), PostgreSQL + asyncpg (prod)
+- **API**: `/api/v1/` prefix, 15 route groups, 70+ endpoints (5 core groups now fully wired)
+- **Services**: BaseService, AuthService, UserService, WorkflowService, ExecutionService, TriggerService
+- **Auth flow**: JWT (access 30min + refresh 7d), get_current_active_user verifies DB
+- **All routes**: use get_current_active_user (DB-verified) instead of raw get_current_user
+
 ## Какво следва (приоритет)
 1. **Frontend** — React 18 + TypeScript + Vite + React Flow visual workflow editor
-2. **Wire services into API routes** — Replace inline DB logic with service calls
-3. **Alembic initial migration** — Generate from current models
+2. **Alembic initial migration** — Generate from current models
+3. **Wire remaining routes** — agents, credentials, schedules, analytics (lower priority)
 4. **Storage/Files** — file upload/download за workflow attachments
 5. **Prometheus metrics** — /metrics endpoint за monitoring
 6. **Browser automation tasks** — Playwright-based web scraping/form filling
-7. **Email trigger handler** — IMAP polling за email-triggered workflows

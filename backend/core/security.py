@@ -112,6 +112,22 @@ def create_access_token(user_id: str, email: str, org_id: str) -> str:
     return encoded_jwt
 
 
+def decode_access_token(token: str) -> dict:
+    """
+    Decode a JWT token and return the raw payload dict.
+
+    Args:
+        token: Encoded JWT token
+
+    Returns:
+        Dict with token payload (sub, email, org_id, etc.)
+
+    Raises:
+        jwt.InvalidTokenError: If token is invalid or expired
+    """
+    return jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
+
+
 def create_refresh_token(user_id: str, email: str, org_id: str) -> str:
     """
     Create a JWT refresh token.

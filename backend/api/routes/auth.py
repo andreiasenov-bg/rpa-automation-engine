@@ -1,16 +1,13 @@
-"""Authentication endpoints."""
+"""Authentication endpoints — register, login, refresh, me."""
 
 from fastapi import APIRouter, HTTPException, status, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 import logging
 
 from core.security import (
-    hash_password,
-    verify_password,
     create_access_token,
     create_refresh_token,
     verify_token,
-    get_current_user,
     TokenPayload,
 )
 from api.schemas.auth import (
@@ -20,12 +17,58 @@ from api.schemas.auth import (
     RefreshRequest,
     UserResponse,
 )
-from app.dependencies import get_db
-from core.utils import utc_now
+from app.dependencies import get_db, get_current_active_user
+from services.auth_service import AuthService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
+
+
+@router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
+async def register(
+    request: RegisterRequest,
+    db: AsyncSession = Depends(get_db),
+) -> TokenResponse:
+    """
+    Register a new user and create an organization.
+
+    Returns access and refresh tokens for the newly created user.
+    """
+    auth_svc = AuthService(db)
+
+    try:
+        user, org = await auth_svc.register(
+            email=request.email,
+            password=request.password,
+            first_name=request.first_name,
+            last_name=request.last_name,
+            organization_name=request.org_name,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(e),
+        )
+
+    access_token = create_access_token(
+        user_id=user.id,
+        email=user.email,
+        org_id=org.id,
+    )
+    refresh_token = create_refresh_token(
+        user_id=user.id,
+        email=user.email,
+        org_id=org.id,
+    )
+
+    logger.info(f"New user registered: {user.email} (org: {org.slug})")
+
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        token_type="bearer",
+    )
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -36,49 +79,22 @@ async def login(
     """
     Authenticate user with email and password.
 
-    Args:
-        request: Login credentials (email, password)
-        db: Database session
-
-    Returns:
-        Access and refresh tokens
-
-    Raises:
-        HTTPException: If credentials are invalid
+    Returns access and refresh tokens on success.
     """
-    # TODO: Implement actual user lookup from database
-    # This is a placeholder implementation
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Invalid credentials",
-    )
+    auth_svc = AuthService(db)
+    result = await auth_svc.login(email=request.email, password=request.password)
 
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
-@router.post("/register", response_model=TokenResponse)
-async def register(
-    request: RegisterRequest,
-    db: AsyncSession = Depends(get_db),
-) -> TokenResponse:
-    """
-    Register a new user and create organization.
-
-    Creates a new organization and user, returns authentication tokens.
-
-    Args:
-        request: Registration details (email, password, name, org_name)
-        db: Database session
-
-    Returns:
-        Access and refresh tokens
-
-    Raises:
-        HTTPException: If email already exists or validation fails
-    """
-    # TODO: Implement actual user and organization creation
-    # This is a placeholder implementation
-    raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail="Registration not yet implemented",
+    return TokenResponse(
+        access_token=result["access_token"],
+        refresh_token=result["refresh_token"],
+        token_type=result["token_type"],
     )
 
 
@@ -88,17 +104,7 @@ async def refresh_token(
     db: AsyncSession = Depends(get_db),
 ) -> TokenResponse:
     """
-    Refresh access token using refresh token.
-
-    Args:
-        request: Refresh token
-        db: Database session
-
-    Returns:
-        New access and refresh tokens
-
-    Raises:
-        HTTPException: If refresh token is invalid or expired
+    Refresh access token using a valid refresh token.
     """
     try:
         token_payload = verify_token(request.refresh_token)
@@ -106,17 +112,24 @@ async def refresh_token(
         if token_payload.type != "refresh":
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token type",
+                detail="Invalid token type — expected refresh token",
             )
 
-        # TODO: Verify refresh token has not been revoked
-        # Generate new tokens
+        # Verify user still exists and is active
+        auth_svc = AuthService(db)
+        user = await auth_svc.get_user_by_id(token_payload.sub)
+        if not user or not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found or deactivated",
+            )
+
         access_token = create_access_token(
             user_id=token_payload.sub,
             email=token_payload.email,
             org_id=token_payload.org_id,
         )
-        refresh_token_new = create_refresh_token(
+        new_refresh = create_refresh_token(
             user_id=token_payload.sub,
             email=token_payload.email,
             org_id=token_payload.org_id,
@@ -124,14 +137,14 @@ async def refresh_token(
 
         return TokenResponse(
             access_token=access_token,
-            refresh_token=refresh_token_new,
+            refresh_token=new_refresh,
             token_type="bearer",
         )
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Token refresh failed: {str(e)}")
+        logger.error(f"Token refresh failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token refresh failed",
@@ -140,25 +153,28 @@ async def refresh_token(
 
 @router.get("/me", response_model=UserResponse)
 async def get_current_user_info(
-    current_user: TokenPayload = Depends(get_current_user),
+    current_user: TokenPayload = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ) -> UserResponse:
     """
-    Get current authenticated user information.
-
-    Args:
-        current_user: Current user from JWT token
-        db: Database session
-
-    Returns:
-        Current user information
-
-    Raises:
-        HTTPException: If user not found
+    Get current authenticated user's full profile.
     """
-    # TODO: Fetch full user details from database
-    # This is a placeholder implementation
-    raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail="User not found",
+    auth_svc = AuthService(db)
+    user = await auth_svc.get_user_by_id(current_user.sub)
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    return UserResponse(
+        id=user.id,
+        email=user.email,
+        first_name=user.first_name,
+        last_name=user.last_name,
+        org_id=user.organization_id,
+        is_active=user.is_active,
+        roles=[r.name for r in user.roles] if user.roles else [],
+        created_at=user.created_at,
     )

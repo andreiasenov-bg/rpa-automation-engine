@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 async def seed():
     """Seed the database with default data."""
     from db.database import init_db
-    from db.session import AsyncSessionLocal
+    from db.database import AsyncSessionLocal
     from db.models.organization import Organization
     from db.models.user import User
     from db.models.role import Role

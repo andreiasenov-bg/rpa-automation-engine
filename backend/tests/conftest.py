@@ -120,7 +120,7 @@ async def test_org(db_session):
         id=str(uuid4()),
         name="Test Organization",
         slug="test-org",
-        plan="enterprise",
+        subscription_plan="enterprise",
         settings={"timezone": "UTC"},
     )
     db_session.add(org)
@@ -138,8 +138,9 @@ async def test_user(db_session, test_org):
         id=str(uuid4()),
         organization_id=test_org.id,
         email="test@example.com",
-        hashed_password=hash_password("TestPassword123!"),
-        full_name="Test User",
+        password_hash=hash_password("TestPassword123!"),
+        first_name="Test",
+        last_name="User",
         is_active=True,
     )
     db_session.add(user)

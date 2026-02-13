@@ -143,7 +143,7 @@ async def _handle_trigger_event(event, engine) -> str:
     """
     import logging
     from uuid import uuid4
-    from db.session import AsyncSessionLocal
+    from db.database import AsyncSessionLocal
     from sqlalchemy import select
 
     logger = logging.getLogger(__name__)

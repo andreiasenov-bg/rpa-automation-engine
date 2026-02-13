@@ -1,18 +1,20 @@
 """Workflow execution history and management endpoints."""
 
-from fastapi import APIRouter, HTTPException, status, Depends, Query
+from fastapi import APIRouter, HTTPException, status as http_status, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from typing import Optional, List
 import logging
 
-from core.security import get_current_user, TokenPayload
+from core.security import TokenPayload
 from api.schemas.execution import (
     ExecutionResponse,
     ExecutionLogResponse,
     ExecutionListResponse,
 )
 from api.schemas.common import PaginationParams, MessageResponse
-from app.dependencies import get_db
+from app.dependencies import get_db, get_current_active_user
+from services.workflow_service import ExecutionService, WorkflowService
 from core.utils import calculate_offset
 
 logger = logging.getLogger(__name__)
@@ -20,143 +22,188 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/executions", tags=["executions"])
 
 
+def _execution_to_response(ex) -> ExecutionResponse:
+    """Convert an Execution ORM object to response schema."""
+    return ExecutionResponse(
+        id=ex.id,
+        workflow_id=ex.workflow_id,
+        agent_id=ex.agent_id,
+        trigger_type=ex.trigger_type,
+        status=ex.status,
+        started_at=ex.started_at,
+        completed_at=ex.completed_at,
+        duration_ms=ex.duration_ms,
+        error_message=ex.error_message,
+        retry_count=ex.retry_count,
+    )
+
+
 @router.get("/", response_model=ExecutionListResponse)
 async def list_executions(
     pagination: PaginationParams = Depends(),
     workflow_id: Optional[str] = Query(None, description="Filter by workflow ID"),
-    status: Optional[str] = Query(None, description="Filter by execution status"),
-    current_user: TokenPayload = Depends(get_current_user),
+    exec_status: Optional[str] = Query(None, alias="status", description="Filter by execution status"),
+    current_user: TokenPayload = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ) -> ExecutionListResponse:
     """
-    List workflow executions.
-
-    Paginated list of executions with optional filtering by workflow and status.
-
-    Args:
-        pagination: Page and per_page parameters
-        workflow_id: Optional workflow ID filter
-        status: Optional status filter (pending, running, success, failed, cancelled)
-        current_user: Current authenticated user
-        db: Database session
-
-    Returns:
-        Paginated list of executions
+    List workflow executions (paginated, filterable).
     """
-    # TODO: Implement execution listing from database with filters
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Execution listing not yet implemented",
+    svc = ExecutionService(db)
+    offset = calculate_offset(pagination.page, pagination.per_page)
+
+    filters = {}
+    if workflow_id:
+        filters["workflow_id"] = workflow_id
+    if exec_status:
+        filters["status"] = exec_status
+
+    executions, total = await svc.list(
+        organization_id=current_user.org_id,
+        offset=offset,
+        limit=pagination.per_page,
+        filters=filters if filters else None,
+        order_by="created_at",
+        order_desc=True,
+    )
+
+    return ExecutionListResponse(
+        executions=[_execution_to_response(ex) for ex in executions],
+        total=total,
+        page=pagination.page,
+        per_page=pagination.per_page,
     )
 
 
 @router.get("/{execution_id}", response_model=ExecutionResponse)
 async def get_execution(
     execution_id: str,
-    current_user: TokenPayload = Depends(get_current_user),
+    current_user: TokenPayload = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ) -> ExecutionResponse:
     """
-    Get execution details.
-
-    Args:
-        execution_id: Execution ID
-        current_user: Current authenticated user
-        db: Database session
-
-    Returns:
-        Execution information
-
-    Raises:
-        HTTPException: If execution not found
+    Get execution details by ID.
     """
-    # TODO: Implement execution fetch with access control
-    raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail="Execution not found",
-    )
+    svc = ExecutionService(db)
+    ex = await svc.get_by_id_and_org(execution_id, current_user.org_id)
+
+    if not ex:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Execution not found",
+        )
+
+    return _execution_to_response(ex)
 
 
 @router.get("/{execution_id}/logs", response_model=List[ExecutionLogResponse])
 async def get_execution_logs(
     execution_id: str,
-    current_user: TokenPayload = Depends(get_current_user),
+    current_user: TokenPayload = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ) -> List[ExecutionLogResponse]:
     """
-    Get execution logs.
-
-    Returns all log entries from a workflow execution.
-
-    Args:
-        execution_id: Execution ID
-        current_user: Current authenticated user
-        db: Database session
-
-    Returns:
-        List of execution log entries
-
-    Raises:
-        HTTPException: If execution not found
+    Get log entries for a specific execution.
     """
-    # TODO: Implement log retrieval from database
-    raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail="Execution not found",
+    svc = ExecutionService(db)
+    ex = await svc.get_by_id_and_org(execution_id, current_user.org_id)
+
+    if not ex:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Execution not found",
+        )
+
+    from db.models.execution_log import ExecutionLog
+    result = await db.execute(
+        select(ExecutionLog)
+        .where(ExecutionLog.execution_id == execution_id)
+        .order_by(ExecutionLog.created_at.asc())
     )
+    logs = result.scalars().all()
+
+    return [
+        ExecutionLogResponse(
+            id=log.id,
+            level=log.level,
+            message=log.message,
+            context=log.context,
+            timestamp=log.created_at,
+        )
+        for log in logs
+    ]
 
 
-@router.post("/{execution_id}/retry", response_model=ExecutionResponse, status_code=status.HTTP_202_ACCEPTED)
+@router.post("/{execution_id}/retry", response_model=ExecutionResponse, status_code=http_status.HTTP_202_ACCEPTED)
 async def retry_execution(
     execution_id: str,
-    current_user: TokenPayload = Depends(get_current_user),
+    current_user: TokenPayload = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ) -> ExecutionResponse:
     """
-    Retry a failed execution.
-
-    Creates a new execution based on the original workflow.
-
-    Args:
-        execution_id: Original execution ID
-        current_user: Current authenticated user
-        db: Database session
-
-    Returns:
-        New execution record
-
-    Raises:
-        HTTPException: If execution not found or not in failed state
+    Retry a failed execution by creating a new execution for the same workflow.
     """
-    # TODO: Implement execution retry logic
-    raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail="Execution not found",
+    exec_svc = ExecutionService(db)
+    ex = await exec_svc.get_by_id_and_org(execution_id, current_user.org_id)
+
+    if not ex:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Execution not found",
+        )
+
+    if ex.status not in ("failed", "cancelled"):
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot retry execution in '{ex.status}' status (must be 'failed' or 'cancelled')",
+        )
+
+    # Create a new execution for the same workflow
+    wf_svc = WorkflowService(db)
+    new_execution_id = await wf_svc.execute(
+        workflow_id=ex.workflow_id,
+        organization_id=current_user.org_id,
+        trigger_type="retry",
+    )
+
+    if not new_execution_id:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail="Workflow not found or disabled — cannot retry",
+        )
+
+    return ExecutionResponse(
+        id=new_execution_id,
+        workflow_id=ex.workflow_id,
+        trigger_type="retry",
+        status="pending",
     )
 
 
 @router.post("/{execution_id}/cancel", response_model=MessageResponse)
 async def cancel_execution(
     execution_id: str,
-    current_user: TokenPayload = Depends(get_current_user),
+    current_user: TokenPayload = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ) -> MessageResponse:
     """
-    Cancel a running execution.
-
-    Args:
-        execution_id: Execution ID to cancel
-        current_user: Current authenticated user
-        db: Database session
-
-    Returns:
-        Confirmation message
-
-    Raises:
-        HTTPException: If execution not found or not in running state
+    Cancel a running or pending execution.
     """
-    # TODO: Implement execution cancellation
-    raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail="Execution not found",
-    )
+    svc = ExecutionService(db)
+    ex = await svc.get_by_id_and_org(execution_id, current_user.org_id)
+
+    if not ex:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Execution not found",
+        )
+
+    if ex.status not in ("pending", "running"):
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot cancel execution in '{ex.status}' status",
+        )
+
+    await svc.update_status(execution_id, "cancelled")
+
+    return MessageResponse(message=f"Execution {execution_id} cancelled")
