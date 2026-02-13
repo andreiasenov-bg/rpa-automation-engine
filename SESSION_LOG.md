@@ -1841,6 +1841,28 @@ rpa-automation-engine/
 
 ---
 
+## Checkpoint #34 — Drag & Drop Step Palette (Сесия 7)
+**Дата**: 2026-02-14
+**Commit**: `9a5e5c2`
+**Какво е направено**:
+- HTML5 drag & drop от палитрата към canvas-а
+- `reactFlowInstance.screenToFlowPosition()` за точни координати
+- Dockable side palette с toggle (Add Step / Hide)
+- Палитрата поддържа и drag, и click за добавяне
+- cursor-grab/grabbing визуален feedback
+- Keyboard достъпност (tabIndex + onKeyDown)
+
+### Defensive Coding Fixes (same session)
+**Commit**: `7fb11a8`
+- ActivityTimeline: guard activities/grouped с null checks
+- AnalyticsDashboard: guard timeline.length + WorkflowPerformance data
+- AdminPage: optional chain на overview.organization/counts
+- AgentsPage: optional chain на stats.by_status
+- TemplatesPage: guard template.tags с fallback
+- templates API: handle both array и object categories response
+
+---
+
 ## Какво следва (приоритет)
 1. ~~Lazy loading~~ ✅
 2. ~~Global search~~ ✅
@@ -1850,9 +1872,9 @@ rpa-automation-engine/
 6. ~~Step config editor~~ ✅
 7. ~~Execution input variables~~ ✅
 8. ~~WebSocket live logs~~ ✅
-9. **Drag & drop step reorder** — Drag steps in palette to canvas
+9. ~~Drag & drop step reorder~~ ✅
 10. ~~Execution detail page~~ ✅
 11. ~~Dashboard widgets~~ ✅
-12. **E2E tests** — Playwright or Cypress tests for critical flows
+12. **E2E tests** — Playwright tests for critical flows
 13. **Docker production config** — Multi-stage Dockerfile, nginx reverse proxy
 14. **Documentation** — API docs, deployment guide, user manual
