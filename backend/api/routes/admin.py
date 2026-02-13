@@ -16,6 +16,7 @@ from sqlalchemy import select, func, and_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_db, get_current_active_user
+from core.rbac import require_permission
 from core.security import TokenPayload
 from db.models.user import User
 from db.models.workflow import Workflow
@@ -51,7 +52,7 @@ class OrgSettingsUpdate(BaseModel):
 
 # ─── Organization Overview ──────────────────────────────────────────────────
 
-@router.get("/overview")
+@router.get("/overview", dependencies=[Depends(require_permission("admin.*"))])
 async def admin_overview(
     current_user: TokenPayload = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
@@ -104,7 +105,7 @@ async def admin_overview(
     }
 
 
-@router.put("/organization")
+@router.put("/organization", dependencies=[Depends(require_permission("admin.*"))])
 async def update_org_settings(
     body: OrgSettingsUpdate,
     current_user: TokenPayload = Depends(get_current_active_user),
@@ -133,7 +134,7 @@ async def update_org_settings(
 
 # ─── Role Management ───────────────────────────────────────────────────────
 
-@router.get("/roles")
+@router.get("/roles", dependencies=[Depends(require_permission("admin.*"))])
 async def list_roles(
     current_user: TokenPayload = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
@@ -167,7 +168,7 @@ async def list_roles(
     return {"roles": result, "total": len(result)}
 
 
-@router.post("/roles", status_code=status.HTTP_201_CREATED)
+@router.post("/roles", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_permission("admin.*"))])
 async def create_role(
     body: RoleCreateRequest,
     current_user: TokenPayload = Depends(get_current_active_user),
@@ -198,7 +199,7 @@ async def create_role(
     return {"id": role.id, "name": role.name, "slug": role.slug, "message": "Role created"}
 
 
-@router.put("/roles/{role_id}")
+@router.put("/roles/{role_id}", dependencies=[Depends(require_permission("admin.*"))])
 async def update_role(
     role_id: str,
     body: RoleUpdateRequest,
@@ -226,7 +227,7 @@ async def update_role(
     return {"id": role.id, "name": role.name, "message": "Role updated"}
 
 
-@router.delete("/roles/{role_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/roles/{role_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_permission("admin.*"))])
 async def delete_role(
     role_id: str,
     current_user: TokenPayload = Depends(get_current_active_user),
@@ -254,7 +255,7 @@ async def delete_role(
 
 # ─── Permissions ────────────────────────────────────────────────────────────
 
-@router.get("/permissions")
+@router.get("/permissions", dependencies=[Depends(require_permission("admin.*"))])
 async def list_permissions(
     current_user: TokenPayload = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
