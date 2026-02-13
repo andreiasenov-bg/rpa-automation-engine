@@ -7,8 +7,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from api.routes import auth, health, workflows, executions, agents, users, credentials, schedules, analytics, ai
+from api.routes import integrations as integrations_routes
 from db.database import init_db
 from integrations.claude_client import get_claude_client
+from integrations.registry import get_integration_registry
 from workflow.checkpoint import CheckpointManager
 from workflow.recovery import RecoveryService
 
@@ -27,6 +29,19 @@ async def lifespan(app: FastAPI):
     else:
         print("⚠️  Claude AI not configured (set ANTHROPIC_API_KEY to enable)")
 
+    # Load external API integrations and start health monitoring
+    integration_registry = get_integration_registry()
+    try:
+        await integration_registry.load_all(db_session=None)
+        await integration_registry.start_health_monitor()
+        count = len(integration_registry.list_all())
+        if count > 0:
+            print(f"🔌 Loaded {count} API integration(s), health monitor active")
+        else:
+            print("🔌 Integration registry ready (no APIs configured yet)")
+    except Exception as e:
+        print(f"⚠️  Integration registry: {e}")
+
     # Recover interrupted executions from previous run
     try:
         checkpoint_mgr = CheckpointManager()
@@ -43,6 +58,7 @@ async def lifespan(app: FastAPI):
     print(f"🚀 {settings.APP_NAME} v{settings.APP_VERSION} started")
     yield
     # Shutdown
+    await integration_registry.stop_health_monitor()
     if claude.is_connected:
         await claude.disconnect()
     print("👋 Application shutting down...")
@@ -82,6 +98,7 @@ def create_app() -> FastAPI:
     app.include_router(schedules.router, prefix="/api/schedules", tags=["Schedules"])
     app.include_router(analytics.router, prefix="/api/analytics", tags=["Analytics"])
     app.include_router(ai.router, prefix="/api/ai", tags=["AI - Claude Integration"])
+    app.include_router(integrations_routes.router, prefix="/api/integrations", tags=["External Integrations"])
 
     return app
 

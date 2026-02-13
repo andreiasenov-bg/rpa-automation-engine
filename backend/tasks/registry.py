@@ -9,6 +9,7 @@ from typing import Dict, Optional, Type
 
 from tasks.base_task import BaseTask
 from tasks.implementations.ai_task import AI_TASK_TYPES
+from tasks.implementations.integration_task import INTEGRATION_TASK_TYPES
 
 
 class TaskRegistry:
@@ -22,6 +23,10 @@ class TaskRegistry:
         """Register all built-in task types."""
         # AI-powered tasks
         for task_type, task_class in AI_TASK_TYPES.items():
+            self.register(task_type, task_class)
+
+        # Integration tasks (external APIs)
+        for task_type, task_class in INTEGRATION_TASK_TYPES.items():
             self.register(task_type, task_class)
 
     def register(self, task_type: str, task_class: Type[BaseTask]):
