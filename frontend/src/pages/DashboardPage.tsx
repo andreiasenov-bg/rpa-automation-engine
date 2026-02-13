@@ -11,6 +11,7 @@ import {
   Activity,
 } from 'lucide-react';
 import client from '@/api/client';
+import { useLocale } from '@/i18n';
 
 interface DashboardStats {
   total_workflows: number;
@@ -101,6 +102,7 @@ function formatTime(iso?: string): string {
 }
 
 export default function DashboardPage() {
+  const { t } = useLocale();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [recent, setRecent] = useState<RecentExecution[]>([]);
   const [loading, setLoading] = useState(true);
@@ -165,47 +167,47 @@ export default function DashboardPage() {
     <div>
       {/* Header */}
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
-        <p className="text-sm text-slate-500 mt-1">Overview of your RPA automation platform</p>
+        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{t('dashboard.title')}</h1>
+        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">{t('dashboard.subtitle')}</p>
       </div>
 
       {/* Stats Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-8">
         <StatCard
           icon={GitBranch}
-          label="Workflows"
+          label={t('dashboard.totalWorkflows')}
           value={stats?.total_workflows ?? 0}
           color="bg-indigo-500"
           to="/workflows"
         />
         <StatCard
           icon={TrendingUp}
-          label="Active"
+          label={t('dashboard.activeWorkflows')}
           value={stats?.active_workflows ?? 0}
           color="bg-emerald-500"
         />
         <StatCard
           icon={Play}
-          label="Total Runs"
+          label={t('dashboard.totalExecutions')}
           value={stats?.total_executions ?? 0}
           color="bg-blue-500"
           to="/executions"
         />
         <StatCard
           icon={Clock}
-          label="Running"
+          label={t('dashboard.running')}
           value={stats?.running_executions ?? 0}
           color="bg-amber-500"
         />
         <StatCard
           icon={CheckCircle2}
-          label="Completed"
+          label={t('dashboard.completed')}
           value={stats?.completed_executions ?? 0}
           color="bg-emerald-500"
         />
         <StatCard
           icon={XCircle}
-          label="Failed"
+          label={t('dashboard.failed')}
           value={stats?.failed_executions ?? 0}
           color="bg-red-500"
         />
@@ -214,7 +216,7 @@ export default function DashboardPage() {
       {/* Recent Executions */}
       <div className="bg-white rounded-xl border border-slate-200">
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-          <h2 className="text-base font-semibold text-slate-900">Recent Executions</h2>
+          <h2 className="text-base font-semibold text-slate-900 dark:text-white">{t('dashboard.recentExecutions')}</h2>
           <Link to="/executions" className="text-sm text-indigo-600 hover:text-indigo-700 font-medium">
             View all
           </Link>

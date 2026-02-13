@@ -2,10 +2,12 @@ import { useState, FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Bot, Loader2 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
+import { useLocale } from '@/i18n';
 
 export default function LoginPage() {
   const navigate = useNavigate();
   const { login, isLoading, error, clearError } = useAuthStore();
+  const { t } = useLocale();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
@@ -28,7 +30,7 @@ export default function LoginPage() {
             <Bot className="w-10 h-10 text-indigo-500" />
             <h1 className="text-2xl font-bold text-slate-900">RPA Engine</h1>
           </div>
-          <p className="text-slate-500">Sign in to your account</p>
+          <p className="text-slate-500">{t('auth.loginSubtitle')}</p>
         </div>
 
         {/* Form */}
@@ -40,7 +42,7 @@ export default function LoginPage() {
           )}
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5">Email</label>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">{t('auth.email')}</label>
             <input
               type="email"
               required
@@ -52,7 +54,7 @@ export default function LoginPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5">Password</label>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">{t('auth.password')}</label>
             <input
               type="password"
               required
@@ -69,13 +71,13 @@ export default function LoginPage() {
             className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white text-sm font-medium rounded-lg transition flex items-center justify-center gap-2"
           >
             {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-            {isLoading ? 'Signing in...' : 'Sign in'}
+            {isLoading ? t('auth.signingIn') : t('auth.login')}
           </button>
 
           <p className="text-center text-sm text-slate-500">
-            Don't have an account?{' '}
+            {t('auth.noAccount')}{' '}
             <Link to="/register" className="text-indigo-600 hover:text-indigo-700 font-medium">
-              Register
+              {t('auth.register')}
             </Link>
           </p>
         </form>

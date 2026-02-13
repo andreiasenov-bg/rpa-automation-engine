@@ -20,6 +20,7 @@ import type { Execution, ExecutionLog } from '@/types';
 import { executionApi } from '@/api/executions';
 import { exportApi } from '@/api/export';
 import { useWebSocket, type ExecutionStatusPayload } from '@/hooks/useWebSocket';
+import { useLocale } from '@/i18n';
 
 /* ─── Status config ─── */
 const STATUS_CONFIG: Record<string, { icon: React.ElementType; color: string; bg: string; border: string }> = {
@@ -189,6 +190,7 @@ function ExecutionRow({
 
 /* ─── Main page ─── */
 export default function ExecutionsPage() {
+  const { t } = useLocale();
   const [executions, setExecutions] = useState<Execution[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -271,7 +273,7 @@ export default function ExecutionsPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Executions</h1>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{t('executions.title')}</h1>
           <p className="text-sm text-slate-500 mt-1">
             {total} execution{total !== 1 ? 's' : ''} total
           </p>
@@ -289,14 +291,14 @@ export default function ExecutionsPage() {
             className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-slate-200 hover:bg-slate-50 transition"
             title="Export to CSV"
           >
-            Export
+            {t('common.export')}
           </button>
           <button
             onClick={fetchExecutions}
             className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-slate-200 hover:bg-slate-50 transition"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
+            {t('common.refresh')}
           </button>
         </div>
       </div>

@@ -72,9 +72,15 @@ const translations: Record<Locale, TranslationMap> = {
     'auth.forgotPassword': 'Forgot password?',
     'auth.noAccount': "Don't have an account?",
     'auth.hasAccount': 'Already have an account?',
+    'auth.loginSubtitle': 'Sign in to your account',
+    'auth.signingIn': 'Signing in...',
+    'auth.registerSubtitle': 'Create your account',
+    'auth.creatingAccount': 'Creating account...',
+    'auth.createAccount': 'Create account',
 
     // Dashboard
     'dashboard.title': 'Dashboard',
+    'dashboard.subtitle': 'Overview of your RPA automation platform',
     'dashboard.totalWorkflows': 'Total Workflows',
     'dashboard.activeWorkflows': 'Active',
     'dashboard.totalExecutions': 'Total Executions',
@@ -116,6 +122,18 @@ const translations: Record<Locale, TranslationMap> = {
     'settings.light': 'Light',
     'settings.dark': 'Dark',
     'settings.system': 'System',
+    'settings.subtitle': 'Manage your account and organization',
+    'settings.personalInfo': 'Personal Information',
+    'settings.emailReadonly': 'Email cannot be changed',
+    'settings.saved': 'Saved',
+    'settings.language': 'Language',
+    'settings.languageDesc': 'Choose your preferred language',
+
+    // Workflows extra
+    'workflows.searchPlaceholder': 'Search workflows...',
+    'workflows.noWorkflows': 'No workflows yet',
+    'workflows.noMatch': 'No workflows match your search',
+    'workflows.createFirst': 'Create your first workflow',
 
     // Admin
     'admin.title': 'Admin Panel',
@@ -179,9 +197,15 @@ const translations: Record<Locale, TranslationMap> = {
     'auth.forgotPassword': 'Забравена парола?',
     'auth.noAccount': 'Нямате акаунт?',
     'auth.hasAccount': 'Вече имате акаунт?',
+    'auth.loginSubtitle': 'Влезте в акаунта си',
+    'auth.signingIn': 'Влизане...',
+    'auth.registerSubtitle': 'Създайте акаунт',
+    'auth.creatingAccount': 'Създаване на акаунт...',
+    'auth.createAccount': 'Създай акаунт',
 
     // Табло
     'dashboard.title': 'Табло',
+    'dashboard.subtitle': 'Преглед на вашата RPA платформа',
     'dashboard.totalWorkflows': 'Общо процеси',
     'dashboard.activeWorkflows': 'Активни',
     'dashboard.totalExecutions': 'Общо изпълнения',
@@ -223,6 +247,18 @@ const translations: Record<Locale, TranslationMap> = {
     'settings.light': 'Светла',
     'settings.dark': 'Тъмна',
     'settings.system': 'Системна',
+    'settings.subtitle': 'Управление на акаунт и организация',
+    'settings.personalInfo': 'Лична информация',
+    'settings.emailReadonly': 'Имейлът не може да бъде променен',
+    'settings.saved': 'Запазено',
+    'settings.language': 'Език',
+    'settings.languageDesc': 'Изберете предпочитания език',
+
+    // Процеси допълнителни
+    'workflows.searchPlaceholder': 'Търсене на процеси...',
+    'workflows.noWorkflows': 'Няма процеси',
+    'workflows.noMatch': 'Няма съвпадения',
+    'workflows.createFirst': 'Създайте първия си процес',
 
     // Админ
     'admin.title': 'Административен панел',

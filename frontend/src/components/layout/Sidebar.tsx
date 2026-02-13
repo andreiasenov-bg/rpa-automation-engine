@@ -19,27 +19,29 @@ import {
   FileText,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
+import { useLocale } from '@/i18n';
 
 const navItems = [
-  { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/workflows', icon: GitBranch, label: 'Workflows' },
-  { to: '/executions', icon: Play, label: 'Executions' },
-  { to: '/templates', icon: BookOpen, label: 'Templates' },
-  { to: '/triggers', icon: Zap, label: 'Triggers' },
-  { to: '/schedules', icon: CalendarClock, label: 'Schedules' },
-  { to: '/credentials', icon: Key, label: 'Credentials' },
-  { to: '/agents', icon: Server, label: 'Agents' },
-  { to: '/users', icon: Users, label: 'Users' },
-  { to: '/notifications', icon: Bell, label: 'Notifications' },
-  { to: '/audit-log', icon: Shield, label: 'Audit Log' },
-  { to: '/plugins', icon: Puzzle, label: 'Plugins' },
-  { to: '/api-docs', icon: FileText, label: 'API Docs' },
-  { to: '/admin', icon: Wrench, label: 'Admin' },
-  { to: '/settings', icon: Settings, label: 'Settings' },
+  { to: '/', icon: LayoutDashboard, i18nKey: 'nav.dashboard' },
+  { to: '/workflows', icon: GitBranch, i18nKey: 'nav.workflows' },
+  { to: '/executions', icon: Play, i18nKey: 'nav.executions' },
+  { to: '/templates', icon: BookOpen, i18nKey: 'nav.templates' },
+  { to: '/triggers', icon: Zap, i18nKey: 'nav.triggers' },
+  { to: '/schedules', icon: CalendarClock, i18nKey: 'nav.schedules' },
+  { to: '/credentials', icon: Key, i18nKey: 'nav.credentials' },
+  { to: '/agents', icon: Server, i18nKey: 'nav.agents' },
+  { to: '/users', icon: Users, i18nKey: 'nav.users' },
+  { to: '/notifications', icon: Bell, i18nKey: 'nav.notifications' },
+  { to: '/audit-log', icon: Shield, i18nKey: 'nav.auditLog' },
+  { to: '/plugins', icon: Puzzle, i18nKey: 'nav.plugins' },
+  { to: '/api-docs', icon: FileText, i18nKey: 'nav.apiDocs' },
+  { to: '/admin', icon: Wrench, i18nKey: 'nav.admin' },
+  { to: '/settings', icon: Settings, i18nKey: 'nav.settings' },
 ];
 
 export default function Sidebar() {
   const { user, logout } = useAuthStore();
+  const { t } = useLocale();
 
   return (
     <aside className="w-60 min-h-screen bg-slate-900 text-slate-300 flex flex-col">
@@ -51,7 +53,7 @@ export default function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 px-3 py-4 space-y-1">
-        {navItems.map(({ to, icon: Icon, label }) => (
+        {navItems.map(({ to, icon: Icon, i18nKey }) => (
           <NavLink
             key={to}
             to={to}
@@ -65,7 +67,7 @@ export default function Sidebar() {
             }
           >
             <Icon className="w-4.5 h-4.5" />
-            {label}
+            {t(i18nKey)}
           </NavLink>
         ))}
       </nav>
@@ -80,7 +82,7 @@ export default function Sidebar() {
           className="flex items-center gap-3 px-3 py-2.5 w-full rounded-lg text-sm font-medium text-slate-400 hover:bg-slate-800 hover:text-red-400 transition-colors"
         >
           <LogOut className="w-4.5 h-4.5" />
-          Log out
+          {t('nav.logout')}
         </button>
       </div>
     </aside>

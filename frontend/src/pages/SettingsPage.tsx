@@ -13,22 +13,24 @@ import { useAuthStore } from '@/stores/authStore';
 import { userApi } from '@/api/users';
 import ThemeToggle from '@/components/ThemeToggle';
 import LocaleToggle from '@/components/LocaleToggle';
+import { useLocale } from '@/i18n';
 
 /* ─── Tab navigation ─── */
-const TABS = [
-  { id: 'profile', label: 'Profile', icon: Settings },
-  { id: 'organization', label: 'Organization', icon: Building2 },
-  { id: 'security', label: 'Security', icon: Key },
-  { id: 'notifications', label: 'Notifications', icon: Bell },
-  { id: 'appearance', label: 'Appearance', icon: Palette },
+const TAB_DEFS = [
+  { id: 'profile', i18nKey: 'settings.profile', icon: Settings },
+  { id: 'organization', i18nKey: 'settings.organization', icon: Building2 },
+  { id: 'security', i18nKey: 'settings.security', icon: Key },
+  { id: 'notifications', i18nKey: 'settings.notifications', icon: Bell },
+  { id: 'appearance', i18nKey: 'settings.appearance', icon: Palette },
 ] as const;
 
-type TabId = typeof TABS[number]['id'];
+type TabId = typeof TAB_DEFS[number]['id'];
 
 /* ─── Profile tab ─── */
 function ProfileTab() {
   const user = useAuthStore((s) => s.user);
   const loadUser = useAuthStore((s) => s.loadUser);
+  const { t } = useLocale();
   const [firstName, setFirstName] = useState(user?.first_name || '');
   const [lastName, setLastName] = useState(user?.last_name || '');
   const [saving, setSaving] = useState(false);
@@ -60,10 +62,10 @@ function ProfileTab() {
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-base font-semibold text-slate-900 mb-4">Personal Information</h3>
+        <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-4">{t('settings.personalInfo')}</h3>
         <div className="grid grid-cols-2 gap-4 max-w-md">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">First name</label>
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">{t('auth.firstName')}</label>
             <input
               type="text"
               value={firstName}
@@ -72,7 +74,7 @@ function ProfileTab() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Last name</label>
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">{t('auth.lastName')}</label>
             <input
               type="text"
               value={lastName}
@@ -84,14 +86,14 @@ function ProfileTab() {
       </div>
 
       <div className="max-w-md">
-        <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
+        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">{t('auth.email')}</label>
         <input
           type="email"
           value={user?.email || ''}
           disabled
           className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-slate-50 text-slate-500"
         />
-        <p className="text-xs text-slate-400 mt-1">Email cannot be changed</p>
+        <p className="text-xs text-slate-400 mt-1">{t('settings.emailReadonly')}</p>
       </div>
 
       <div className="flex items-center gap-3">
@@ -101,12 +103,12 @@ function ProfileTab() {
           className="inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition disabled:opacity-50"
         >
           {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-          Save Changes
+          {t('common.save')}
         </button>
         {saved && (
           <span className="flex items-center gap-1 text-sm text-emerald-600">
             <CheckCircle2 className="w-4 h-4" />
-            Saved
+            {t('settings.saved')}
           </span>
         )}
       </div>
@@ -127,18 +129,19 @@ function ComingSoonTab({ title }: { title: string }) {
 /* ─── Main page ─── */
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<TabId>('profile');
+  const { t } = useLocale();
 
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-900">Settings</h1>
-        <p className="text-sm text-slate-500 mt-1">Manage your account and organization</p>
+        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{t('settings.title')}</h1>
+        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">{t('settings.subtitle')}</p>
       </div>
 
       <div className="flex gap-6">
         {/* Sidebar tabs */}
         <div className="w-48 flex-shrink-0 space-y-0.5">
-          {TABS.map(({ id, label, icon: Icon }) => (
+          {TAB_DEFS.map(({ id, i18nKey, icon: Icon }) => (
             <button
               key={id}
               onClick={() => setActiveTab(id)}
@@ -149,27 +152,27 @@ export default function SettingsPage() {
               }`}
             >
               <Icon className="w-4 h-4" />
-              {label}
+              {t(i18nKey)}
             </button>
           ))}
         </div>
 
         {/* Content */}
-        <div className="flex-1 bg-white rounded-xl border border-slate-200 p-6">
+        <div className="flex-1 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6">
           {activeTab === 'profile' && <ProfileTab />}
-          {activeTab === 'organization' && <ComingSoonTab title="Organization" />}
-          {activeTab === 'security' && <ComingSoonTab title="Security" />}
-          {activeTab === 'notifications' && <ComingSoonTab title="Notification" />}
+          {activeTab === 'organization' && <ComingSoonTab title={t('settings.organization')} />}
+          {activeTab === 'security' && <ComingSoonTab title={t('settings.security')} />}
+          {activeTab === 'notifications' && <ComingSoonTab title={t('settings.notifications')} />}
           {activeTab === 'appearance' && (
             <div className="space-y-6">
               <div>
-                <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-1">Theme</h3>
-                <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">Choose your preferred color scheme</p>
+                <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-1">{t('settings.theme')}</h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">{t('settings.themeDesc')}</p>
                 <ThemeToggle />
               </div>
               <div>
-                <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-1">Language</h3>
-                <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">Choose your preferred language</p>
+                <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-1">{t('settings.language')}</h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">{t('settings.languageDesc')}</p>
                 <LocaleToggle />
               </div>
             </div>
