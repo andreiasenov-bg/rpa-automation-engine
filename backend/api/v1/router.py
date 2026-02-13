@@ -19,6 +19,7 @@ from api.routes import (
     ai,
     dashboard,
 )
+from api.routes import admin
 from api.routes import audit
 from api.routes import templates
 from api.routes import integrations as integrations_routes
@@ -143,4 +144,11 @@ api_v1_router.include_router(
     templates.router,
     prefix="/templates",
     tags=["Workflow Templates"],
+)
+
+# Admin Panel
+api_v1_router.include_router(
+    admin.router,
+    prefix="/admin",
+    tags=["Admin Panel"],
 )

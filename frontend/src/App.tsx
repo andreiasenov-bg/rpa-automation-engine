@@ -23,6 +23,7 @@ import AuditLogPage from '@/pages/AuditLogPage';
 import TemplatesPage from '@/pages/TemplatesPage';
 import AgentsPage from '@/pages/AgentsPage';
 import NotificationSettingsPage from '@/pages/NotificationSettingsPage';
+import AdminPage from '@/pages/AdminPage';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import ToastContainer from '@/components/ToastContainer';
 
@@ -73,6 +74,7 @@ function AppRoutes() {
         <Route path="agents" element={<AgentsPage />} />
         <Route path="notifications" element={<NotificationSettingsPage />} />
         <Route path="audit-log" element={<AuditLogPage />} />
+        <Route path="admin" element={<AdminPage />} />
       </Route>
 
       {/* Catch-all */}

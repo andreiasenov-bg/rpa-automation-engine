@@ -14,6 +14,7 @@ import {
   BookOpen,
   Server,
   Bell,
+  Wrench,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 
@@ -29,6 +30,7 @@ const navItems = [
   { to: '/users', icon: Users, label: 'Users' },
   { to: '/notifications', icon: Bell, label: 'Notifications' },
   { to: '/audit-log', icon: Shield, label: 'Audit Log' },
+  { to: '/admin', icon: Wrench, label: 'Admin' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];
 

@@ -20,6 +20,7 @@ from notifications.manager import get_notification_manager
 from core.logging_config import setup_logging
 from core.middleware import RequestTrackingMiddleware, setup_exception_handlers
 from core.metrics import MetricsMiddleware, metrics_router
+from core.rate_limit import RateLimitMiddleware
 
 
 @asynccontextmanager
@@ -108,6 +109,9 @@ def create_app() -> FastAPI:
 
     # Prometheus metrics middleware (outermost — measures all requests)
     app.add_middleware(MetricsMiddleware)
+
+    # Rate limiting middleware
+    app.add_middleware(RateLimitMiddleware)
 
     # Request tracking middleware
     app.add_middleware(RequestTrackingMiddleware)
