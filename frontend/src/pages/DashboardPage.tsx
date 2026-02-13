@@ -13,6 +13,7 @@ import {
 import client from '@/api/client';
 import { useLocale } from '@/i18n';
 import AnalyticsDashboard from '@/components/AnalyticsDashboard';
+import ActivityTimeline from '@/components/ActivityTimeline';
 
 interface DashboardStats {
   total_workflows: number;
@@ -256,6 +257,14 @@ export default function DashboardPage() {
       {/* Analytics section */}
       <div className="mt-8">
         <AnalyticsDashboard />
+      </div>
+
+      {/* Activity Timeline */}
+      <div className="mt-8 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
+        <h2 className="text-base font-semibold text-slate-900 dark:text-white mb-4">
+          {t('activity.title')}
+        </h2>
+        <ActivityTimeline days={7} limit={20} />
       </div>
     </div>
   );

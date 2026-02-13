@@ -25,6 +25,8 @@ from api.routes import templates
 from api.routes import plugins
 from api.routes import export
 from api.routes import bulk
+from api.routes import agent_tasks
+from api.routes import activity
 from api.routes import integrations as integrations_routes
 from api.routes import triggers
 from api.routes import notifications
@@ -173,4 +175,18 @@ api_v1_router.include_router(
 api_v1_router.include_router(
     bulk.router,
     tags=["Bulk Operations"],
+)
+
+# Agent Task Assignment
+api_v1_router.include_router(
+    agent_tasks.router,
+    prefix="/agent-tasks",
+    tags=["Agent Tasks"],
+)
+
+# Activity Timeline
+api_v1_router.include_router(
+    activity.router,
+    prefix="/activity",
+    tags=["Activity Timeline"],
 )

@@ -148,6 +148,10 @@ const translations: Record<Locale, TranslationMap> = {
     'analytics.executionTimeline': 'Execution Timeline',
     'analytics.successRate': 'Success Rate',
     'analytics.workflowPerformance': 'Workflow Performance',
+
+    // Activity
+    'activity.title': 'Recent Activity',
+    'activity.noActivity': 'No recent activity',
   },
 
   bg: {
@@ -280,6 +284,10 @@ const translations: Record<Locale, TranslationMap> = {
     'analytics.executionTimeline': 'Хронология на изпълнения',
     'analytics.successRate': 'Процент успех',
     'analytics.workflowPerformance': 'Производителност на процеси',
+
+    // Активност
+    'activity.title': 'Последна активност',
+    'activity.noActivity': 'Няма скорошна активност',
   },
 };
 
