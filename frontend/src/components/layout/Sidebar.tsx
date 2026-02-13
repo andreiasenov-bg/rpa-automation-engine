@@ -15,6 +15,7 @@ import {
   Server,
   Bell,
   Wrench,
+  Puzzle,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 
@@ -30,6 +31,7 @@ const navItems = [
   { to: '/users', icon: Users, label: 'Users' },
   { to: '/notifications', icon: Bell, label: 'Notifications' },
   { to: '/audit-log', icon: Shield, label: 'Audit Log' },
+  { to: '/plugins', icon: Puzzle, label: 'Plugins' },
   { to: '/admin', icon: Wrench, label: 'Admin' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];
