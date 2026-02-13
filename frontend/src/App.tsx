@@ -25,6 +25,7 @@ import AgentsPage from '@/pages/AgentsPage';
 import NotificationSettingsPage from '@/pages/NotificationSettingsPage';
 import AdminPage from '@/pages/AdminPage';
 import PluginsPage from '@/pages/PluginsPage';
+import ApiDocsPage from '@/pages/ApiDocsPage';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import ToastContainer from '@/components/ToastContainer';
 
@@ -77,6 +78,7 @@ function AppRoutes() {
         <Route path="audit-log" element={<AuditLogPage />} />
         <Route path="admin" element={<AdminPage />} />
         <Route path="plugins" element={<PluginsPage />} />
+        <Route path="api-docs" element={<ApiDocsPage />} />
       </Route>
 
       {/* Catch-all */}

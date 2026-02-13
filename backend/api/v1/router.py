@@ -24,6 +24,7 @@ from api.routes import audit
 from api.routes import templates
 from api.routes import plugins
 from api.routes import export
+from api.routes import bulk
 from api.routes import integrations as integrations_routes
 from api.routes import triggers
 from api.routes import notifications
@@ -166,4 +167,10 @@ api_v1_router.include_router(
 api_v1_router.include_router(
     export.router,
     tags=["Data Export"],
+)
+
+# Bulk Operations
+api_v1_router.include_router(
+    bulk.router,
+    tags=["Bulk Operations"],
 )
