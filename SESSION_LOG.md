@@ -1400,9 +1400,199 @@ rpa-automation-engine/
 - **K8s**: Full production manifests with HPA, TLS, PVC
 - **Общо**: ~140+ файла, ~20,000+ реда код
 
+## Checkpoint #25 — i18n Wiring + Retry Strategies (Сесия 7)
+**Дата**: 2026-02-13
+**Commit**: `f6b0876`
+**Какво е направено**:
+
+### 25a. i18n Integration in Pages
+- Sidebar: All 16 nav items now use `t(i18nKey)` instead of hardcoded labels
+- DashboardPage: title, subtitle, stat card labels, recent executions header
+- LoginPage: labels, button text, register link
+- ExecutionsPage: title, export/refresh buttons
+- SettingsPage: all tabs, profile labels, save button, theme/language descriptions
+- 25+ new translation keys added (EN + BG)
+
+### 25b. Execution Retry Strategies
+- **Нов файл**: `backend/workflow/retry_strategies.py`
+  - `RetryStrategy` — configurable with policy (fixed/exponential/linear/none)
+  - `compute_delay()` — exponential backoff with jitter, max cap
+  - `should_retry()` — error classification (timeout, connection, custom list, transient indicators)
+  - `from_dict()` / `to_dict()` — serialization for workflow definitions
+  - `execute_with_retry()` — async wrapper with on_retry callback
+  - 7 preset strategies: none, conservative, aggressive, api_call, web_scraping, database, email
+- **Нов файл**: `backend/tests/test_retry_strategies.py` — 20 tests
+
+---
+
+## Checkpoint #26 — Dashboard Analytics Charts (Сесия 7)
+**Дата**: 2026-02-13
+**Commit**: `f05e3f9`
+**Какво е направено**:
+
+### 26a. Recharts Integration
+- Installed `recharts` dependency
+- **Нов файл**: `frontend/src/components/AnalyticsDashboard.tsx`
+  - Period selector (7d / 30d / 90d)
+  - KPI cards: total executions, completed, failed, avg duration
+  - Execution timeline area chart (gradient fill)
+  - Success rate donut chart (PieChart with inner radius)
+  - Workflow performance stacked bar chart (success vs failed)
+  - Full dark mode support
+- Integrated into DashboardPage
+- Analytics i18n keys (EN + BG)
+
+---
+
+## Checkpoint #27 — Agent Task Assignment + Activity Timeline (Сесия 7)
+**Дата**: 2026-02-13
+**Commit**: `d97b80f`
+**Какво е направено**:
+
+### 27a. Agent Task Assignment API
+- **Нов файл**: `backend/api/routes/agent_tasks.py`
+  - `POST /agent-tasks/claim` — Agent claims next pending execution (FIFO)
+  - `POST /agent-tasks/{execution_id}/result` — Submit completed/failed result
+  - `GET /agent-tasks/queue` — View pending task queue
+  - `GET /agent-tasks/assigned/{agent_id}` — Tasks assigned to specific agent
+  - Auto-updates agent heartbeat on claim
+
+### 27b. Activity Timeline API
+- **Нов файл**: `backend/api/routes/activity.py`
+  - `GET /activity` — Unified timeline from audit_logs, date-grouped
+  - `GET /activity/summary` — Action type counts
+  - Human-readable descriptions for 20+ action types
+  - Icon + color mapping for frontend rendering
+  - Filters: days, limit, actor_id, action_type
+
+### 27c. Activity Timeline Frontend
+- **Нов файл**: `frontend/src/components/ActivityTimeline.tsx`
+  - Date-grouped activity feed
+  - Lucide icon mapping per action type
+  - Color coding (emerald/red/blue/amber/slate)
+  - Integrated into DashboardPage
+- Activity i18n keys (EN + BG)
+- v1/router.py: 24 route groups total
+
+---
+
+## Checkpoint #28 — Production Config + Tests + Code Splitting (Сесия 7)
+**Дата**: 2026-02-13
+**Commit**: `bec8aaf`
+**Какво е направено**:
+
+### 28a. Production Docker Compose
+- **Нов файл**: `docker-compose.prod.yml`
+  - Gunicorn with UvicornWorker (4 workers, 120s timeout)
+  - Resource limits for all services
+  - 2 replicas for backend, celery-worker, frontend
+  - Required env vars (SECRET_KEY, ENCRYPTION_KEY, DB_PASSWORD)
+  - Redis maxmemory + LRU policy
+  - Health check for backend
+
+### 28b. Environment Configuration
+- **Нов файл**: `.env.example` — All production variables documented
+
+### 28c. Vite Code Splitting
+- Added `recharts` as separate chunk: main bundle 715KB → 347KB
+- 8 chunks: index, charts, flow, ui, react-vendor, query, css
+
+### 28d. New Tests
+- **Нов файл**: `backend/tests/test_agent_tasks.py` — 7 schema validation tests
+- **Нов файл**: `backend/tests/test_activity.py` — 12 tests (descriptions, icons, colors)
+
+---
+
+## Файлова структура (текущо състояние)
+```
+rpa-automation-engine/
+├── SESSION_LOG.md, README.md, ROADMAP.md
+├── docker-compose.yml, docker-compose.prod.yml      ← NEW
+├── .env.example                                       ← NEW
+├── .github/workflows/ci.yml (local only)
+├── k8s/ (9 manifests)
+├── monitoring/ (6 files)
+├── backend/
+│   ├── Dockerfile, requirements.txt, pytest.ini
+│   ├── alembic.ini, alembic/
+│   ├── app/ (main.py, config.py, dependencies.py)
+│   ├── api/
+│   │   ├── v1/router.py (24 route groups)
+│   │   ├── routes/ — 24 ROUTES:
+│   │   │   ├── health, auth, users, workflows, executions
+│   │   │   ├── agents, agent_tasks (NEW), credentials, schedules
+│   │   │   ├── analytics, dashboard, ai, integrations, triggers
+│   │   │   ├── notifications, task_types, audit, templates
+│   │   │   ├── admin, plugins, export, bulk
+│   │   │   ├── activity (NEW), ws
+│   │   ├── schemas/, websockets/
+│   ├── core/ (security, middleware, rate_limit, api_keys, rbac,
+│   │          webhook_signing, metrics, plugin_system, logging, exceptions)
+│   ├── db/, integrations/, notifications/, services/
+│   ├── scripts/, tasks/, triggers/, worker/
+│   ├── workflow/
+│   │   ├── engine.py, checkpoint.py, recovery.py
+│   │   └── retry_strategies.py                        ← NEW
+│   └── tests/ (12 test modules, 90+ test cases)
+├── frontend/
+│   ├── Dockerfile, nginx.conf, playwright.config.ts
+│   ├── e2e/ (4 spec files + helpers)
+│   └── src/
+│       ├── api/ (17 modules)
+│       ├── hooks/ (useWebSocket)
+│       ├── i18n/ (index.ts — 150+ keys, EN + BG)
+│       ├── stores/ (authStore, toastStore, themeStore)
+│       ├── components/
+│       │   ├── ErrorBoundary, ToastContainer, layout/
+│       │   ├── ThemeToggle, LocaleToggle
+│       │   ├── WorkflowVersionHistory
+│       │   ├── AnalyticsDashboard (Recharts)           ← NEW
+│       │   └── ActivityTimeline                         ← NEW
+│       └── pages/ (18 pages):
+│           ├── Login, Register, Dashboard (analytics + activity)
+│           ├── WorkflowList, WorkflowEditor (React Flow)
+│           ├── Executions (+ live WebSocket + export)
+│           ├── Templates, Triggers, Schedules, Credentials
+│           ├── Agents, Users, Notifications
+│           ├── AuditLog, Admin, Plugins
+│           ├── ApiDocs, Settings (theme + locale)
+```
+
+## Технически бележки
+- **Git**: `git push` директно с token в URL
+- **Git credentials**: `~/.git-credentials` с token `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`
+- **DB**: SQLite + aiosqlite (dev/test), PostgreSQL + asyncpg (prod)
+- **API**: `/api/v1/` prefix, 24 route groups, 130+ endpoints, ALL FULLY WIRED
+- **Frontend**: React 19 + TypeScript + Vite 7 + Tailwind 4 + React Flow 11 + Zustand 5 + Recharts
+- **RBAC**: Permission enforcement с wildcard support, admin routes protected
+- **Retry Strategies**: Fixed/exponential/linear/none with jitter, 7 presets
+- **Agent Tasks**: Claim/result/queue assignment system
+- **Activity Timeline**: Unified feed from audit logs
+- **Analytics**: Recharts area/bar/pie charts, period selector
+- **i18n**: EN + BG, 150+ keys, wired into Sidebar + 5 pages
+- **Webhook Signing**: HMAC-SHA256 с timestamp tolerance
+- **Bulk Ops**: Batch publish/archive/delete/cancel/retry (max 100)
+- **WebSocket**: `/ws?token=<jwt>`, auto-reconnect, live execution status
+- **Metrics**: `/metrics` Prometheus endpoint + Grafana dashboard (18 panels)
+- **Rate Limiting**: Sliding window, per-IP/per-user, group-based
+- **API Keys**: SHA-256, header/query auth, permission scoping
+- **Plugin System**: Entry point + local directory discovery, hook system
+- **Vault**: AES-256 (Fernet), audit-logged
+- **Browser Tasks**: 5 Playwright tasks
+- **Templates**: 8 built-in workflow templates
+- **Data Export**: CSV/JSON for executions, audit logs, analytics
+- **Theme**: Light/Dark/System toggle
+- **API Docs**: 65+ endpoint catalog with search
+- **Monitoring**: Prometheus + Grafana + 12 alert rules
+- **E2E Tests**: Playwright 24 tests + 90+ backend tests
+- **Docker**: 6 services + monitoring stack + production overlay
+- **K8s**: Full production manifests with HPA, TLS, PVC
+- **Code Splitting**: 8 chunks (main 347KB, charts 382KB, flow 134KB)
+- **Общо**: ~160+ файла, ~25,000+ реда код
+
 ## Какво следва (приоритет)
-1. **Frontend i18n integration** — Wire t() into all pages
-2. **Workflow execution retry strategies** — Configurable retry policies
-3. **Agent task assignment** — Route tasks to specific agents
-4. **Dashboard analytics charts** — Recharts integration
-5. **User activity timeline** — Per-user action history
+1. **Lazy loading** — React.lazy() for heavy pages (WorkflowEditor, Analytics)
+2. **Search & filtering** — Global search across workflows, executions, agents
+3. **Notification center** — In-app bell + unread count
+4. **User roles UI** — Assign/manage roles from Admin panel
+5. **Workflow variables** — Variable passing between steps
