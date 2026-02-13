@@ -42,7 +42,7 @@ export const templatesApi = {
 
   categories: async (): Promise<string[]> => {
     const { data } = await client.get('/templates/categories');
-    return data.categories;
+    return Array.isArray(data) ? data : data?.categories ?? [];
   },
 
   instantiate: async (

@@ -56,7 +56,7 @@ function TemplateCard({
       <p className="text-xs text-slate-500 mb-3 line-clamp-2">{template.description}</p>
 
       <div className="flex flex-wrap gap-1 mb-3">
-        {template.tags.slice(0, 3).map((tag) => (
+        {(template.tags || []).slice(0, 3).map((tag) => (
           <span key={tag} className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-slate-100 text-slate-500">
             {tag}
           </span>

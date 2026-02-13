@@ -207,11 +207,11 @@ export default function AgentsPage() {
           </div>
           <div className="bg-white rounded-xl border border-slate-200 px-4 py-3">
             <p className="text-xs text-slate-500">Inactive</p>
-            <p className="text-xl font-bold text-slate-500">{stats.by_status.inactive || 0}</p>
+            <p className="text-xl font-bold text-slate-500">{stats?.by_status?.inactive || 0}</p>
           </div>
           <div className="bg-white rounded-xl border border-slate-200 px-4 py-3">
             <p className="text-xs text-slate-500">Errors</p>
-            <p className="text-xl font-bold text-red-600">{stats.by_status.error || 0}</p>
+            <p className="text-xl font-bold text-red-600">{stats?.by_status?.error || 0}</p>
           </div>
         </div>
       )}

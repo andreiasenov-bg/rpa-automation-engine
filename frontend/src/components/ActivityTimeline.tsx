@@ -171,7 +171,7 @@ export default function ActivityTimeline({
     );
   }
 
-  if (!data || data.activities.length === 0) {
+  if (!data || !data.activities || data.activities.length === 0) {
     return (
       <div className="py-8 text-center">
         <Activity className="w-8 h-8 text-slate-300 mx-auto mb-2" />
@@ -181,7 +181,7 @@ export default function ActivityTimeline({
   }
 
   // Sort date keys descending (newest first)
-  const dateKeys = Object.keys(data.grouped).sort((a, b) => b.localeCompare(a));
+  const dateKeys = Object.keys(data.grouped || {}).sort((a, b) => b.localeCompare(a));
 
   return (
     <div className="space-y-6">
@@ -194,7 +194,7 @@ export default function ActivityTimeline({
             </span>
             <div className="flex-1 h-px bg-slate-200 dark:bg-slate-700" />
             <span className="text-xs text-slate-400">
-              {data.grouped[dateKey].length}
+              {data.grouped?.[dateKey]?.length ?? 0}
             </span>
           </div>
 

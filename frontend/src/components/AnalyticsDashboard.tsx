@@ -108,7 +108,7 @@ function KpiCard({
 
 /* ─── Execution Timeline Chart ─── */
 function TimelineChart({ data }: { data: ExecutionTimeline | null }) {
-  if (!data || data.timeline.length === 0) {
+  if (!data || !data.timeline || data.timeline.length === 0) {
     return (
       <div className="h-64 flex items-center justify-center text-sm text-slate-400">
         No timeline data available
@@ -195,7 +195,7 @@ function SuccessRateDonut({ rate }: { rate: number }) {
 
 /* ─── Workflow Performance Chart ─── */
 function WorkflowPerformanceChart({ data }: { data: WorkflowPerformanceEntry[] }) {
-  if (data.length === 0) {
+  if (!data || data.length === 0) {
     return (
       <div className="h-64 flex items-center justify-center text-sm text-slate-400">
         No workflow data available

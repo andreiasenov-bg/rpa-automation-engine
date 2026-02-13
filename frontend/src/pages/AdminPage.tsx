@@ -378,7 +378,7 @@ export default function AdminPage() {
             {t('admin.title')}
           </h1>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-            {overview?.organization.name} &mdash; {overview?.organization.plan} plan
+            {overview?.organization?.name} &mdash; {overview?.organization?.plan} plan
           </p>
         </div>
       </div>
@@ -399,15 +399,15 @@ export default function AdminPage() {
       {activeTab === 'overview' && overview && (
         <div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-            <StatCard label="Users" value={overview.counts.users} icon={Users} color="bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400" />
-            <StatCard label="Workflows" value={overview.counts.workflows} icon={GitBranch} color="bg-violet-50 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400" />
-            <StatCard label="Agents" value={overview.counts.agents} icon={Server} color="bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400" />
-            <StatCard label="Credentials" value={overview.counts.credentials} icon={Key} color="bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400" />
+            <StatCard label="Users" value={overview?.counts?.users ?? 0} icon={Users} color="bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400" />
+            <StatCard label="Workflows" value={overview?.counts?.workflows ?? 0} icon={GitBranch} color="bg-violet-50 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400" />
+            <StatCard label="Agents" value={overview?.counts?.agents ?? 0} icon={Server} color="bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400" />
+            <StatCard label="Credentials" value={overview?.counts?.credentials ?? 0} icon={Key} color="bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400" />
           </div>
           <div className="grid grid-cols-3 gap-3">
-            <StatCard label="Total Executions" value={overview.counts.executions_total} icon={Play} color="bg-slate-50 text-slate-600 dark:bg-slate-700 dark:text-slate-300" />
-            <StatCard label="Running" value={overview.counts.executions_running} icon={Loader2} color="bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400" />
-            <StatCard label="Failed" value={overview.counts.executions_failed} icon={AlertCircle} color="bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400" />
+            <StatCard label="Total Executions" value={overview?.counts?.executions_total ?? 0} icon={Play} color="bg-slate-50 text-slate-600 dark:bg-slate-700 dark:text-slate-300" />
+            <StatCard label="Running" value={overview?.counts?.executions_running ?? 0} icon={Loader2} color="bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400" />
+            <StatCard label="Failed" value={overview?.counts?.executions_failed ?? 0} icon={AlertCircle} color="bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400" />
           </div>
 
           <div className="mt-6 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
@@ -417,19 +417,19 @@ export default function AdminPage() {
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div>
                 <p className="text-xs text-slate-400">Name</p>
-                <p className="font-medium text-slate-900 dark:text-white">{overview.organization.name}</p>
+                <p className="font-medium text-slate-900 dark:text-white">{overview?.organization?.name}</p>
               </div>
               <div>
                 <p className="text-xs text-slate-400">Plan</p>
-                <p className="font-medium text-slate-900 dark:text-white capitalize">{overview.organization.plan}</p>
+                <p className="font-medium text-slate-900 dark:text-white capitalize">{overview?.organization?.plan}</p>
               </div>
               <div>
                 <p className="text-xs text-slate-400">Organization ID</p>
-                <p className="font-mono text-xs text-slate-600 dark:text-slate-300">{overview.organization.id}</p>
+                <p className="font-mono text-xs text-slate-600 dark:text-slate-300">{overview?.organization?.id}</p>
               </div>
               <div>
                 <p className="text-xs text-slate-400">Created</p>
-                <p className="text-slate-600 dark:text-slate-300">{overview.organization.created_at ? new Date(overview.organization.created_at).toLocaleDateString() : '—'}</p>
+                <p className="text-slate-600 dark:text-slate-300">{overview?.organization?.created_at ? new Date(overview?.organization?.created_at).toLocaleDateString() : '—'}</p>
               </div>
             </div>
           </div>
