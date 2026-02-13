@@ -141,6 +141,13 @@ const translations: Record<Locale, TranslationMap> = {
     'admin.roles': 'Roles',
     'admin.permissions': 'Permissions',
     'admin.createRole': 'New Role',
+
+    // Analytics
+    'analytics.title': 'Analytics',
+    'analytics.avgDuration': 'Avg Duration',
+    'analytics.executionTimeline': 'Execution Timeline',
+    'analytics.successRate': 'Success Rate',
+    'analytics.workflowPerformance': 'Workflow Performance',
   },
 
   bg: {
@@ -266,6 +273,13 @@ const translations: Record<Locale, TranslationMap> = {
     'admin.roles': 'Роли',
     'admin.permissions': 'Разрешения',
     'admin.createRole': 'Нова роля',
+
+    // Аналитика
+    'analytics.title': 'Аналитика',
+    'analytics.avgDuration': 'Средна продълж.',
+    'analytics.executionTimeline': 'Хронология на изпълнения',
+    'analytics.successRate': 'Процент успех',
+    'analytics.workflowPerformance': 'Производителност на процеси',
   },
 };
 

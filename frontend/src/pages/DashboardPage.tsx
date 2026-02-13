@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import client from '@/api/client';
 import { useLocale } from '@/i18n';
+import AnalyticsDashboard from '@/components/AnalyticsDashboard';
 
 interface DashboardStats {
   total_workflows: number;
@@ -250,6 +251,11 @@ export default function DashboardPage() {
             ))}
           </div>
         )}
+      </div>
+
+      {/* Analytics section */}
+      <div className="mt-8">
+        <AnalyticsDashboard />
       </div>
     </div>
   );
