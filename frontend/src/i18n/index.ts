@@ -152,6 +152,17 @@ const translations: Record<Locale, TranslationMap> = {
     // Activity
     'activity.title': 'Recent Activity',
     'activity.noActivity': 'No recent activity',
+
+    // Search
+    'search.placeholder': 'Search workflows, executions, agents...',
+    'search.hint': 'Type to search across your workspace',
+    'search.shortcutHint': 'to toggle search',
+
+    // Notifications
+    'notifications.title': 'Notifications',
+    'notifications.markAllRead': 'Mark all read',
+    'notifications.empty': 'No notifications yet',
+    'notifications.viewAll': 'View all notifications',
   },
 
   bg: {
@@ -288,6 +299,17 @@ const translations: Record<Locale, TranslationMap> = {
     // Активност
     'activity.title': 'Последна активност',
     'activity.noActivity': 'Няма скорошна активност',
+
+    // Търсене
+    'search.placeholder': 'Търсене на процеси, изпълнения, агенти...',
+    'search.hint': 'Въведете за търсене в работната среда',
+    'search.shortcutHint': 'за превключване на търсенето',
+
+    // Известия
+    'notifications.title': 'Известия',
+    'notifications.markAllRead': 'Прочети всички',
+    'notifications.empty': 'Няма известия',
+    'notifications.viewAll': 'Виж всички известия',
   },
 };
 

@@ -1,31 +1,35 @@
-import { useEffect } from 'react';
+import { useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useAuthStore } from '@/stores/authStore';
+import { Loader2 } from 'lucide-react';
 
 /* Layout */
 import AppLayout from '@/components/layout/AppLayout';
 import ProtectedRoute from '@/components/layout/ProtectedRoute';
 
-/* Pages */
+/* Eagerly loaded (small, critical path) */
 import LoginPage from '@/pages/LoginPage';
 import RegisterPage from '@/pages/RegisterPage';
 import DashboardPage from '@/pages/DashboardPage';
-import WorkflowListPage from '@/pages/WorkflowListPage';
-import WorkflowEditorPage from '@/pages/WorkflowEditorPage';
-import ExecutionsPage from '@/pages/ExecutionsPage';
-import TriggersPage from '@/pages/TriggersPage';
-import UsersPage from '@/pages/UsersPage';
-import SettingsPage from '@/pages/SettingsPage';
-import CredentialsPage from '@/pages/CredentialsPage';
-import SchedulesPage from '@/pages/SchedulesPage';
-import AuditLogPage from '@/pages/AuditLogPage';
-import TemplatesPage from '@/pages/TemplatesPage';
-import AgentsPage from '@/pages/AgentsPage';
-import NotificationSettingsPage from '@/pages/NotificationSettingsPage';
-import AdminPage from '@/pages/AdminPage';
-import PluginsPage from '@/pages/PluginsPage';
-import ApiDocsPage from '@/pages/ApiDocsPage';
+
+/* Lazy loaded (heavier pages) */
+const WorkflowListPage = lazy(() => import('@/pages/WorkflowListPage'));
+const WorkflowEditorPage = lazy(() => import('@/pages/WorkflowEditorPage'));
+const ExecutionsPage = lazy(() => import('@/pages/ExecutionsPage'));
+const TriggersPage = lazy(() => import('@/pages/TriggersPage'));
+const UsersPage = lazy(() => import('@/pages/UsersPage'));
+const SettingsPage = lazy(() => import('@/pages/SettingsPage'));
+const CredentialsPage = lazy(() => import('@/pages/CredentialsPage'));
+const SchedulesPage = lazy(() => import('@/pages/SchedulesPage'));
+const AuditLogPage = lazy(() => import('@/pages/AuditLogPage'));
+const TemplatesPage = lazy(() => import('@/pages/TemplatesPage'));
+const AgentsPage = lazy(() => import('@/pages/AgentsPage'));
+const NotificationSettingsPage = lazy(() => import('@/pages/NotificationSettingsPage'));
+const AdminPage = lazy(() => import('@/pages/AdminPage'));
+const PluginsPage = lazy(() => import('@/pages/PluginsPage'));
+const ApiDocsPage = lazy(() => import('@/pages/ApiDocsPage'));
+
 import ErrorBoundary from '@/components/ErrorBoundary';
 import ToastContainer from '@/components/ToastContainer';
 
@@ -38,6 +42,15 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+/* Suspense fallback */
+function PageLoader() {
+  return (
+    <div className="flex items-center justify-center h-64">
+      <Loader2 className="w-6 h-6 text-indigo-500 animate-spin" />
+    </div>
+  );
+}
 
 function AppRoutes() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -63,22 +76,21 @@ function AppRoutes() {
         }
       >
         <Route index element={<DashboardPage />} />
-        <Route path="workflows" element={<WorkflowListPage />} />
-        <Route path="workflows/:id/edit" element={<WorkflowEditorPage />} />
-        <Route path="executions" element={<ExecutionsPage />} />
-
-        <Route path="triggers" element={<TriggersPage />} />
-        <Route path="schedules" element={<SchedulesPage />} />
-        <Route path="credentials" element={<CredentialsPage />} />
-        <Route path="users" element={<UsersPage />} />
-        <Route path="settings" element={<SettingsPage />} />
-        <Route path="templates" element={<TemplatesPage />} />
-        <Route path="agents" element={<AgentsPage />} />
-        <Route path="notifications" element={<NotificationSettingsPage />} />
-        <Route path="audit-log" element={<AuditLogPage />} />
-        <Route path="admin" element={<AdminPage />} />
-        <Route path="plugins" element={<PluginsPage />} />
-        <Route path="api-docs" element={<ApiDocsPage />} />
+        <Route path="workflows" element={<Suspense fallback={<PageLoader />}><WorkflowListPage /></Suspense>} />
+        <Route path="workflows/:id/edit" element={<Suspense fallback={<PageLoader />}><WorkflowEditorPage /></Suspense>} />
+        <Route path="executions" element={<Suspense fallback={<PageLoader />}><ExecutionsPage /></Suspense>} />
+        <Route path="triggers" element={<Suspense fallback={<PageLoader />}><TriggersPage /></Suspense>} />
+        <Route path="schedules" element={<Suspense fallback={<PageLoader />}><SchedulesPage /></Suspense>} />
+        <Route path="credentials" element={<Suspense fallback={<PageLoader />}><CredentialsPage /></Suspense>} />
+        <Route path="users" element={<Suspense fallback={<PageLoader />}><UsersPage /></Suspense>} />
+        <Route path="settings" element={<Suspense fallback={<PageLoader />}><SettingsPage /></Suspense>} />
+        <Route path="templates" element={<Suspense fallback={<PageLoader />}><TemplatesPage /></Suspense>} />
+        <Route path="agents" element={<Suspense fallback={<PageLoader />}><AgentsPage /></Suspense>} />
+        <Route path="notifications" element={<Suspense fallback={<PageLoader />}><NotificationSettingsPage /></Suspense>} />
+        <Route path="audit-log" element={<Suspense fallback={<PageLoader />}><AuditLogPage /></Suspense>} />
+        <Route path="admin" element={<Suspense fallback={<PageLoader />}><AdminPage /></Suspense>} />
+        <Route path="plugins" element={<Suspense fallback={<PageLoader />}><PluginsPage /></Suspense>} />
+        <Route path="api-docs" element={<Suspense fallback={<PageLoader />}><ApiDocsPage /></Suspense>} />
       </Route>
 
       {/* Catch-all */}
