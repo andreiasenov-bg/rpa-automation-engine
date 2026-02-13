@@ -1,5 +1,33 @@
 version: '3.8'
 
+x-backend-common: &backend-common
+  build:
+    context: ./backend
+    dockerfile: Dockerfile
+  environment: &backend-env
+    DATABASE_URL: postgresql+asyncpg://rpa_user:rpa_secret_dev@postgres:5432/rpa_engine
+    REDIS_URL: redis://redis:6379/0
+    CELERY_BROKER_URL: redis://redis:6379/0
+    CELERY_RESULT_BACKEND: redis://redis:6379/1
+    SECRET_KEY: dev-secret-key-change-in-production
+    ENCRYPTION_KEY: ""
+    ENVIRONMENT: development
+    LOG_LEVEL: info
+    LOG_FORMAT: colored
+    ALLOWED_ORIGINS: "http://localhost:3000,http://localhost:5173"
+    DB_HOST: postgres
+    DB_PORT: "5432"
+    DB_USER: rpa_user
+    REDIS_HOST: redis
+    REDIS_PORT: "6379"
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  volumes:
+    - ./backend:/app
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -32,64 +60,45 @@ services:
       retries: 5
 
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    <<: *backend-common
     container_name: rpa-backend
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://rpa_user:rpa_secret_dev@postgres:5432/rpa_engine
-      - REDIS_URL=redis://redis:6379/0
-      - SECRET_KEY=dev-secret-key-change-in-production
-      - ENVIRONMENT=development
-      - CORS_ORIGINS=http://localhost:3000,http://localhost:5173
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./backend:/app
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      <<: *backend-env
+      APP_ROLE: api
+      UVICORN_WORKERS: "1"
+    # Dev override: use uvicorn --reload directly
+    command: >
+      uvicorn app.main:app
+      --host 0.0.0.0
+      --port 8000
+      --reload
+      --log-level info
 
   celery-worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    <<: *backend-common
     container_name: rpa-celery-worker
     environment:
-      - DATABASE_URL=postgresql+asyncpg://rpa_user:rpa_secret_dev@postgres:5432/rpa_engine
-      - REDIS_URL=redis://redis:6379/0
-      - SECRET_KEY=dev-secret-key-change-in-production
-      - ENVIRONMENT=development
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./backend:/app
-    command: celery -A queue.celery_app worker --loglevel=info --concurrency=4
+      <<: *backend-env
+      APP_ROLE: worker
+      CELERY_CONCURRENCY: "4"
+    command: >
+      celery -A worker.celery_app worker
+      --loglevel=info
+      --concurrency=4
+      --queues=default,workflows,triggers,notifications,health
+      --hostname=worker@%h
 
   celery-beat:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    <<: *backend-common
     container_name: rpa-celery-beat
     environment:
-      - DATABASE_URL=postgresql+asyncpg://rpa_user:rpa_secret_dev@postgres:5432/rpa_engine
-      - REDIS_URL=redis://redis:6379/0
-      - SECRET_KEY=dev-secret-key-change-in-production
-      - ENVIRONMENT=development
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./backend:/app
-    command: celery -A queue.celery_app beat --loglevel=info
+      <<: *backend-env
+      APP_ROLE: beat
+    command: >
+      celery -A worker.celery_app beat
+      --loglevel=info
 
 volumes:
   postgres_data:

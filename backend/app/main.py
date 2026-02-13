@@ -17,6 +17,7 @@ from workflow.engine import get_workflow_engine
 from triggers.manager import get_trigger_manager
 from notifications.manager import get_notification_manager
 from core.logging_config import setup_logging
+from core.middleware import RequestTrackingMiddleware, setup_exception_handlers
 
 
 @asynccontextmanager
@@ -103,6 +104,9 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # Request tracking middleware (runs first — outermost)
+    app.add_middleware(RequestTrackingMiddleware)
+
     # CORS middleware
     app.add_middleware(
         CORSMiddleware,
@@ -111,6 +115,9 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Global exception handlers
+    setup_exception_handlers(app)
 
     # Root health check (unversioned — for load balancers / k8s probes)
     app.include_router(health.router, prefix="/api", tags=["Health"])

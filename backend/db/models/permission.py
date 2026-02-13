@@ -30,8 +30,12 @@ class Permission(BaseModel):
 
     __tablename__ = "permissions"
 
-    resource: Mapped[str] = mapped_column(nullable=False, index=True)
-    action: Mapped[str] = mapped_column(nullable=False, index=True)
+    code: Mapped[str] = mapped_column(nullable=False, unique=True, index=True)  # e.g. "workflows:read"
+    organization_id: Mapped[str] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     description: Mapped[str] = mapped_column(nullable=False, default="")
 
     # Relationships

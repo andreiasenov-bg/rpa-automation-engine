@@ -54,215 +54,129 @@
 **Commit**: `e7471ec` — Add comprehensive roadmap
 **Какво е направено**:
 - Пълен roadmap с 4 приоритетни категории
-- Критично: Triggers, Workflow Engine, Security, Storage, Monitoring
-- Важно: Workflow Mgmt, Notifications, Data Transform, Browser Automation, Frontend
-- Nice-to-have: Advanced Features, Multi-env, Compliance, Scaling
 - Архитектурни решения и конвенции
 
 ---
 
 ## Checkpoint #6 — Foundation Hardening + Engine Core (Сесия 2)
 **Дата**: 2026-02-13
-**Статус**: ЗАВЪРШЕН
 **Какво е направено**:
 
 ### 6a. Config.py fix
 - Добавени липсващи properties: `DB_POOL_SIZE`, `DB_MAX_OVERFLOW`, `DB_POOL_TIMEOUT`
 - Добавени: `ENVIRONMENT`, `API_V1_PREFIX`, `LOG_LEVEL`, `LOG_FORMAT`
 - Properties: `is_development`, `is_production`, `cors_origins_list`
-- `ALLOWED_ORIGINS` сега е string (comma-separated) за .env compatibility
 
 ### 6b. API Versioning — `/api/v1/`
-- **Нов файл**: `backend/api/v1/__init__.py`
-- **Нов файл**: `backend/api/v1/router.py` — агрегира всички routes под `/api/v1/`
-- `main.py` обновен: health остава на `/api/` (за k8s probes), всичко друго на `/api/v1/`
-- Лесно се добавя `/api/v2/` по-късно без да се пипат съществуващи routes
+- `backend/api/v1/router.py` — агрегира всички routes под `/api/v1/`
+- Health на `/api/` (k8s probes), всичко друго на `/api/v1/`
 
 ### 6c. Soft Delete на всички модели
-- `backend/db/base.py` — `SoftDeleteMixin` клас с `deleted_at`, `is_deleted`, `soft_delete()`, `restore()`
-- `BaseModel` вече наследява `SoftDeleteMixin` — автоматично добавя soft delete на ВСИЧКИ модели
-- Timestamps вече са `DateTime(timezone=True)` за правилна timezone поддръжка
+- `SoftDeleteMixin` клас с `deleted_at`, `is_deleted`, `soft_delete()`, `restore()`
+- `BaseModel` наследява `SoftDeleteMixin` → автоматично на ВСИЧКИ модели
 
 ### 6d. Alembic Migrations
-- **Нов файл**: `backend/alembic.ini` — Alembic конфигурация
-- **Нов файл**: `backend/alembic/env.py` — Async migration environment
-- **Нов файл**: `backend/alembic/script.py.mako` — Migration template
-- **Нова директория**: `backend/alembic/versions/` — Migration files
-- Поддържа async engine (за PostgreSQL + SQLite)
+- Async migration environment за PostgreSQL + SQLite
 
 ### 6e. Triggers система
-- **Нов модел**: `backend/db/models/trigger.py` — Trigger модел (8 типа)
-- **Нов пакет**: `backend/triggers/` с:
-  - `base.py` — TriggerTypeEnum, TriggerEvent, TriggerResult, BaseTriggerHandler ABC
-  - `manager.py` — TriggerManager singleton (register handlers, load from DB, fire events)
-  - `handlers/webhook.py` — WebhookTriggerHandler (path routing, HMAC signature verification)
-  - `handlers/schedule.py` — ScheduleTriggerHandler (cron validation, Celery beat integration)
-  - `handlers/event_bus.py` — EventBusTriggerHandler (Redis pub/sub, channel subscriptions)
-- **Нов route**: `backend/api/routes/triggers.py` — /types, /status, /test, /{id}/fire, /webhooks/{path}
-- Organization + Workflow модели обновени с `triggers` relationship
-- `db/models/__init__.py` обновен с Trigger + ExecutionState модели
+- Trigger модел (8 типа: webhook, schedule, file_watch, email, db_change, api_poll, event_bus, manual)
+- TriggerManager singleton + 3 handlers (webhook, schedule, event_bus)
 
 ### 6f. Workflow Execution Engine (DAG core)
-- **Нов файл**: `backend/workflow/engine.py` (~500 реда) с:
-  - `StepStatus` enum (pending, running, completed, failed, skipped, cancelled, waiting)
-  - `StepResult` dataclass — резултат от една стъпка
-  - `ExecutionContext` — споделен контекст между стъпки (variables, step outputs, trigger payload, loop state)
-  - `ExpressionEvaluator` — шаблонни изрази `{{ steps.step_1.output.name }}`, dot-notation, comparisons
-  - `StepExecutor` — изпълнява индивидуални стъпки с timeout, retry (exponential/linear backoff)
-  - Вградени step типове: `condition`, `foreach`, `parallel`, `delay`, `set_variable`, `log`
-  - `WorkflowEngine` — главен engine, DAG traversal, branching, error handlers, checkpoint integration
-  - Singleton: `get_workflow_engine()`
-- `main.py` обновен: инициализира Engine + TriggerManager при startup, свързва ги
-- `requirements.txt`: добавен `aiosqlite` за development
+- `backend/workflow/engine.py` (~500 реда)
+- ExpressionEvaluator: `{{ steps.step_1.output.name }}`
+- StepExecutor: timeout, retry (exponential/linear), вградени типове (condition, foreach, parallel, delay)
+- WorkflowEngine: DAG traversal, branching, error handlers, checkpoint integration
 
 ---
 
-## Файлова структура (текущо състояние)
-```
-rpa-automation-engine/
-├── .github/
-├── .gitignore
-├── README.md
-├── ROADMAP.md
-├── SESSION_LOG.md              ← ТОЗИ ФАЙЛ
-├── docker-compose.yml
-├── agent-service/
-├── docs/
-├── frontend/
-├── k8s/
-├── scripts/
-└── backend/
-    ├── Dockerfile
-    ├── requirements.txt
-    ├── .env.example
-    ├── alembic.ini                 ← NEW
-    ├── alembic/                    ← NEW
-    │   ├── env.py
-    │   ├── script.py.mako
-    │   └── versions/
-    ├── app/
-    │   ├── __init__.py
-    │   ├── config.py              # UPDATED: +properties +settings
-    │   ├── main.py                # UPDATED: v1 router, engine, triggers
-    │   └── dependencies.py
-    ├── api/
-    │   ├── __init__.py
-    │   ├── v1/                    ← NEW
-    │   │   ├── __init__.py
-    │   │   └── router.py          # Aggregated v1 router
-    │   ├── routes/
-    │   │   ├── health.py, auth.py, users.py, workflows.py
-    │   │   ├── executions.py, agents.py, credentials.py
-    │   │   ├── schedules.py, analytics.py, ai.py
-    │   │   ├── integrations.py
-    │   │   └── triggers.py        ← NEW
-    │   ├── schemas/
-    │   │   ├── common.py, auth.py, workflow.py, execution.py
-    │   └── websockets/
-    │       └── connection_manager.py
-    ├── core/
-    │   ├── constants.py
-    │   ├── exceptions.py
-    │   ├── security.py
-    │   └── utils.py
-    ├── db/
-    │   ├── base.py                # UPDATED: +SoftDeleteMixin +timezone
-    │   ├── database.py
-    │   ├── session.py
-    │   └── models/
-    │       ├── __init__.py        # UPDATED: +Trigger +ExecutionState models
-    │       ├── organization.py    # UPDATED: +triggers relationship
-    │       ├── workflow.py        # UPDATED: +triggers relationship
-    │       ├── trigger.py         ← NEW (8 trigger types)
-    │       ├── user.py, role.py, permission.py
-    │       ├── execution.py, execution_log.py, execution_state.py
-    │       ├── workflow_step.py
-    │       ├── agent.py, credential.py, schedule.py, audit_log.py
-    ├── integrations/
-    │   ├── claude_client.py
-    │   └── registry.py
-    ├── tasks/
-    │   ├── base_task.py
-    │   ├── registry.py
-    │   └── implementations/
-    │       ├── ai_task.py
-    │       └── integration_task.py
-    ├── triggers/                   ← NEW
-    │   ├── __init__.py
-    │   ├── base.py                # TriggerTypeEnum, TriggerEvent, BaseTriggerHandler
-    │   ├── manager.py             # TriggerManager singleton
-    │   └── handlers/
-    │       ├── __init__.py
-    │       ├── webhook.py         # HMAC signatures, path routing
-    │       ├── schedule.py        # Cron validation, Celery beat
-    │       └── event_bus.py       # Redis pub/sub
-    └── workflow/
-        ├── checkpoint.py
-        ├── recovery.py
-        └── engine.py              ← NEW (DAG execution, branching, loops)
-```
-
-## Технически бележки
-- **Git credentials**: `~/.git-credentials` с token
-- **Push**: Работи с `git push` директно (не `gh` CLI, не PyGithub API — blocked by proxy)
-- **DB**: SQLite + aiosqlite за development, PostgreSQL + asyncpg за production
-- **Всички модели**: Наследяват `BaseModel` → `SoftDeleteMixin` + `Base`
-  - Полета: `id` (UUID), `created_at`, `updated_at`, `deleted_at`, `is_deleted`
-- **API Versioning**: Всички бизнес endpoints на `/api/v1/`, health на `/api/`
-- **Config**: Всички properties фиксирани, ready for .env
-
 ## Checkpoint #7 — Celery + Notifications + Tasks + Logging (Сесия 2)
 **Дата**: 2026-02-13
-**Статус**: ЗАВЪРШЕН
 **Какво е направено**:
 
 ### 7a. Celery Worker Setup
-- **Нов пакет**: `backend/worker/`
-  - `celery_app.py` — Celery config с Redis broker, 5 task queues (workflows, triggers, notifications, health, default)
-  - Beat schedule: health checks на 5мин, agent heartbeats на 2мин, cleanup daily 3AM
-  - Task routing: различни queues за различни workloads
-- **Worker tasks**: `backend/worker/tasks/`
-  - `workflow.py` — `execute_workflow` + `resume_workflow` Celery tasks (bridge async engine ↔ sync Celery)
-  - `triggers.py` — `execute_trigger` (called by Celery beat for scheduled triggers)
-  - `health.py` — `check_all_integrations` + `check_agent_heartbeats`
-  - `maintenance.py` — `cleanup_old_data` (daily housekeeping)
-  - `notifications.py` — `send_notification` async via Celery
+- `backend/worker/celery_app.py` — 5 queues, beat schedule
+- Worker tasks: workflow, triggers, health, maintenance, notifications
 
 ### 7b. Notification System
-- **Нов пакет**: `backend/notifications/`
-  - `channels.py` — 4 канала:
-    - `EmailChannel` — SMTP с HTML templates, TLS support
-    - `SlackChannel` — Webhook с Block Kit formatting, priority emojis
-    - `WebhookChannel` — Arbitrary HTTP endpoints
-    - `WebSocketChannel` — Real-time push чрез ConnectionManager
-  - `manager.py` — NotificationManager singleton с:
-    - Multi-channel dispatch
-    - Convenience methods: `notify_workflow_completed`, `notify_workflow_failed`, `notify_integration_down`, `notify_agent_disconnected`
-- **Нов route**: `backend/api/routes/notifications.py` — /status, /send, /channels/configure, /test
+- 4 канала: Email (SMTP), Slack (webhook), Webhook (HTTP), WebSocket (real-time)
+- NotificationManager с convenience methods
 
 ### 7c. Task Implementations
-- **HTTP tasks** (`backend/tasks/implementations/http_task.py`):
-  - `HttpRequestTask` — Full HTTP client (all methods, auth types, response validation, JSON path extraction)
-  - `HttpDownloadTask` — File downloads with progress
-- **Script tasks** (`backend/tasks/implementations/script_task.py`):
-  - `PythonScriptTask` — Python code execution in subprocess (sandboxed, with variable injection)
-  - `ShellCommandTask` — Shell commands with dangerous pattern blocking
-  - `DataTransformTask` — Data operations: filter, map, sort, group_by, aggregate, flatten, unique
-- **Task Registry** обновен: 15+ task типа общо (8 AI + 2 integration + 2 HTTP + 3 script/data)
-- **Нов route**: `backend/api/routes/task_types.py` — list all task types, get schema by type
+- HTTP tasks: HttpRequestTask, HttpDownloadTask
+- Script tasks: PythonScriptTask, ShellCommandTask, DataTransformTask
+- Task Registry: 15+ типа общо
 
 ### 7d. Structured Logging
-- **Нов файл**: `backend/core/logging_config.py`
-  - structlog с JSON output за production, colored console за development
-  - Noise reduction за 3rd-party libs (uvicorn, sqlalchemy, httpx)
-  - Configurable via `LOG_LEVEL` и `LOG_FORMAT` env vars
+- structlog с JSON (prod) / colored console (dev)
 
 ### 7e. Trigger→Engine Wiring
-- `main.py` `_handle_trigger_event` вече:
-  - Зарежда Workflow от DB
-  - Създава Execution record
-  - Dispatch-ва към Celery worker (`execute_workflow.delay()`)
-  - Full error handling с logging
+- `_handle_trigger_event`: Load workflow → Create Execution → Dispatch to Celery
+
+---
+
+## Checkpoint #8 — Service Layer + Docker + Tests (Сесия 3)
+**Дата**: 2026-02-13
+**Какво е направено**:
+
+### 8a. CRUD Service Layer (Repository Pattern)
+- **Нов файл**: `backend/services/base.py` — Generic BaseService[ModelType]:
+  - `get_by_id()`, `get_by_id_and_org()`, `list()` (с pagination, ordering, soft-delete filtering)
+  - `create()`, `update()`, `soft_delete()`, `restore()`, `hard_delete()`, `exists()`
+  - Всички queries са org-scoped и soft-delete aware
+- **Нов файл**: `backend/services/auth_service.py` — AuthService:
+  - `register()` — Създава Organization + User, проверява за дублиран email
+  - `login()` — Верифицира парола, обновява last_login_at, генерира JWT
+  - `get_user_by_id()`, `get_user_by_email()`
+- **Нов файл**: `backend/services/workflow_service.py` — WorkflowService + ExecutionService:
+  - `create_workflow()`, `publish()`, `archive()`, `update_definition()` (bumps version)
+  - `execute()` — Creates Execution + dispatches to Celery
+  - ExecutionService: `get_by_workflow()`, `update_status()`
+- **Нов файл**: `backend/services/trigger_service.py` — TriggerService:
+  - `create_trigger()` с auto_start, `toggle()`, `delete_trigger()` (stop + soft delete)
+
+### 8b. DB Seed Script
+- **Нов файл**: `backend/scripts/seed.py`
+  - Default org (RPA Engine) с enterprise plan
+  - 25 permissions (workflows:read, workflows:write, executions:read, etc.)
+  - 4 roles: admin (всички permissions), developer, operator, viewer
+  - Admin user: admin@rpa-engine.local / admin123!
+  - Idempotent — safe to run multiple times
+
+### 8c. DB Model Updates
+- **Permission model** обновен: `resource` + `action` полета заменени с `code` (unique, indexed) + добавен `organization_id` FK
+- **Role model** обновен: добавено `slug` поле (indexed)
+
+### 8d. Request Middleware
+- **Нов файл**: `backend/core/middleware.py` — RequestTrackingMiddleware:
+  - X-Request-ID генериране/propagation
+  - X-Process-Time header
+  - Structured logging per request (skip health endpoints)
+  - Global exception handlers: NotFoundError→404, UnauthorizedError→401, ForbiddenError→403, ValidationError→422, ConflictError→409, ValueError→400
+- Интегриран в `main.py` (`create_app()`)
+
+### 8e. Docker Entrypoint
+- **Нов файл**: `backend/scripts/entrypoint.sh`
+  - Wait for PostgreSQL + Redis
+  - Run Alembic migrations
+  - Run seed script (idempotent)
+  - Multi-role: api, worker, beat, flower (via APP_ROLE env)
+- **Обновен**: `backend/Dockerfile` — +postgresql-client +redis-tools, entrypoint
+- **Обновен**: `docker-compose.yml` — YAML anchors (&backend-common), proper env vars, Celery queues
+
+### 8f. Pytest Test Suite Foundation
+- **Нов файл**: `backend/pytest.ini` — config с markers (unit, integration, slow, e2e)
+- **Нов файл**: `backend/tests/conftest.py` — shared fixtures:
+  - In-memory SQLite async DB (no PostgreSQL needed)
+  - AsyncSession factory с rollback per test
+  - FastAPI test client (httpx AsyncClient)
+  - Pre-seeded: test_org, test_user, test_workflow, auth_headers
+- **Тестове**:
+  - `test_health.py` — Health endpoints, X-Request-ID propagation
+  - `test_auth.py` — Password hashing, JWT creation/decoding
+  - `test_models.py` — Model creation, soft delete
+  - `test_workflow_engine.py` — ExpressionEvaluator, ExecutionContext serialization
+  - `test_services.py` — AuthService register/login/duplicate checks
 
 ---
 
@@ -270,54 +184,71 @@ rpa-automation-engine/
 ```
 rpa-automation-engine/
 ├── SESSION_LOG.md, README.md, ROADMAP.md
-├── docker-compose.yml, .gitignore
+├── docker-compose.yml (YAML anchors, multi-service)
+├── .gitignore
 ├── backend/
-│   ├── Dockerfile, requirements.txt, .env.example
+│   ├── Dockerfile (multi-role entrypoint)
+│   ├── requirements.txt
+│   ├── pytest.ini
+│   ├── .env.example
 │   ├── alembic.ini, alembic/
 │   ├── app/
-│   │   ├── config.py, main.py, dependencies.py
+│   │   ├── config.py, main.py (middleware integrated), dependencies.py
 │   ├── api/
-│   │   ├── v1/router.py           # 13 route groups
-│   │   ├── routes/
-│   │   │   ├── health, auth, users, workflows, executions
-│   │   │   ├── agents, credentials, schedules, analytics, ai
-│   │   │   ├── integrations, triggers, notifications, task_types
+│   │   ├── v1/router.py (15 route groups)
+│   │   ├── routes/ (health, auth, users, workflows, executions, agents,
+│   │   │           credentials, schedules, analytics, ai, integrations,
+│   │   │           triggers, notifications, task_types)
 │   │   ├── schemas/, websockets/
 │   ├── core/
-│   │   ├── constants, exceptions, security, utils, logging_config
+│   │   ├── constants, exceptions, security, utils
+│   │   ├── logging_config, middleware (RequestTracking + exception handlers)
 │   ├── db/
 │   │   ├── base.py (BaseModel + SoftDeleteMixin)
 │   │   ├── database.py, session.py
-│   │   └── models/ (17 models)
+│   │   └── models/ (17+ models)
 │   ├── integrations/ (claude_client, registry)
-│   ├── notifications/              ← NEW
-│   │   ├── channels.py (4 channels)
-│   │   └── manager.py (NotificationManager)
+│   ├── notifications/ (channels × 4, manager)
+│   ├── services/                       ← NEW
+│   │   ├── base.py (BaseService generic CRUD)
+│   │   ├── auth_service.py
+│   │   ├── workflow_service.py
+│   │   └── trigger_service.py
+│   ├── scripts/
+│   │   ├── seed.py                     ← NEW
+│   │   └── entrypoint.sh              ← NEW
 │   ├── tasks/
 │   │   ├── base_task, registry (15+ types)
 │   │   └── implementations/ (ai, integration, http, script)
-│   ├── triggers/
-│   │   ├── base, manager
-│   │   └── handlers/ (webhook, schedule, event_bus)
-│   ├── worker/                     ← NEW
-│   │   ├── celery_app.py (5 queues, beat schedule)
-│   │   └── tasks/ (workflow, triggers, health, maintenance, notifications)
-│   └── workflow/
-│       ├── checkpoint, recovery, engine
+│   ├── triggers/ (base, manager, handlers × 3)
+│   ├── worker/ (celery_app, tasks × 5)
+│   ├── workflow/ (checkpoint, recovery, engine)
+│   └── tests/                          ← NEW
+│       ├── conftest.py (async fixtures, in-memory DB)
+│       ├── test_health.py
+│       ├── test_auth.py
+│       ├── test_models.py
+│       ├── test_workflow_engine.py
+│       └── test_services.py
 ```
 
 ## Технически бележки
-- **Git**: `git push` директно с token в URL
-- **DB**: SQLite + aiosqlite (dev), PostgreSQL + asyncpg (prod)
+- **Git**: `git push` директно с token в URL (не `gh` CLI — blocked by proxy)
+- **Git credentials**: `~/.git-credentials` с token `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`
+- **DB**: SQLite + aiosqlite (dev/test), PostgreSQL + asyncpg (prod)
 - **Всички модели**: BaseModel → SoftDeleteMixin (id, created/updated/deleted_at, is_deleted)
-- **API**: `/api/v1/` prefix, 13 route groups, 60+ endpoints
+- **API**: `/api/v1/` prefix, 15 route groups, 60+ endpoints
 - **Task types**: 15+ (8 AI, 2 integration, 2 HTTP, 3 script/data)
 - **Celery**: 5 queues (workflows, triggers, notifications, health, default)
 - **Notifications**: 4 канала (email, slack, webhook, websocket)
+- **Services**: BaseService generic CRUD, AuthService, WorkflowService, ExecutionService, TriggerService
+- **Tests**: pytest + pytest-asyncio, in-memory SQLite, rollback per test
 
 ## Какво следва (приоритет)
 1. **Frontend** — React 18 + TypeScript + Vite + React Flow visual workflow editor
-2. **Storage/Files** — file upload/download за workflow attachments
-3. **Prometheus metrics** — /metrics endpoint за monitoring
-4. **Browser automation tasks** — Playwright-based web scraping/form filling
-5. **Email trigger handler** — IMAP polling за email-triggered workflows
+2. **Wire services into API routes** — Replace inline DB logic with service calls
+3. **Alembic initial migration** — Generate from current models
+4. **Storage/Files** — file upload/download за workflow attachments
+5. **Prometheus metrics** — /metrics endpoint за monitoring
+6. **Browser automation tasks** — Playwright-based web scraping/form filling
+7. **Email trigger handler** — IMAP polling за email-triggered workflows

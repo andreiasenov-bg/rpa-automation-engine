@@ -35,6 +35,7 @@ class Role(BaseModel):
         index=True,
     )
     name: Mapped[str] = mapped_column(nullable=False, index=True)
+    slug: Mapped[str] = mapped_column(nullable=False, index=True)
     description: Mapped[str] = mapped_column(nullable=False, default="")
     is_system_role: Mapped[bool] = mapped_column(default=False)
 
