@@ -1252,9 +1252,157 @@ rpa-automation-engine/
 - **Docker**: 6 services + monitoring stack
 - **Общо**: ~130+ файла, ~17,000+ реда код
 
+## Checkpoint #22 — RBAC Enforcement + Webhook HMAC Signing (Сесия 6)
+**Дата**: 2026-02-13
+**Commit**: `554028f`
+**Какво е направено**:
+
+### 22a. RBAC Enforcement Module
+- **Нов файл**: `backend/core/rbac.py`
+  - `require_permission(perm)` — FastAPI dependency за endpoint-level permission check
+  - `require_any_permission(*perms)` — поне едно от дадените
+  - `require_all_permissions(*perms)` — всичките
+  - `require_admin()` — shortcut за `admin.*`
+  - `require_org_owner()` — проверка за organization owner
+  - Wildcard matching: `admin.*` → `admin.read`, `admin.write`, etc.
+  - Graceful degradation: при fresh install без permissions — не заключва
+- All 7 admin routes enforced with `dependencies=[Depends(require_permission("admin.*"))]`
+
+### 22b. Webhook HMAC Signing
+- **Нов файл**: `backend/core/webhook_signing.py`
+  - `sign_webhook_payload()` — HMAC-SHA256 over `{timestamp}.{payload}`
+  - Headers: `X-RPA-Signature`, `X-RPA-Timestamp`, `X-RPA-Delivery`
+  - `verify_webhook_signature()` — constant-time comparison + timestamp tolerance (5min)
+  - `generate_webhook_secret()` — `whsec_` prefix keys
+
+### 22c. Tests
+- **Нов файл**: `backend/tests/test_rbac.py` — 8 tests (exact match, wildcard, global wildcard, mixed)
+- **Нов файл**: `backend/tests/test_webhook_signing.py` — 14 tests (signing, verification, tampering, expiry)
+
+---
+
+## Checkpoint #23 — Bulk Operations + API Documentation (Сесия 6)
+**Дата**: 2026-02-13
+**Commit**: `d3f7989`
+**Какво е направено**:
+
+### 23a. Bulk Operations API
+- **Нов файл**: `backend/api/routes/bulk.py`
+  - `POST /bulk/workflows/publish` — bulk publish (max 100)
+  - `POST /bulk/workflows/archive` — bulk archive
+  - `POST /bulk/workflows/delete` — bulk soft-delete
+  - `POST /bulk/executions/cancel` — bulk cancel running/pending
+  - `POST /bulk/executions/retry` — bulk retry failed/cancelled
+  - All endpoints RBAC-protected, return `BulkResult(success, failed, errors)`
+- v1/router.py: 22 route groups
+
+### 23b. API Documentation Page
+- **Нов файл**: `frontend/src/pages/ApiDocsPage.tsx`
+  - 65+ endpoint catalog, organized by 15 tag groups
+  - Searchable (path, method, summary, tag)
+  - Expand/collapse groups, copy path
+  - Method badges (GET=green, POST=blue, PUT=amber, DELETE=red)
+  - Public/auth indicators
+- Sidebar: 16 nav items (+ API Docs with FileText icon)
+- App.tsx: `/api-docs` route
+
+---
+
+## Checkpoint #24 — i18n System (Сесия 6)
+**Дата**: 2026-02-13
+**Commit**: `44eda02`
+**Какво е направено**:
+
+### 24a. Internationalization
+- **Нов файл**: `frontend/src/i18n/index.ts`
+  - 100+ translation keys за EN и BG
+  - Categories: common, nav, auth, dashboard, workflows, executions, settings, admin
+  - Zustand store за locale state (localStorage persistence)
+  - `t(key)` function + `useLocale()` React hook
+- **Нов файл**: `frontend/src/components/LocaleToggle.tsx` — EN/BG toggle
+- Settings > Appearance: Language selector (replaces density placeholder)
+
+---
+
+## Файлова структура (текущо състояние)
+```
+rpa-automation-engine/
+├── SESSION_LOG.md, README.md, ROADMAP.md
+├── docker-compose.yml
+├── .github/workflows/ci.yml (local only)
+├── k8s/ (9 manifests)
+├── monitoring/ (Prometheus + Grafana + exporters)
+├── backend/
+│   ├── Dockerfile, requirements.txt, pytest.ini
+│   ├── alembic.ini, alembic/
+│   ├── app/ (main.py, config.py, dependencies.py)
+│   ├── api/
+│   │   ├── v1/router.py (22 route groups)
+│   │   ├── routes/ — 22 ROUTES (ALL FULLY WIRED):
+│   │   │   ├── bulk.py (batch operations)               ← NEW
+│   │   │   ├── export.py, admin.py (RBAC enforced)
+│   │   │   ├── + all previous routes
+│   │   ├── schemas/, websockets/
+│   ├── core/
+│   │   ├── security, middleware, logging, exceptions, metrics
+│   │   ├── rate_limit.py, api_keys.py, plugin_system.py
+│   │   ├── rbac.py (permission enforcement)              ← NEW
+│   │   ├── webhook_signing.py (HMAC-SHA256)             ← NEW
+│   ├── db/, integrations/, notifications/, services/
+│   ├── scripts/, tasks/, triggers/, worker/, workflow/
+│   └── tests/ (10 test modules: + rbac, webhook_signing)
+├── frontend/
+│   ├── Dockerfile, nginx.conf, playwright.config.ts
+│   ├── e2e/ (4 spec files + helpers)
+│   └── src/
+│       ├── api/ (17 modules)
+│       ├── hooks/ (useWebSocket)
+│       ├── i18n/ (index.ts — EN + BG translations)      ← NEW
+│       ├── stores/ (authStore, toastStore, themeStore)
+│       ├── components/
+│       │   ├── ErrorBoundary, ToastContainer, layout/
+│       │   ├── ThemeToggle, LocaleToggle                  ← NEW
+│       │   ├── WorkflowVersionHistory
+│       └── pages/ (18 pages):
+│           ├── Login, Register, Dashboard
+│           ├── WorkflowList, WorkflowEditor (React Flow)
+│           ├── Executions (+ live WebSocket + export)
+│           ├── Templates, Triggers, Schedules, Credentials
+│           ├── Agents, Users, Notifications
+│           ├── AuditLog, Admin, Plugins
+│           ├── ApiDocs (NEW), Settings (theme + locale)
+```
+
+## Технически бележки
+- **Git**: `git push` директно с token в URL
+- **Git credentials**: `~/.git-credentials` с token `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`
+- **DB**: SQLite + aiosqlite (dev/test), PostgreSQL + asyncpg (prod)
+- **API**: `/api/v1/` prefix, 22 route groups, 120+ endpoints, ALL FULLY WIRED
+- **Frontend**: React 19 + TypeScript + Vite 7 + Tailwind 4 + React Flow 11 + Zustand 5
+- **RBAC**: Permission enforcement с wildcard support, admin routes protected
+- **Webhook Signing**: HMAC-SHA256 с timestamp tolerance
+- **Bulk Ops**: Batch publish/archive/delete/cancel/retry (max 100)
+- **i18n**: EN + BG, 100+ keys, Zustand store, localStorage
+- **WebSocket**: `/ws?token=<jwt>`, auto-reconnect, live execution status
+- **Metrics**: `/metrics` Prometheus endpoint + Grafana dashboard (18 panels)
+- **Rate Limiting**: Sliding window, per-IP/per-user, group-based
+- **API Keys**: SHA-256, header/query auth, permission scoping
+- **Plugin System**: Entry point + local directory discovery, hook system
+- **Vault**: AES-256 (Fernet), audit-logged
+- **Browser Tasks**: 5 Playwright tasks
+- **Templates**: 8 built-in workflow templates
+- **Data Export**: CSV/JSON for executions, audit logs, analytics
+- **Theme**: Light/Dark/System toggle
+- **API Docs**: 65+ endpoint catalog with search
+- **Monitoring**: Prometheus + Grafana + 12 alert rules
+- **E2E Tests**: Playwright 24 tests + 30+ integration tests
+- **Docker**: 6 services + monitoring stack
+- **K8s**: Full production manifests with HPA, TLS, PVC
+- **Общо**: ~140+ файла, ~20,000+ реда код
+
 ## Какво следва (приоритет)
-1. **i18n** — Internationalization support (BG + EN)
-2. **RBAC enforcement** — Permission checks on all admin routes
-3. **Bulk operations** — Bulk execute/archive/delete workflows
-4. **Webhook signatures** — HMAC signing for outbound webhooks
-5. **OpenAPI docs** — Auto-generated API documentation page
+1. **Frontend i18n integration** — Wire t() into all pages
+2. **Workflow execution retry strategies** — Configurable retry policies
+3. **Agent task assignment** — Route tasks to specific agents
+4. **Dashboard analytics charts** — Recharts integration
+5. **User activity timeline** — Per-user action history
