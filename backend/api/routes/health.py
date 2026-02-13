@@ -57,13 +57,33 @@ async def health_check() -> dict[str, Any]:
         logger.error("Database health check failed: %s", e)
         checks["database"] = "unavailable"
 
-    # Redis check
+    # Redis check via TCP socket
     try:
+        import asyncio
+        import socket
         from core.config import settings
-        import aiohttp
 
-        # Simple TCP check against Redis (lightweight)
-        checks["redis"] = "ok"
+        redis_url = settings.REDIS_URL
+        # Parse host:port from redis://host:port/db
+        parts = redis_url.replace("redis://", "").split("/")[0]
+        host_port = parts.split("@")[-1] if "@" in parts else parts
+        redis_host, redis_port = host_port.split(":") if ":" in host_port else (host_port, "6379")
+
+        # Async TCP connect with 2s timeout
+        loop = asyncio.get_event_loop()
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(2.0)
+        try:
+            await loop.run_in_executor(None, sock.connect, (redis_host, int(redis_port)))
+            # Send Redis PING command
+            await loop.run_in_executor(None, sock.send, b"*1\r\n$4\r\nPING\r\n")
+            response = await loop.run_in_executor(None, sock.recv, 64)
+            if b"PONG" in response:
+                checks["redis"] = "ok"
+            else:
+                checks["redis"] = "degraded"
+        finally:
+            sock.close()
     except Exception as e:
         logger.warning("Redis health check failed: %s", e)
         checks["redis"] = "unavailable"

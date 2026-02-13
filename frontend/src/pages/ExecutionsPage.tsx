@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import type { Execution, ExecutionLog } from '@/types';
 import { executionApi } from '@/api/executions';
+import { exportApi } from '@/api/export';
 import { useWebSocket, type ExecutionStatusPayload } from '@/hooks/useWebSocket';
 
 /* ─── Status config ─── */
@@ -283,6 +284,13 @@ export default function ExecutionsPage() {
               <><WifiOff className="w-3.5 h-3.5 text-slate-400" /> Offline</>
             )}
           </span>
+          <button
+            onClick={() => exportApi.executions('csv', statusFilter ? { status: statusFilter } : undefined)}
+            className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-slate-200 hover:bg-slate-50 transition"
+            title="Export to CSV"
+          >
+            Export
+          </button>
           <button
             onClick={fetchExecutions}
             className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-slate-200 hover:bg-slate-50 transition"

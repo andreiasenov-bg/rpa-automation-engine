@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import { userApi } from '@/api/users';
+import ThemeToggle from '@/components/ThemeToggle';
 
 /* ─── Tab navigation ─── */
 const TABS = [
@@ -158,7 +159,19 @@ export default function SettingsPage() {
           {activeTab === 'organization' && <ComingSoonTab title="Organization" />}
           {activeTab === 'security' && <ComingSoonTab title="Security" />}
           {activeTab === 'notifications' && <ComingSoonTab title="Notification" />}
-          {activeTab === 'appearance' && <ComingSoonTab title="Appearance" />}
+          {activeTab === 'appearance' && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-1">Theme</h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">Choose your preferred color scheme</p>
+                <ThemeToggle />
+              </div>
+              <div>
+                <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-1">Density</h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400">Compact mode will be available in a future update.</p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
