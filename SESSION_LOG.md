@@ -1798,6 +1798,49 @@ rpa-automation-engine/
 
 ---
 
+## Checkpoint #32 — Execution Detail Page (Сесия 7)
+**Дата**: 2026-02-14
+**Commit**: `cf4328e` — Checkpoint #32-33: Execution detail page + dashboard widgets
+**Какво е направено**:
+
+### 32a. ExecutionDetailPage
+- **Нов файл**: `frontend/src/pages/ExecutionDetailPage.tsx`
+  - Route: `/executions/:id` (lazy loaded)
+  - Metadata card: Execution ID, Workflow, Agent, Trigger Type, Started/Completed, Duration, Retries
+  - StepTimeline component: visual step-by-step progress with timeline dots/lines, status colors
+  - StatusBadge with large variant
+  - WebSocket live status updates via `execution.status_changed` events
+  - Auto-refresh every 5s for running/pending executions
+  - Retry/Cancel action buttons (contextual)
+  - Error display with AlertTriangle icon
+  - LiveLogViewer integration
+  - Link to workflow editor, Copy ID button
+
+### 32b. Route + Navigation
+- App.tsx: Added `ExecutionDetailPage` lazy import + `/executions/:id` route
+- ExecutionsPage: Added ExternalLink icon button per row → navigates to detail
+- DashboardPage: Recent executions rows now clickable → link to detail
+
+## Checkpoint #33 — Dashboard Widgets + Polish (Сесия 7)
+**Дата**: 2026-02-14
+**Commit**: `cf4328e` (same)
+**Какво е направено**:
+
+### 33a. Enhanced Dashboard
+- **Quick Actions** widget — 6-button grid: New Workflow, Executions, Agents, Credentials, Schedules, Templates
+- **Success Rate Ring** — SVG donut chart with animated stroke, color-coded (green ≥90%, amber ≥70%, red <70%)
+- **System Health** monitor — WebSocket status, Agents online/total, Queue depth, Active schedules
+- Avg Duration display when available
+- Full dark mode support across all widgets
+
+### 33b. Polish
+- StatCard enhanced: trend indicators (up/down/flat), suffix support, dark mode
+- StatusBadge: dark mode variants for all states
+- Recent executions: clickable rows with ChevronRight hover effect
+- WebSocket status indicator in dashboard header
+
+---
+
 ## Какво следва (приоритет)
 1. ~~Lazy loading~~ ✅
 2. ~~Global search~~ ✅
@@ -1808,5 +1851,8 @@ rpa-automation-engine/
 7. ~~Execution input variables~~ ✅
 8. ~~WebSocket live logs~~ ✅
 9. **Drag & drop step reorder** — Drag steps in palette to canvas
-10. **Execution detail page** — Full execution detail with step-by-step view
-11. **Dashboard widgets** — Customizable dashboard widget layout
+10. ~~Execution detail page~~ ✅
+11. ~~Dashboard widgets~~ ✅
+12. **E2E tests** — Playwright or Cypress tests for critical flows
+13. **Docker production config** — Multi-stage Dockerfile, nginx reverse proxy
+14. **Documentation** — API docs, deployment guide, user manual
