@@ -2,10 +2,10 @@
  * ExecutionDetailPage — Full execution detail view with step-by-step progress.
  *
  * Shows execution metadata, step timeline with status indicators,
- * live log viewer, and variable context.
+ * progress bar, collapsible step cards, live log viewer, and variable context.
  */
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -23,9 +23,13 @@ import {
   GitBranch,
   Server,
   Calendar,
+  ChevronDown,
   ChevronRight,
   Copy,
   ExternalLink,
+  Zap,
+  Code2,
+  Check,
 } from 'lucide-react';
 import type { Execution } from '@/types';
 import { executionApi } from '@/api/executions';
@@ -34,12 +38,13 @@ import LiveLogViewer from '@/components/LiveLogViewer';
 import { useLocale } from '@/i18n';
 
 /* ─── Status config ─── */
-const STATUS_CONFIG: Record<string, { icon: React.ElementType; color: string; bg: string; border: string; textColor: string }> = {
-  pending: { icon: Clock, color: 'text-amber-600', bg: 'bg-amber-50 dark:bg-amber-900/20', border: 'border-amber-200 dark:border-amber-800', textColor: 'text-amber-700 dark:text-amber-400' },
-  running: { icon: Activity, color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-900/20', border: 'border-blue-200 dark:border-blue-800', textColor: 'text-blue-700 dark:text-blue-400' },
-  completed: { icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-900/20', border: 'border-emerald-200 dark:border-emerald-800', textColor: 'text-emerald-700 dark:text-emerald-400' },
-  failed: { icon: XCircle, color: 'text-red-600', bg: 'bg-red-50 dark:bg-red-900/20', border: 'border-red-200 dark:border-red-800', textColor: 'text-red-700 dark:text-red-400' },
-  cancelled: { icon: Ban, color: 'text-slate-500', bg: 'bg-slate-50 dark:bg-slate-800', border: 'border-slate-200 dark:border-slate-700', textColor: 'text-slate-600 dark:text-slate-400' },
+const STATUS_CONFIG: Record<string, { icon: React.ElementType; color: string; bg: string; border: string; textColor: string; barColor: string }> = {
+  pending:   { icon: Clock,        color: 'text-amber-600',   bg: 'bg-amber-50 dark:bg-amber-900/20',   border: 'border-amber-200 dark:border-amber-800',   textColor: 'text-amber-700 dark:text-amber-400',   barColor: 'bg-amber-400' },
+  running:   { icon: Activity,     color: 'text-blue-600',    bg: 'bg-blue-50 dark:bg-blue-900/20',     border: 'border-blue-200 dark:border-blue-800',     textColor: 'text-blue-700 dark:text-blue-400',     barColor: 'bg-blue-500' },
+  completed: { icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-900/20', border: 'border-emerald-200 dark:border-emerald-800', textColor: 'text-emerald-700 dark:text-emerald-400', barColor: 'bg-emerald-500' },
+  failed:    { icon: XCircle,      color: 'text-red-600',     bg: 'bg-red-50 dark:bg-red-900/20',       border: 'border-red-200 dark:border-red-800',       textColor: 'text-red-700 dark:text-red-400',       barColor: 'bg-red-500' },
+  cancelled: { icon: Ban,          color: 'text-slate-500',   bg: 'bg-slate-50 dark:bg-slate-800',      border: 'border-slate-200 dark:border-slate-700',   textColor: 'text-slate-600 dark:text-slate-400',   barColor: 'bg-slate-400' },
+  skipped:   { icon: ChevronRight, color: 'text-slate-400',   bg: 'bg-slate-50 dark:bg-slate-800',      border: 'border-slate-200 dark:border-slate-700',   textColor: 'text-slate-500 dark:text-slate-500',   barColor: 'bg-slate-300' },
 };
 
 function StatusBadge({ status, large }: { status: string; large?: boolean }) {
@@ -65,6 +70,38 @@ function formatDatetime(iso?: string): string {
   return new Date(iso).toLocaleString();
 }
 
+/* ─── Copy button ─── */
+function CopyButton({ text, size = 'sm' }: { text: string; size?: 'sm' | 'xs' }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = () => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  const iconSize = size === 'xs' ? 'w-3 h-3' : 'w-3.5 h-3.5';
+  return (
+    <button onClick={handleCopy} className="p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition" title="Copy">
+      {copied ? <Check className={`${iconSize} text-emerald-500`} /> : <Copy className={iconSize} />}
+    </button>
+  );
+}
+
+/* ─── Elapsed time counter ─── */
+function ElapsedTimer({ startedAt }: { startedAt: string }) {
+  const [elapsed, setElapsed] = useState('');
+  useEffect(() => {
+    const start = new Date(startedAt).getTime();
+    const update = () => {
+      const diff = Date.now() - start;
+      setElapsed(formatDuration(diff));
+    };
+    update();
+    const interval = setInterval(update, 1000);
+    return () => clearInterval(interval);
+  }, [startedAt]);
+  return <span className="text-blue-600 dark:text-blue-400 font-mono text-sm animate-pulse">{elapsed}</span>;
+}
+
 /* ─── Metadata card ─── */
 function MetaItem({ icon: Icon, label, value, mono }: { icon: React.ElementType; label: string; value: string; mono?: boolean }) {
   return (
@@ -78,7 +115,54 @@ function MetaItem({ icon: Icon, label, value, mono }: { icon: React.ElementType;
   );
 }
 
-/* ─── Step timeline ─── */
+/* ─── Overall progress bar ─── */
+function ProgressBar({ steps }: { steps: StepInfo[] }) {
+  if (steps.length === 0) return null;
+  const completed = steps.filter((s) => s.status === 'completed').length;
+  const failed = steps.filter((s) => s.status === 'failed').length;
+  const running = steps.filter((s) => s.status === 'running').length;
+  const pct = Math.round(((completed + failed) / steps.length) * 100);
+
+  return (
+    <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-medium text-slate-600 dark:text-slate-300">
+          Overall Progress
+        </span>
+        <span className="text-xs font-mono text-slate-500">
+          {completed}/{steps.length} steps
+          {failed > 0 && <span className="text-red-500 ml-1">({failed} failed)</span>}
+          {running > 0 && <span className="text-blue-500 ml-1">({running} running)</span>}
+        </span>
+      </div>
+      <div className="h-2.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all duration-700 ease-out ${
+            failed > 0 ? 'bg-gradient-to-r from-emerald-500 to-red-500' :
+            pct === 100 ? 'bg-emerald-500' : 'bg-blue-500'
+          }`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <p className="text-[10px] text-slate-400 mt-1 text-right">{pct}%</p>
+    </div>
+  );
+}
+
+/* ─── Step duration bar ─── */
+function StepDurationBar({ durationMs, totalMs }: { durationMs: number; totalMs: number }) {
+  const pct = totalMs > 0 ? Math.max(2, Math.round((durationMs / totalMs) * 100)) : 0;
+  return (
+    <div className="flex items-center gap-2 mt-1">
+      <div className="flex-1 h-1 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+        <div className="h-full bg-indigo-400 rounded-full transition-all" style={{ width: `${pct}%` }} />
+      </div>
+      <span className="text-[9px] text-slate-400 font-mono w-8 text-right">{pct}%</span>
+    </div>
+  );
+}
+
+/* ─── Step timeline (collapsible cards) ─── */
 interface StepInfo {
   id: string;
   name: string;
@@ -88,9 +172,13 @@ interface StepInfo {
   completed_at?: string;
   duration_ms?: number;
   error?: string;
+  input?: Record<string, unknown>;
+  output?: Record<string, unknown>;
 }
 
-function StepTimeline({ steps }: { steps: StepInfo[] }) {
+function StepTimeline({ steps, totalDurationMs }: { steps: StepInfo[]; totalDurationMs: number }) {
+  const [expandedStep, setExpandedStep] = useState<string | null>(null);
+
   if (steps.length === 0) {
     return (
       <div className="text-center py-8">
@@ -106,34 +194,109 @@ function StepTimeline({ steps }: { steps: StepInfo[] }) {
         const isLast = idx === steps.length - 1;
         const statusCfg = STATUS_CONFIG[step.status] || STATUS_CONFIG.pending;
         const Icon = statusCfg.icon;
+        const isExpanded = expandedStep === step.id;
+        const hasDetails = step.error || step.input || step.output || step.started_at;
 
         return (
           <div key={step.id} className="flex gap-3">
             {/* Timeline line + dot */}
             <div className="flex flex-col items-center">
               <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${statusCfg.bg} ${statusCfg.border} border`}>
-                <Icon className={`w-3.5 h-3.5 ${statusCfg.color}`} />
+                {step.status === 'running' ? (
+                  <Loader2 className={`w-3.5 h-3.5 ${statusCfg.color} animate-spin`} />
+                ) : (
+                  <Icon className={`w-3.5 h-3.5 ${statusCfg.color}`} />
+                )}
               </div>
               {!isLast && <div className="w-px flex-1 bg-slate-200 dark:bg-slate-700 my-1" />}
             </div>
 
             {/* Step content */}
-            <div className={`flex-1 pb-4 ${isLast ? '' : ''}`}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-slate-900 dark:text-white">{step.name}</p>
-                  <p className="text-[10px] text-slate-400 font-mono">{step.type}</p>
+            <div className={`flex-1 pb-3 ${isLast ? '' : ''}`}>
+              <div
+                className={`rounded-lg border ${isExpanded ? 'border-indigo-200 dark:border-indigo-800 bg-slate-50 dark:bg-slate-800/50' : 'border-transparent hover:bg-slate-50 dark:hover:bg-slate-800/30'} px-3 py-2 transition ${hasDetails ? 'cursor-pointer' : ''}`}
+                onClick={() => hasDetails && setExpandedStep(isExpanded ? null : step.id)}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 min-w-0">
+                    {hasDetails && (
+                      <ChevronRight className={`w-3 h-3 text-slate-400 transition-transform flex-shrink-0 ${isExpanded ? 'rotate-90' : ''}`} />
+                    )}
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-900 dark:text-white truncate">
+                        <span className="text-slate-400 text-xs mr-1.5">#{idx + 1}</span>
+                        {step.name}
+                      </p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-[10px] text-slate-400 font-mono flex items-center gap-1">
+                          <Code2 className="w-2.5 h-2.5" />{step.type}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-right flex-shrink-0 ml-2">
+                    <p className={`text-xs font-medium ${statusCfg.textColor}`}>{step.status}</p>
+                    {step.duration_ms != null && (
+                      <p className="text-[10px] text-slate-400 font-mono">{formatDuration(step.duration_ms)}</p>
+                    )}
+                  </div>
                 </div>
-                <div className="text-right">
-                  <p className={`text-xs font-medium ${statusCfg.textColor}`}>{step.status}</p>
-                  {step.duration_ms && (
-                    <p className="text-[10px] text-slate-400">{formatDuration(step.duration_ms)}</p>
-                  )}
-                </div>
+
+                {/* Duration bar */}
+                {step.duration_ms != null && totalDurationMs > 0 && (
+                  <StepDurationBar durationMs={step.duration_ms} totalMs={totalDurationMs} />
+                )}
+
+                {/* Error preview (always visible) */}
+                {step.error && !isExpanded && (
+                  <div className="mt-1.5 text-[10px] text-red-500 truncate">{step.error}</div>
+                )}
               </div>
-              {step.error && (
-                <div className="mt-1.5 text-[10px] text-red-500 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded px-2 py-1">
-                  {step.error}
+
+              {/* Expanded details */}
+              {isExpanded && (
+                <div className="mt-1 ml-5 space-y-2 animate-in slide-in-from-top-1 duration-200">
+                  {/* Timestamps */}
+                  {step.started_at && (
+                    <div className="flex gap-4 text-[10px] text-slate-400">
+                      <span>Started: {formatDatetime(step.started_at)}</span>
+                      {step.completed_at && <span>Ended: {formatDatetime(step.completed_at)}</span>}
+                    </div>
+                  )}
+
+                  {/* Error with copy */}
+                  {step.error && (
+                    <div className="text-[11px] text-red-500 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded px-2.5 py-2 font-mono whitespace-pre-wrap relative group">
+                      <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition">
+                        <CopyButton text={step.error} size="xs" />
+                      </div>
+                      {step.error}
+                    </div>
+                  )}
+
+                  {/* Input data */}
+                  {step.input && Object.keys(step.input).length > 0 && (
+                    <details className="text-[10px]">
+                      <summary className="text-slate-500 cursor-pointer hover:text-slate-700 dark:hover:text-slate-300 font-medium">
+                        Input Data
+                      </summary>
+                      <pre className="mt-1 p-2 bg-slate-50 dark:bg-slate-900 rounded text-slate-600 dark:text-slate-300 overflow-x-auto font-mono">
+                        {JSON.stringify(step.input, null, 2)}
+                      </pre>
+                    </details>
+                  )}
+
+                  {/* Output data */}
+                  {step.output && Object.keys(step.output).length > 0 && (
+                    <details className="text-[10px]">
+                      <summary className="text-slate-500 cursor-pointer hover:text-slate-700 dark:hover:text-slate-300 font-medium">
+                        Output Data
+                      </summary>
+                      <pre className="mt-1 p-2 bg-slate-50 dark:bg-slate-900 rounded text-slate-600 dark:text-slate-300 overflow-x-auto font-mono">
+                        {JSON.stringify(step.output, null, 2)}
+                      </pre>
+                    </details>
+                  )}
                 </div>
               )}
             </div>
@@ -172,6 +335,8 @@ export default function ExecutionDetailPage() {
           completed_at: s.completed_at,
           duration_ms: s.duration_ms,
           error: s.error || s.error_message,
+          input: s.input || s.input_data,
+          output: s.output || s.output_data || s.result,
         })));
       }
     } catch {
@@ -191,17 +356,24 @@ export default function ExecutionDetailPage() {
       const data = payload as ExecutionStatusPayload;
       if (data.execution_id === id) {
         setExecution((prev) => prev ? { ...prev, status: data.status as Execution['status'] } : prev);
+        // Re-fetch for updated step data
+        fetchExecution();
       }
     });
     return unsubscribe;
-  }, [id, on]);
+  }, [id, on, fetchExecution]);
 
   // Auto-refresh for running executions
   useEffect(() => {
     if (!execution || (execution.status !== 'running' && execution.status !== 'pending')) return;
-    const interval = setInterval(fetchExecution, 5000);
+    const interval = setInterval(fetchExecution, 3000);
     return () => clearInterval(interval);
   }, [execution, fetchExecution]);
+
+  const totalStepDuration = useMemo(() =>
+    steps.reduce((sum, s) => sum + (s.duration_ms || 0), 0),
+    [steps]
+  );
 
   const handleRetry = async () => {
     if (!id) return;
@@ -217,10 +389,6 @@ export default function ExecutionDetailPage() {
       await executionApi.cancel(id);
       fetchExecution();
     } catch { /* handle */ }
-  };
-
-  const copyId = () => {
-    if (id) navigator.clipboard.writeText(id);
   };
 
   if (loading) {
@@ -247,12 +415,13 @@ export default function ExecutionDetailPage() {
           <div className="flex items-center gap-3">
             <h1 className="text-xl font-bold text-slate-900 dark:text-white">Execution Detail</h1>
             <StatusBadge status={execution.status} large />
+            {isActive && execution.started_at && (
+              <ElapsedTimer startedAt={execution.started_at} />
+            )}
           </div>
           <div className="flex items-center gap-2 mt-1">
             <p className="text-xs font-mono text-slate-400">{id}</p>
-            <button onClick={copyId} className="p-0.5 text-slate-400 hover:text-slate-600" title="Copy ID">
-              <Copy className="w-3 h-3" />
-            </button>
+            <CopyButton text={id || ''} size="xs" />
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -271,6 +440,11 @@ export default function ExecutionDetailPage() {
         </div>
       </div>
 
+      {/* Progress bar */}
+      <div className="mb-6">
+        <ProgressBar steps={steps} />
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left column: metadata + steps */}
         <div className="lg:col-span-1 space-y-6">
@@ -284,7 +458,9 @@ export default function ExecutionDetailPage() {
               <MetaItem icon={Play} label="Trigger Type" value={execution.trigger_type} />
               <MetaItem icon={Calendar} label="Started" value={formatDatetime(execution.started_at)} />
               <MetaItem icon={Calendar} label="Completed" value={formatDatetime(execution.completed_at)} />
-              <MetaItem icon={Timer} label="Duration" value={formatDuration(execution.duration_ms)} />
+              <MetaItem icon={Timer} label="Duration" value={
+                isActive && execution.started_at ? 'In progress...' : formatDuration(execution.duration_ms)
+              } />
               {execution.retry_count > 0 && (
                 <MetaItem icon={RotateCcw} label="Retries" value={String(execution.retry_count)} />
               )}
@@ -300,10 +476,18 @@ export default function ExecutionDetailPage() {
 
           {/* Step timeline */}
           <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
-            <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-4">
-              Step Progress {steps.length > 0 && `(${steps.filter((s) => s.status === 'completed').length}/${steps.length})`}
-            </h3>
-            <StepTimeline steps={steps} />
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                <Zap className="w-3 h-3" />
+                Step Progress
+              </h3>
+              {steps.length > 0 && (
+                <span className="text-[10px] font-mono text-slate-400">
+                  {steps.filter((s) => s.status === 'completed').length}/{steps.length}
+                </span>
+              )}
+            </div>
+            <StepTimeline steps={steps} totalDurationMs={totalStepDuration} />
           </div>
         </div>
 
@@ -311,7 +495,10 @@ export default function ExecutionDetailPage() {
         <div className="lg:col-span-2 space-y-6">
           {/* Error message */}
           {execution.error_message && (
-            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4">
+            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4 relative group">
+              <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition">
+                <CopyButton text={execution.error_message} />
+              </div>
               <div className="flex items-start gap-2">
                 <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
                 <div>
