@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useState, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ReactFlow,
@@ -8,14 +8,19 @@ import {
   addEdge,
   useNodesState,
   useEdgesState,
+  MarkerType,
   type Node,
   type Edge,
   type Connection,
   type NodeTypes,
+  type EdgeTypes,
   type ReactFlowInstance,
   Handle,
   Position,
   Panel,
+  BaseEdge,
+  getSmoothStepPath,
+  type EdgeProps,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import {
@@ -37,6 +42,10 @@ import {
   FolderOpen,
   Search,
   Variable,
+  Undo2,
+  Redo2,
+  Keyboard,
+  X,
 } from 'lucide-react';
 import { workflowApi } from '@/api/workflows';
 import WorkflowVariablesPanel from '@/components/WorkflowVariablesPanel';
@@ -58,15 +67,64 @@ const TASK_TYPES = [
   { type: 'delay', label: 'Delay', icon: Clock, color: '#94a3b8' },
 ];
 
+/* ─── Custom smooth-step edge with delete button ─── */
+function CustomEdge({
+  id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style, markerEnd, selected,
+}: EdgeProps) {
+  const [edgePath, labelX, labelY] = getSmoothStepPath({
+    sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition, borderRadius: 16,
+  });
+
+  return (
+    <g className="group">
+      {/* Wider invisible path for easier selection */}
+      <path d={edgePath} fill="none" strokeWidth={14} stroke="transparent" className="cursor-pointer" />
+      <BaseEdge
+        id={id}
+        path={edgePath}
+        markerEnd={markerEnd}
+        style={{
+          ...style,
+          strokeWidth: selected ? 3 : 2,
+          stroke: selected ? '#6366f1' : '#94a3b8',
+          transition: 'stroke 0.15s, stroke-width 0.15s',
+        }}
+      />
+      {/* Delete button on hover */}
+      <foreignObject
+        x={labelX - 10} y={labelY - 10} width={20} height={20}
+        className="opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto"
+      >
+        <button
+          className="w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center text-[10px] shadow-sm hover:bg-red-600 transition-colors"
+          onClick={(e) => {
+            e.stopPropagation();
+            const event = new CustomEvent('delete-edge', { detail: id });
+            window.dispatchEvent(event);
+          }}
+          title="Remove connection"
+        >
+          <X className="w-3 h-3" />
+        </button>
+      </foreignObject>
+    </g>
+  );
+}
+
+const edgeTypes: EdgeTypes = { custom: CustomEdge };
+
 /* ─── Custom node component ─── */
-function StepNode({ data }: { data: { label: string; type: string; color: string } }) {
+function StepNode({ data, selected }: { data: { label: string; type: string; color: string }; selected?: boolean }) {
   const taskDef = TASK_TYPES.find((t) => t.type === data.type);
   const Icon = taskDef?.icon || Code2;
   const color = data.color || taskDef?.color || '#6366f1';
 
   return (
-    <div className="bg-white rounded-xl border-2 shadow-sm min-w-[160px]" style={{ borderColor: color }}>
-      <Handle type="target" position={Position.Top} className="!w-3 !h-3 !bg-slate-400 !border-2 !border-white" />
+    <div
+      className={`bg-white rounded-xl border-2 shadow-sm min-w-[160px] transition-shadow ${selected ? 'shadow-lg ring-2 ring-indigo-200' : ''}`}
+      style={{ borderColor: color }}
+    >
+      <Handle type="target" position={Position.Top} className="!w-3 !h-3 !bg-slate-400 !border-2 !border-white hover:!bg-indigo-500 hover:!scale-125 transition-all" />
       <div className="px-3 py-2.5 flex items-center gap-2.5">
         <div
           className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
@@ -79,14 +137,53 @@ function StepNode({ data }: { data: { label: string; type: string; color: string
           <p className="text-[10px] text-slate-400 capitalize">{data.type.replace(/_/g, ' ')}</p>
         </div>
       </div>
-      <Handle type="source" position={Position.Bottom} className="!w-3 !h-3 !bg-slate-400 !border-2 !border-white" />
+      <Handle type="source" position={Position.Bottom} className="!w-3 !h-3 !bg-slate-400 !border-2 !border-white hover:!bg-indigo-500 hover:!scale-125 transition-all" />
     </div>
   );
 }
 
-const nodeTypes: NodeTypes = {
-  stepNode: StepNode,
-};
+const nodeTypes: NodeTypes = { stepNode: StepNode };
+
+/* ─── Undo/Redo hook ─── */
+interface FlowSnapshot {
+  nodes: Node[];
+  edges: Edge[];
+}
+
+function useUndoRedo(maxHistory = 50) {
+  const past = useRef<FlowSnapshot[]>([]);
+  const future = useRef<FlowSnapshot[]>([]);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
+
+  const push = useCallback((snapshot: FlowSnapshot) => {
+    past.current.push(snapshot);
+    if (past.current.length > maxHistory) past.current.shift();
+    future.current = [];
+    setCanUndo(true);
+    setCanRedo(false);
+  }, [maxHistory]);
+
+  const undo = useCallback((current: FlowSnapshot): FlowSnapshot | null => {
+    if (past.current.length === 0) return null;
+    const prev = past.current.pop()!;
+    future.current.push(current);
+    setCanUndo(past.current.length > 0);
+    setCanRedo(true);
+    return prev;
+  }, []);
+
+  const redo = useCallback((current: FlowSnapshot): FlowSnapshot | null => {
+    if (future.current.length === 0) return null;
+    const next = future.current.pop()!;
+    past.current.push(current);
+    setCanUndo(true);
+    setCanRedo(future.current.length > 0);
+    return next;
+  }, []);
+
+  return { push, undo, redo, canUndo, canRedo };
+}
 
 /* ─── Convert backend steps ↔ React Flow ─── */
 function stepsToNodesEdges(steps: WorkflowStep[]): { nodes: Node[]; edges: Edge[] } {
@@ -110,7 +207,9 @@ function stepsToNodesEdges(steps: WorkflowStep[]): { nodes: Node[]; edges: Edge[
           id: `${step.id}-${targetId}`,
           source: step.id,
           target: targetId,
+          type: 'custom',
           animated: true,
+          markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16, color: '#94a3b8' },
           style: { stroke: '#94a3b8', strokeWidth: 2 },
         });
       });
@@ -134,6 +233,14 @@ function nodesEdgesToSteps(nodes: Node[], edges: Edge[]): WorkflowStep[] {
   });
 }
 
+/* ─── Default edge options ─── */
+const defaultEdgeOptions = {
+  type: 'custom',
+  animated: true,
+  markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16, color: '#94a3b8' },
+  style: { stroke: '#94a3b8', strokeWidth: 2 },
+};
+
 /* ─── Editor page ─── */
 export default function WorkflowEditorPage() {
   const { id } = useParams<{ id: string }>();
@@ -150,9 +257,60 @@ export default function WorkflowEditorPage() {
   const [showVariables, setShowVariables] = useState(false);
   const [selectedStep, setSelectedStep] = useState<string | null>(null);
   const [showRunDialog, setShowRunDialog] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
   const counterRef = useRef(0);
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
+  const nodesRef = useRef(nodes);
+  const edgesRef = useRef(edges);
+  nodesRef.current = nodes;
+  edgesRef.current = edges;
+
+  const history = useUndoRedo();
+
+  // Snapshot before mutations
+  const snapshot = useCallback(() => {
+    history.push({ nodes: structuredClone(nodesRef.current), edges: structuredClone(edgesRef.current) });
+  }, [history]);
+
+  const handleUndo = useCallback(() => {
+    const prev = history.undo({ nodes: nodesRef.current, edges: edgesRef.current });
+    if (prev) { setNodes(prev.nodes); setEdges(prev.edges); }
+  }, [history, setNodes, setEdges]);
+
+  const handleRedo = useCallback(() => {
+    const next = history.redo({ nodes: nodesRef.current, edges: edgesRef.current });
+    if (next) { setNodes(next.nodes); setEdges(next.edges); }
+  }, [history, setNodes, setEdges]);
+
+  // Listen for edge delete events from custom edge component
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const edgeId = (e as CustomEvent).detail;
+      snapshot();
+      setEdges((eds) => eds.filter((edge) => edge.id !== edgeId));
+    };
+    window.addEventListener('delete-edge', handler);
+    return () => window.removeEventListener('delete-edge', handler);
+  }, [setEdges, snapshot]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      // Ignore if inside input/textarea
+      if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return;
+
+      if (mod && e.key === 'z' && !e.shiftKey) { e.preventDefault(); handleUndo(); }
+      if (mod && e.key === 'z' && e.shiftKey) { e.preventDefault(); handleRedo(); }
+      if (mod && e.key === 'y') { e.preventDefault(); handleRedo(); }
+      if (mod && e.key === 's') { e.preventDefault(); handleSaveRef.current(); }
+      if (e.key === 'Escape') { setSelectedStep(null); setShowPalette(false); setShowShortcuts(false); }
+      if (e.key === '?' && !mod) { setShowShortcuts((v) => !v); }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [handleUndo, handleRedo]);
 
   // Fetch workflow
   useEffect(() => {
@@ -184,18 +342,20 @@ export default function WorkflowEditorPage() {
 
   const onConnect = useCallback(
     (params: Connection) => {
-      setEdges((eds) => addEdge({ ...params, animated: true, style: { stroke: '#94a3b8', strokeWidth: 2 } }, eds));
+      snapshot();
+      setEdges((eds) => addEdge({ ...params, ...defaultEdgeOptions }, eds));
     },
-    [setEdges],
+    [setEdges, snapshot],
   );
 
-  const addNode = (taskType: string) => {
+  const addNode = useCallback((taskType: string, position?: { x: number; y: number }) => {
+    snapshot();
     counterRef.current += 1;
     const taskDef = TASK_TYPES.find((t) => t.type === taskType)!;
     const newNode: Node = {
       id: `step_${Date.now()}_${counterRef.current}`,
       type: 'stepNode',
-      position: { x: 250, y: nodes.length * 120 + 50 },
+      position: position || { x: 250, y: nodesRef.current.length * 120 + 50 },
       data: {
         label: `${taskDef.label} ${counterRef.current}`,
         type: taskType,
@@ -205,13 +365,33 @@ export default function WorkflowEditorPage() {
     };
     setNodes((nds) => [...nds, newNode]);
     setShowPalette(false);
-  };
+    return newNode;
+  }, [setNodes, snapshot]);
 
-  const handleSave = async () => {
+  /* ─── Find closest node to auto-connect ─── */
+  const findClosestNodeAbove = useCallback((position: { x: number; y: number }, excludeId: string): Node | null => {
+    let closest: Node | null = null;
+    let minDist = 150; // Max snap distance
+    for (const node of nodesRef.current) {
+      if (node.id === excludeId) continue;
+      // Only connect to nodes above the drop position
+      if (node.position.y >= position.y) continue;
+      const dx = node.position.x - position.x;
+      const dy = (node.position.y + 60) - position.y; // offset for node height
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < minDist) {
+        minDist = dist;
+        closest = node;
+      }
+    }
+    return closest;
+  }, []);
+
+  const handleSave = useCallback(async () => {
     if (!id || !workflow) return;
     setSaving(true);
     try {
-      const steps = nodesEdgesToSteps(nodes, edges);
+      const steps = nodesEdgesToSteps(nodesRef.current, edgesRef.current);
       const updated = await workflowApi.update(id, {
         name,
         description,
@@ -224,7 +404,9 @@ export default function WorkflowEditorPage() {
     } finally {
       setSaving(false);
     }
-  };
+  }, [id, workflow, name, description]);
+  const handleSaveRef = useRef(handleSave);
+  handleSaveRef.current = handleSave;
 
   const handlePublish = async () => {
     if (!id) return;
@@ -237,21 +419,12 @@ export default function WorkflowEditorPage() {
     }
   };
 
-  const handleExecute = async () => {
-    if (!id) return;
-    try {
-      await workflowApi.execute(id);
-      navigate('/executions');
-    } catch {
-      // handle error
-    }
-  };
-
   const handleNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
     setSelectedStep(node.id);
   }, []);
 
   const handleStepConfigSave = useCallback((stepId: string, updates: { label: string; config: Record<string, unknown>; on_error?: string }) => {
+    snapshot();
     setNodes((nds) =>
       nds.map((n) =>
         n.id === stepId
@@ -259,7 +432,7 @@ export default function WorkflowEditorPage() {
           : n
       )
     );
-  }, [setNodes]);
+  }, [setNodes, snapshot]);
 
   // Drag & drop from palette to canvas
   const onDragOver = useCallback((event: React.DragEvent) => {
@@ -278,33 +451,50 @@ export default function WorkflowEditorPage() {
         y: event.clientY,
       });
 
-      counterRef.current += 1;
-      const taskDef = TASK_TYPES.find((t) => t.type === taskType);
-      if (!taskDef) return;
+      const newNode = addNode(taskType, position);
 
-      const newNode: Node = {
-        id: `step_${Date.now()}_${counterRef.current}`,
-        type: 'stepNode',
-        position,
-        data: {
-          label: `${taskDef.label} ${counterRef.current}`,
-          type: taskType,
-          config: {},
-          color: taskDef.color,
-        },
-      };
-      setNodes((nds) => [...nds, newNode]);
+      // Auto-connect: find closest node above and create edge
+      const closest = findClosestNodeAbove(position, newNode.id);
+      if (closest) {
+        setEdges((eds) =>
+          addEdge({ source: closest.id, target: newNode.id, ...defaultEdgeOptions }, eds)
+        );
+      }
     },
-    [reactFlowInstance, setNodes],
+    [reactFlowInstance, addNode, findClosestNodeAbove, setEdges],
+  );
+
+  // Track node moves for undo
+  const onNodesChangeWrapped = useCallback(
+    (changes: Parameters<typeof onNodesChange>[0]) => {
+      const hasMoveEnd = changes.some((c) => c.type === 'position' && c.dragging === false);
+      const hasRemove = changes.some((c) => c.type === 'remove');
+      if (hasMoveEnd || hasRemove) snapshot();
+      onNodesChange(changes);
+    },
+    [onNodesChange, snapshot],
+  );
+
+  const onEdgesChangeWrapped = useCallback(
+    (changes: Parameters<typeof onEdgesChange>[0]) => {
+      const hasRemove = changes.some((c) => c.type === 'remove');
+      if (hasRemove) snapshot();
+      onEdgesChange(changes);
+    },
+    [onEdgesChange, snapshot],
   );
 
   const handleDeleteSelected = () => {
+    snapshot();
     setNodes((nds) => nds.filter((n) => !n.selected));
     setEdges((eds) => {
-      const selectedNodeIds = new Set(nodes.filter((n) => n.selected).map((n) => n.id));
+      const selectedNodeIds = new Set(nodesRef.current.filter((n) => n.selected).map((n) => n.id));
       return eds.filter((e) => !selectedNodeIds.has(e.source) && !selectedNodeIds.has(e.target) && !e.selected);
     });
   };
+
+  // Memoize connection line style
+  const connectionLineStyle = useMemo(() => ({ stroke: '#6366f1', strokeWidth: 2, strokeDasharray: '5 5' }), []);
 
   if (loading) {
     return (
@@ -349,7 +539,27 @@ export default function WorkflowEditorPage() {
           {dirty && <span className="w-2 h-2 rounded-full bg-amber-400 flex-shrink-0" title="Unsaved changes" />}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
+          {/* Undo / Redo */}
+          <button
+            onClick={handleUndo}
+            disabled={!history.canUndo}
+            className="p-2 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            title="Undo (Ctrl+Z)"
+          >
+            <Undo2 className="w-4 h-4" />
+          </button>
+          <button
+            onClick={handleRedo}
+            disabled={!history.canRedo}
+            className="p-2 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            title="Redo (Ctrl+Shift+Z)"
+          >
+            <Redo2 className="w-4 h-4" />
+          </button>
+
+          <div className="w-px h-5 bg-slate-200 mx-1" />
+
           <button
             onClick={() => setShowVariables(!showVariables)}
             className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border transition ${
@@ -365,9 +575,16 @@ export default function WorkflowEditorPage() {
           <button
             onClick={handleDeleteSelected}
             className="p-2 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors"
-            title="Delete selected"
+            title="Delete selected (Del)"
           >
             <Trash2 className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => setShowShortcuts(!showShortcuts)}
+            className="p-2 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
+            title="Keyboard shortcuts (?)"
+          >
+            <Keyboard className="w-4 h-4" />
           </button>
           <button
             onClick={handleSave}
@@ -403,16 +620,21 @@ export default function WorkflowEditorPage() {
         <ReactFlow
           nodes={nodes}
           edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
+          onNodesChange={onNodesChangeWrapped}
+          onEdgesChange={onEdgesChangeWrapped}
           onConnect={onConnect}
           onNodeClick={handleNodeClick}
           onInit={setReactFlowInstance}
           onDrop={onDrop}
           onDragOver={onDragOver}
           nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
+          defaultEdgeOptions={defaultEdgeOptions}
+          connectionLineStyle={connectionLineStyle}
           fitView
           deleteKeyCode={['Backspace', 'Delete']}
+          snapToGrid
+          snapGrid={[16, 16]}
           className="bg-slate-50"
         >
           <Background gap={16} size={1} color="#e2e8f0" />
@@ -422,6 +644,8 @@ export default function WorkflowEditorPage() {
             maskColor="rgba(241,245,249,0.8)"
             position="bottom-left"
             className="!bg-white !border-slate-200 !rounded-lg"
+            zoomable
+            pannable
           />
 
           {/* Dockable step palette */}
@@ -474,7 +698,7 @@ export default function WorkflowEditorPage() {
           {/* Step count */}
           <Panel position="top-right">
             <div className="px-3 py-1.5 bg-white rounded-lg border border-slate-200 text-xs text-slate-500 shadow-sm">
-              {nodes.length} step{nodes.length !== 1 ? 's' : ''} &middot; v{workflow?.version || 1}
+              {nodes.length} step{nodes.length !== 1 ? 's' : ''} &middot; {edges.length} edge{edges.length !== 1 ? 's' : ''} &middot; v{workflow?.version || 1}
             </div>
           </Panel>
         </ReactFlow>
@@ -503,6 +727,35 @@ export default function WorkflowEditorPage() {
             />
           );
         })()}
+
+        {/* Keyboard shortcuts modal */}
+        {showShortcuts && (
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/20" onClick={() => setShowShortcuts(false)}>
+            <div className="bg-white rounded-xl shadow-xl border border-slate-200 p-5 w-80" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-semibold text-slate-800">Keyboard Shortcuts</h3>
+                <button onClick={() => setShowShortcuts(false)} className="p-1 rounded hover:bg-slate-100">
+                  <X className="w-4 h-4 text-slate-400" />
+                </button>
+              </div>
+              <div className="space-y-2 text-xs">
+                {[
+                  ['Ctrl+S', 'Save workflow'],
+                  ['Ctrl+Z', 'Undo'],
+                  ['Ctrl+Shift+Z', 'Redo'],
+                  ['Delete / Backspace', 'Delete selected'],
+                  ['Escape', 'Close panel'],
+                  ['?', 'Toggle shortcuts'],
+                ].map(([key, desc]) => (
+                  <div key={key} className="flex items-center justify-between py-1">
+                    <span className="text-slate-500">{desc}</span>
+                    <kbd className="px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-mono text-[10px] border border-slate-200">{key}</kbd>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Run dialog */}
