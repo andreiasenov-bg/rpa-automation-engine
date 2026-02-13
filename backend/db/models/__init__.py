@@ -16,6 +16,8 @@ from db.models.agent import Agent
 from db.models.credential import Credential
 from db.models.schedule import Schedule
 from db.models.audit_log import AuditLog
+from db.models.trigger import Trigger
+from db.models.execution_state import ExecutionStateModel, ExecutionCheckpointModel, ExecutionJournalModel
 
 __all__ = [
     "Organization",
@@ -32,4 +34,8 @@ __all__ = [
     "Credential",
     "Schedule",
     "AuditLog",
+    "Trigger",
+    "ExecutionStateModel",
+    "ExecutionCheckpointModel",
+    "ExecutionJournalModel",
 ]

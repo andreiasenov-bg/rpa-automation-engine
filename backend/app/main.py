@@ -6,13 +6,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from api.routes import auth, health, workflows, executions, agents, users, credentials, schedules, analytics, ai
-from api.routes import integrations as integrations_routes
+from api.v1.router import api_v1_router
+from api.routes import health
 from db.database import init_db
 from integrations.claude_client import get_claude_client
 from integrations.registry import get_integration_registry
 from workflow.checkpoint import CheckpointManager
 from workflow.recovery import RecoveryService
+from workflow.engine import get_workflow_engine
+from triggers.manager import get_trigger_manager
 
 
 @asynccontextmanager
@@ -25,9 +27,9 @@ async def lifespan(app: FastAPI):
     # Connect to Claude AI
     claude = await get_claude_client()
     if claude.is_configured:
-        print(f"🤖 Claude AI connected (model: {settings.CLAUDE_MODEL})")
+        print(f"[startup] Claude AI connected (model: {settings.CLAUDE_MODEL})")
     else:
-        print("⚠️  Claude AI not configured (set ANTHROPIC_API_KEY to enable)")
+        print("[startup] Claude AI not configured (set ANTHROPIC_API_KEY to enable)")
 
     # Load external API integrations and start health monitoring
     integration_registry = get_integration_registry()
@@ -36,11 +38,26 @@ async def lifespan(app: FastAPI):
         await integration_registry.start_health_monitor()
         count = len(integration_registry.list_all())
         if count > 0:
-            print(f"🔌 Loaded {count} API integration(s), health monitor active")
+            print(f"[startup] Loaded {count} API integration(s), health monitor active")
         else:
-            print("🔌 Integration registry ready (no APIs configured yet)")
+            print("[startup] Integration registry ready (no APIs configured yet)")
     except Exception as e:
-        print(f"⚠️  Integration registry: {e}")
+        print(f"[startup] Integration registry warning: {e}")
+
+    # Initialize Workflow Engine
+    engine = get_workflow_engine()
+    print("[startup] Workflow execution engine ready")
+
+    # Initialize Trigger Manager and connect to workflow engine
+    trigger_mgr = get_trigger_manager()
+    trigger_mgr.set_event_callback(
+        lambda event: _handle_trigger_event(event, engine)
+    )
+    try:
+        loaded = await trigger_mgr.load_from_db(db_session=None)
+        print(f"[startup] Trigger manager ready ({loaded} trigger(s) loaded)")
+    except Exception as e:
+        print(f"[startup] Trigger manager warning: {e}")
 
     # Recover interrupted executions from previous run
     try:
@@ -49,19 +66,19 @@ async def lifespan(app: FastAPI):
         results = await recovery_svc.recover_all()
         recovered = sum(1 for r in results if r.recovered)
         if recovered > 0:
-            print(f"🔄 Recovered {recovered} interrupted execution(s)")
+            print(f"[startup] Recovered {recovered} interrupted execution(s)")
         else:
-            print("✅ No interrupted executions to recover")
+            print("[startup] No interrupted executions to recover")
     except Exception as e:
-        print(f"⚠️  Recovery scan skipped: {e}")
+        print(f"[startup] Recovery scan skipped: {e}")
 
-    print(f"🚀 {settings.APP_NAME} v{settings.APP_VERSION} started")
+    print(f"[startup] {settings.APP_NAME} v{settings.APP_VERSION} started ({settings.ENVIRONMENT})")
     yield
     # Shutdown
     await integration_registry.stop_health_monitor()
     if claude.is_connected:
         await claude.disconnect()
-    print("👋 Application shutting down...")
+    print("[shutdown] Application shutting down...")
 
 
 def create_app() -> FastAPI:
@@ -87,20 +104,35 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Register API routes
+    # Root health check (unversioned — for load balancers / k8s probes)
     app.include_router(health.router, prefix="/api", tags=["Health"])
-    app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
-    app.include_router(users.router, prefix="/api/users", tags=["Users"])
-    app.include_router(workflows.router, prefix="/api/workflows", tags=["Workflows"])
-    app.include_router(executions.router, prefix="/api/executions", tags=["Executions"])
-    app.include_router(agents.router, prefix="/api/agents", tags=["Agents"])
-    app.include_router(credentials.router, prefix="/api/credentials", tags=["Credentials"])
-    app.include_router(schedules.router, prefix="/api/schedules", tags=["Schedules"])
-    app.include_router(analytics.router, prefix="/api/analytics", tags=["Analytics"])
-    app.include_router(ai.router, prefix="/api/ai", tags=["AI - Claude Integration"])
-    app.include_router(integrations_routes.router, prefix="/api/integrations", tags=["External Integrations"])
+
+    # Versioned API — all business endpoints under /api/v1
+    app.include_router(api_v1_router, prefix=settings.API_V1_PREFIX)
 
     return app
+
+
+async def _handle_trigger_event(event, engine) -> str:
+    """Bridge between TriggerManager and WorkflowEngine.
+
+    Called when a trigger fires. Creates an execution and runs the workflow.
+
+    Args:
+        event: TriggerEvent from the trigger manager
+        engine: WorkflowEngine instance
+
+    Returns:
+        execution_id
+    """
+    from uuid import uuid4
+    execution_id = str(uuid4())
+
+    # TODO: Load workflow definition from DB
+    # TODO: Create Execution record in DB
+    # TODO: Run engine.execute() in background task
+
+    return execution_id
 
 
 app = create_app()

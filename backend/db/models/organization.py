@@ -79,3 +79,9 @@ class Organization(BaseModel):
         cascade="all, delete-orphan",
         lazy="selectin",
     )
+    triggers: Mapped[list["Trigger"]] = relationship(
+        "Trigger",
+        back_populates="organization",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )

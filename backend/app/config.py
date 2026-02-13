@@ -11,7 +11,9 @@ class Settings(BaseSettings):
     # API Settings
     APP_NAME: str = "RPA Automation Engine"
     APP_VERSION: str = "1.0.0"
+    API_V1_PREFIX: str = "/api/v1"
     DEBUG: bool = False
+    ENVIRONMENT: str = "development"  # development, staging, production
 
     # Server Settings
     HOST: str = "0.0.0.0"
@@ -21,6 +23,9 @@ class Settings(BaseSettings):
     # Database Settings
     DATABASE_URL: str = "sqlite+aiosqlite:///./test.db"
     SQLALCHEMY_ECHO: bool = False
+    DB_POOL_SIZE: int = 20
+    DB_MAX_OVERFLOW: int = 10
+    DB_POOL_TIMEOUT: int = 30
 
     # Redis Settings
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -47,10 +52,29 @@ class Settings(BaseSettings):
     )
 
     # CORS Settings
-    ALLOWED_ORIGINS: list = ["http://localhost:3000", "http://localhost:8080"]
+    ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:8080"
     ALLOW_CREDENTIALS: bool = True
     ALLOW_METHODS: list = ["*"]
     ALLOW_HEADERS: list = ["*"]
+
+    # Logging
+    LOG_LEVEL: str = "INFO"
+    LOG_FORMAT: str = "json"  # json or text
+
+    @property
+    def is_development(self) -> bool:
+        """Check if running in development mode."""
+        return self.ENVIRONMENT == "development"
+
+    @property
+    def is_production(self) -> bool:
+        """Check if running in production mode."""
+        return self.ENVIRONMENT == "production"
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        """Parse ALLOWED_ORIGINS string into a list."""
+        return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",") if origin.strip()]
 
     class Config:
         """Pydantic config."""

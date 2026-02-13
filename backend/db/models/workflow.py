@@ -75,3 +75,9 @@ class Workflow(BaseModel):
         cascade="all, delete-orphan",
         lazy="selectin",
     )
+    triggers: Mapped[list["Trigger"]] = relationship(
+        "Trigger",
+        back_populates="workflow",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
