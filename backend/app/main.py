@@ -6,8 +6,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from api.routes import auth, health, workflows, executions, agents, users, credentials, schedules, analytics
+from api.routes import auth, health, workflows, executions, agents, users, credentials, schedules, analytics, ai
 from db.database import init_db
+from integrations.claude_client import get_claude_client
 
 
 @asynccontextmanager
@@ -16,9 +17,19 @@ async def lifespan(app: FastAPI):
     # Startup
     settings = get_settings()
     await init_db()
-    print(f"🚀 {settings.APP_NAME} v{settings.APP_VERSION} started ({settings.ENVIRONMENT})")
+
+    # Connect to Claude AI
+    claude = await get_claude_client()
+    if claude.is_configured:
+        print(f"🤖 Claude AI connected (model: {settings.CLAUDE_MODEL})")
+    else:
+        print("⚠️  Claude AI not configured (set ANTHROPIC_API_KEY to enable)")
+
+    print(f"🚀 {settings.APP_NAME} v{settings.APP_VERSION} started")
     yield
     # Shutdown
+    if claude.is_connected:
+        await claude.disconnect()
     print("👋 Application shutting down...")
 
 
@@ -55,6 +66,7 @@ def create_app() -> FastAPI:
     app.include_router(credentials.router, prefix="/api/credentials", tags=["Credentials"])
     app.include_router(schedules.router, prefix="/api/schedules", tags=["Schedules"])
     app.include_router(analytics.router, prefix="/api/analytics", tags=["Analytics"])
+    app.include_router(ai.router, prefix="/api/ai", tags=["AI - Claude Integration"])
 
     return app
 

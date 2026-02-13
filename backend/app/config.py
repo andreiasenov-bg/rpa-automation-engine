@@ -31,6 +31,21 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
+    # Claude AI Settings
+    ANTHROPIC_API_KEY: str = ""
+    CLAUDE_MODEL: str = "claude-sonnet-4-5-20250929"
+    CLAUDE_MAX_TOKENS: int = 4096
+    CLAUDE_TEMPERATURE: float = 0.3
+    CLAUDE_TIMEOUT: int = 120
+    CLAUDE_MAX_RETRIES: int = 3
+    CLAUDE_RETRY_DELAY: float = 1.0
+    CLAUDE_SYSTEM_PROMPT: str = (
+        "You are an AI assistant integrated into an RPA automation engine. "
+        "You help analyze data, make decisions, process documents, "
+        "generate content, and provide intelligent automation support. "
+        "Be precise, structured, and action-oriented in your responses."
+    )
+
     # CORS Settings
     ALLOWED_ORIGINS: list = ["http://localhost:3000", "http://localhost:8080"]
     ALLOW_CREDENTIALS: bool = True
