@@ -348,10 +348,129 @@ rpa-automation-engine/
 - **Auth flow**: JWT (access 30min + refresh 7d), get_current_active_user verifies DB
 - **All routes**: use get_current_active_user (DB-verified) instead of raw get_current_user
 
+## Checkpoint #10 — React Frontend SPA (Сесия 4)
+**Дата**: 2026-02-13
+**Какво е направено**:
+
+### 10a. Project Setup
+- **Vite 7 + React 19 + TypeScript** scaffold (replaced old empty skeleton)
+- **Dependencies**: react-router-dom 7, @tanstack/react-query 5, axios, zustand 5, reactflow 11, lucide-react, tailwindcss 4, clsx
+- **vite.config.ts**: Tailwind CSS 4 plugin, `@/` path alias, proxy `/api` → `http://localhost:8000`
+- **tsconfig.app.json**: path aliases, strict mode, bundler moduleResolution
+
+### 10b. API Layer
+- **`api/client.ts`** — Axios HTTP client with JWT interceptors:
+  - Request: attaches `Authorization: Bearer` header from localStorage
+  - Response: 401 → auto-refresh access token via refresh token; failed queue mechanism; redirect to /login on refresh failure
+- **`api/auth.ts`** — login, register, me, refresh
+- **`api/workflows.ts`** — list, get, create, update, delete, publish, archive, execute
+- **`api/executions.ts`** — list, get, logs, retry, cancel
+
+### 10c. State Management
+- **`stores/authStore.ts`** — Zustand store:
+  - State: user, isAuthenticated, isLoading, error
+  - Actions: login, register, logout, loadUser, clearError
+  - Persists JWT tokens in localStorage
+
+### 10d. Layout Components
+- **`components/layout/Sidebar.tsx`** — Navigation sidebar with NavLink active state, lucide-react icons, user email, logout button
+- **`components/layout/AppLayout.tsx`** — Sidebar + `<Outlet />` (React Router nested routes)
+- **`components/layout/ProtectedRoute.tsx`** — Redirects to /login if not authenticated
+
+### 10e. Pages
+- **`pages/LoginPage.tsx`** — Email/password form, error display, loading spinner, link to register
+- **`pages/RegisterPage.tsx`** — Full registration: first/last name, org name, email, password + confirm, client-side validation (min 8 chars, match passwords)
+- **`pages/DashboardPage.tsx`** — Stats grid (6 cards: workflows, active, runs, running, completed, failed) + recent executions list with status badges, durations, relative timestamps
+- **`pages/WorkflowListPage.tsx`** — Paginated table with search, status badges, action menu (edit, execute, publish, archive, delete), "New Workflow" creates and navigates to editor
+- **`pages/WorkflowEditorPage.tsx`** — Visual DAG editor with React Flow:
+  - 10 task types in palette (web scraping, API request, form fill, email, database, file ops, script, condition, loop, delay)
+  - Custom StepNode component with icon + color coding
+  - Add/delete/connect steps, drag-drop positioning
+  - Save, publish, execute toolbar
+  - Dirty state indicator, step count, MiniMap, Background grid, Controls
+  - Bidirectional conversion: backend WorkflowStep[] ↔ React Flow Node[]/Edge[]
+- **`pages/ExecutionsPage.tsx`** — Expandable execution rows with:
+  - Status filter tabs (All/pending/running/completed/failed/cancelled)
+  - Auto-refresh every 5s when running/pending executions exist
+  - Log viewer per execution (monospace terminal-style, color-coded levels)
+  - Retry/cancel actions
+  - Pagination
+
+### 10f. Routing
+- **`App.tsx`** — React Router v7 with:
+  - Public: /login, /register (redirect to / if authenticated)
+  - Protected (nested under AppLayout): /, /workflows, /workflows/:id/edit, /executions, /triggers, /users, /settings
+  - Placeholder pages for triggers, users, settings
+  - QueryClientProvider (React Query)
+- **`main.tsx`** — StrictMode + createRoot entry
+
+### 10g. Build Verification
+- `tsc -b` — zero errors
+- `vite build` — production bundle: 485 KB JS (156 KB gzip) + 30 KB CSS (6.6 KB gzip)
+
+---
+
+## Файлова структура (текущо състояние)
+```
+rpa-automation-engine/
+├── SESSION_LOG.md, README.md, ROADMAP.md
+├── docker-compose.yml (YAML anchors, multi-service)
+├── backend/
+│   ├── Dockerfile, requirements.txt, pytest.ini
+│   ├── alembic.ini, alembic/
+│   ├── app/ (main.py, config.py, dependencies.py)
+│   ├── api/
+│   │   ├── v1/router.py (15 route groups)
+│   │   ├── routes/ — ALL CORE ROUTES WIRED TO SERVICES
+│   │   ├── schemas/, websockets/
+│   ├── core/ (security, middleware, logging, exceptions)
+│   ├── db/ (base.py, database.py, models/ 17+)
+│   ├── integrations/ (claude_client, registry)
+│   ├── notifications/ (channels × 4, manager)
+│   ├── services/ (base, auth, user, workflow, trigger)
+│   ├── scripts/ (seed.py, entrypoint.sh)
+│   ├── tasks/ (15+ types)
+│   ├── triggers/ (base, manager, handlers × 3)
+│   ├── worker/ (celery_app, tasks × 5)
+│   ├── workflow/ (checkpoint, recovery, engine)
+│   └── tests/ (conftest, 5 test modules)
+├── frontend/                              ← NEW (Checkpoint #10)
+│   ├── package.json, vite.config.ts
+│   ├── tsconfig.json, tsconfig.app.json, tsconfig.node.json
+│   ├── index.html
+│   └── src/
+│       ├── main.tsx, App.tsx, index.css
+│       ├── api/
+│       │   ├── client.ts (JWT interceptors, auto-refresh)
+│       │   ├── auth.ts, workflows.ts, executions.ts
+│       ├── stores/
+│       │   └── authStore.ts (Zustand)
+│       ├── types/
+│       │   └── index.ts (User, Workflow, Execution, Trigger, etc.)
+│       ├── components/layout/
+│       │   ├── Sidebar.tsx, AppLayout.tsx, ProtectedRoute.tsx
+│       └── pages/
+│           ├── LoginPage.tsx, RegisterPage.tsx
+│           ├── DashboardPage.tsx
+│           ├── WorkflowListPage.tsx
+│           ├── WorkflowEditorPage.tsx (React Flow DAG editor)
+│           └── ExecutionsPage.tsx
+```
+
+## Технически бележки
+- **Git**: `git push` директно с token в URL
+- **Git credentials**: `~/.git-credentials` с token `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`
+- **DB**: SQLite + aiosqlite (dev/test), PostgreSQL + asyncpg (prod)
+- **API**: `/api/v1/` prefix, 15 route groups, 70+ endpoints (5 core groups fully wired)
+- **Frontend**: React 19 + TypeScript + Vite 7 + Tailwind CSS 4 + React Flow 11 + Zustand 5
+- **Services**: BaseService, AuthService, UserService, WorkflowService, ExecutionService, TriggerService
+- **Auth flow**: JWT (access 30min + refresh 7d), DB-verified, auto-refresh in frontend
+
 ## Какво следва (приоритет)
-1. **Frontend** — React 18 + TypeScript + Vite + React Flow visual workflow editor
+1. **WebSocket real-time updates** — Live execution status in frontend
 2. **Alembic initial migration** — Generate from current models
-3. **Wire remaining routes** — agents, credentials, schedules, analytics (lower priority)
-4. **Storage/Files** — file upload/download за workflow attachments
+3. **Wire remaining backend routes** — agents, credentials, schedules, analytics
+4. **Triggers/Users/Settings pages** — Complete remaining frontend pages
 5. **Prometheus metrics** — /metrics endpoint за monitoring
 6. **Browser automation tasks** — Playwright-based web scraping/form filling
+7. **Docker frontend** — Add frontend to docker-compose (nginx or Vite preview)
