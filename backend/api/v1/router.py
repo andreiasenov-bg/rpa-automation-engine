@@ -23,6 +23,7 @@ from api.routes import admin
 from api.routes import audit
 from api.routes import templates
 from api.routes import plugins
+from api.routes import export
 from api.routes import integrations as integrations_routes
 from api.routes import triggers
 from api.routes import notifications
@@ -159,4 +160,10 @@ api_v1_router.include_router(
     plugins.router,
     prefix="/plugins",
     tags=["Plugins"],
+)
+
+# Data Export
+api_v1_router.include_router(
+    export.router,
+    tags=["Data Export"],
 )
