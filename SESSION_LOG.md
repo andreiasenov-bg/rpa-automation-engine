@@ -1118,9 +1118,143 @@ rpa-automation-engine/
 - **Docker**: 6 services + monitoring stack (Prometheus, Grafana, exporters)
 - **Общо**: ~120+ файла, ~15,000+ реда код
 
+## Checkpoint #20 — Integration Tests + Data Export + Theme + Version History (Сесия 6)
+**Дата**: 2026-02-13
+**Commit**: `884964b`
+**Какво е направено**:
+
+### 20a. Backend Integration Tests
+- **Нов файл**: `backend/tests/test_api_integration.py` — 30+ API tests:
+  - Health: root, system status
+  - Auth: register, duplicate email, login, wrong password, me (auth required), me (authenticated)
+  - Workflows: list (auth required), list, create, get by ID, nonexistent
+  - Executions: list (auth required), list
+  - Templates: list, get by ID, categories
+  - Plugins: list, reload
+  - Admin: auth required, overview, roles, permissions
+  - Audit: logs, stats, resource types, actions
+  - Rate limiting: headers present, health bypass
+
+### 20b. Data Export API
+- **Нов файл**: `backend/api/routes/export.py`
+  - `GET /export/executions` — CSV/JSON с filters (workflow_id, status, date range)
+  - `GET /export/audit-logs` — CSV/JSON с filters (resource_type, action, date range)
+  - `GET /export/analytics` — CSV/JSON workflow performance metrics
+  - StreamingResponse for large datasets, up to 50K rows
+- **Нов файл**: `frontend/src/api/export.ts` — download helpers with Blob + URL.createObjectURL
+- v1/router.py: 21 route groups
+
+### 20c. Theme System (Dark Mode)
+- **Нов файл**: `frontend/src/stores/themeStore.ts` — Zustand store:
+  - 3 modes: light, dark, system
+  - System theme detection via matchMedia
+  - localStorage persistence
+  - Auto-applies `dark` class to documentElement
+- **Нов файл**: `frontend/src/components/ThemeToggle.tsx` — toggle with Sun/Moon/Monitor icons
+
+### 20d. Workflow Version History
+- **Нов файл**: `frontend/src/components/WorkflowVersionHistory.tsx`
+  - Timeline view with action badges, user emails, relative timestamps
+  - Expandable diff viewer (before/after JSON)
+  - Clone workflow button
+  - Dark mode support
+
+---
+
+## Checkpoint #21 — Improvements & Hardening (Сесия 6)
+**Дата**: 2026-02-13
+**Commit**: `8032bb2`
+**Какво е направено**:
+
+### 21a. Redis Health Check Fix
+- **health.py** — replaced placeholder with real Redis PING via TCP socket
+  - Parses host:port from REDIS_URL, 2s timeout
+  - Sends actual Redis PING command, checks for PONG response
+  - Reports "ok", "degraded", or "unavailable"
+
+### 21b. Dark Mode CSS
+- **index.css** — Tailwind dark mode variant (`@custom-variant dark`)
+  - Dark background (#0f172a), dark text (#e2e8f0)
+  - Dark scrollbar styles
+
+### 21c. Settings Page — Theme Toggle
+- Appearance tab now shows real ThemeToggle component (replaces "coming soon")
+- Density section placeholder for future compact mode
+
+### 21d. Export Button on Executions Page
+- Export CSV button with current status filter support
+
+---
+
+## Файлова структура (текущо състояние)
+```
+rpa-automation-engine/
+├── SESSION_LOG.md, README.md, ROADMAP.md
+├── docker-compose.yml
+├── .github/workflows/ci.yml (local only)
+├── k8s/ (9 manifests)
+├── monitoring/ (Prometheus + Grafana + exporters)
+├── backend/
+│   ├── Dockerfile, requirements.txt, pytest.ini
+│   ├── alembic.ini, alembic/
+│   ├── app/ (main.py, config.py, dependencies.py)
+│   ├── api/
+│   │   ├── v1/router.py (21 route groups)
+│   │   ├── routes/ — 21 ROUTES (ALL FULLY WIRED):
+│   │   │   ├── export.py (CSV/JSON data export)          ← NEW
+│   │   │   ├── + all previous routes
+│   │   ├── schemas/, websockets/
+│   ├── core/
+│   │   ├── security, middleware, logging, exceptions, metrics
+│   │   ├── rate_limit.py, api_keys.py, plugin_system.py
+│   ├── db/, integrations/, notifications/, services/
+│   ├── scripts/, tasks/, triggers/, worker/, workflow/
+│   └── tests/ (8 test modules including integration tests)
+├── frontend/
+│   ├── Dockerfile, nginx.conf, playwright.config.ts
+│   ├── e2e/ (4 spec files + helpers)
+│   └── src/
+│       ├── api/ (17 modules: + export)
+│       ├── hooks/ (useWebSocket)
+│       ├── stores/ (authStore, toastStore, themeStore)    ← NEW
+│       ├── components/
+│       │   ├── ErrorBoundary, ToastContainer, layout/
+│       │   ├── ThemeToggle.tsx                             ← NEW
+│       │   ├── WorkflowVersionHistory.tsx                  ← NEW
+│       └── pages/ (17 pages)
+```
+
+## Технически бележки
+- **Git**: `git push` директно с token в URL
+- **Git credentials**: `~/.git-credentials` с token `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`
+- **DB**: SQLite + aiosqlite (dev/test), PostgreSQL + asyncpg (prod)
+- **API**: `/api/v1/` prefix, 21 route groups, 110+ endpoints, ALL FULLY WIRED
+- **Frontend**: React 19 + TypeScript + Vite 7 + Tailwind 4 + React Flow 11 + Zustand 5
+- **WebSocket**: `/ws?token=<jwt>`, auto-reconnect, live execution status
+- **Metrics**: `/metrics` Prometheus endpoint + Grafana dashboard (18 panels)
+- **Rate Limiting**: Sliding window, per-IP/per-user, group-based
+- **API Keys**: SHA-256, header/query auth, permission scoping
+- **Plugin System**: Entry point + local directory discovery, hook system
+- **Vault**: AES-256 (Fernet), audit-logged
+- **Browser Tasks**: 5 Playwright tasks
+- **Templates**: 8 built-in workflow templates
+- **Audit**: Full trail with diff viewer
+- **Data Export**: CSV/JSON for executions, audit logs, analytics
+- **Theme**: Light/Dark/System toggle with Tailwind dark variant
+- **Version History**: Timeline view with diff viewer, clone support
+- **Agents**: Full CRUD, heartbeat, token rotation
+- **Notifications**: 4 channels, 6 event types
+- **K8s**: Full production manifests with HPA, TLS, PVC
+- **Monitoring**: Prometheus + Grafana + 12 alert rules + Redis/Postgres exporters
+- **E2E Tests**: Playwright with 24 test cases
+- **Integration Tests**: 30+ API integration tests
+- **Error handling**: ErrorBoundary + Toast notifications
+- **Docker**: 6 services + monitoring stack
+- **Общо**: ~130+ файла, ~17,000+ реда код
+
 ## Какво следва (приоритет)
-1. **Backend integration tests** — Full API integration tests with test DB
-2. **Data export** — CSV/Excel export for executions and analytics
-3. **Workflow versioning UI** — Version history browser in editor
-4. **Dark mode** — Theme toggle in settings
-5. **i18n** — Internationalization support (BG + EN)
+1. **i18n** — Internationalization support (BG + EN)
+2. **RBAC enforcement** — Permission checks on all admin routes
+3. **Bulk operations** — Bulk execute/archive/delete workflows
+4. **Webhook signatures** — HMAC signing for outbound webhooks
+5. **OpenAPI docs** — Auto-generated API documentation page
