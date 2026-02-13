@@ -19,6 +19,7 @@ export default defineConfig({
           'react-vendor': ['react', 'react-dom', 'react-router-dom'],
           'query': ['@tanstack/react-query'],
           'flow': ['reactflow'],
+          'charts': ['recharts'],
           'ui': ['lucide-react', 'zustand', 'axios'],
         },
       },
