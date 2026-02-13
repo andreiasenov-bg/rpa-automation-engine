@@ -21,6 +21,7 @@ import { executionApi } from '@/api/executions';
 import { exportApi } from '@/api/export';
 import { useWebSocket, type ExecutionStatusPayload } from '@/hooks/useWebSocket';
 import { useLocale } from '@/i18n';
+import LiveLogViewer from '@/components/LiveLogViewer';
 
 /* ─── Status config ─── */
 const STATUS_CONFIG: Record<string, { icon: React.ElementType; color: string; bg: string; border: string }> = {
@@ -181,7 +182,7 @@ function ExecutionRow({
               {execution.error_message}
             </div>
           )}
-          <LogViewer executionId={execution.id} />
+          <LiveLogViewer executionId={execution.id} isRunning={execution.status === 'running'} />
         </div>
       )}
     </div>

@@ -25,6 +25,6 @@ export const workflowApi = {
   archive: (id: string) =>
     client.post<Workflow>(`/workflows/${id}/archive`).then((r) => r.data),
 
-  execute: (id: string) =>
-    client.post<Execution>(`/workflows/${id}/execute`).then((r) => r.data),
+  execute: (id: string, variables?: Record<string, unknown>) =>
+    client.post<Execution>(`/workflows/${id}/execute`, variables ? { variables } : undefined).then((r) => r.data),
 };

@@ -39,6 +39,8 @@ import {
 } from 'lucide-react';
 import { workflowApi } from '@/api/workflows';
 import WorkflowVariablesPanel from '@/components/WorkflowVariablesPanel';
+import StepConfigEditor from '@/components/StepConfigEditor';
+import ExecutionRunDialog from '@/components/ExecutionRunDialog';
 import type { Workflow, WorkflowStep } from '@/types';
 
 /* ─── Task palette ─── */
@@ -145,6 +147,8 @@ export default function WorkflowEditorPage() {
   const [dirty, setDirty] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
   const [showVariables, setShowVariables] = useState(false);
+  const [selectedStep, setSelectedStep] = useState<string | null>(null);
+  const [showRunDialog, setShowRunDialog] = useState(false);
   const counterRef = useRef(0);
 
   // Fetch workflow
@@ -240,6 +244,20 @@ export default function WorkflowEditorPage() {
     }
   };
 
+  const handleNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
+    setSelectedStep(node.id);
+  }, []);
+
+  const handleStepConfigSave = useCallback((stepId: string, updates: { label: string; config: Record<string, unknown>; on_error?: string }) => {
+    setNodes((nds) =>
+      nds.map((n) =>
+        n.id === stepId
+          ? { ...n, data: { ...n.data, label: updates.label, config: updates.config } }
+          : n
+      )
+    );
+  }, [setNodes]);
+
   const handleDeleteSelected = () => {
     setNodes((nds) => nds.filter((n) => !n.selected));
     setEdges((eds) => {
@@ -330,7 +348,7 @@ export default function WorkflowEditorPage() {
           )}
           {workflow?.status === 'published' && (
             <button
-              onClick={handleExecute}
+              onClick={() => setShowRunDialog(true)}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition"
             >
               <Play className="w-3.5 h-3.5" />
@@ -348,6 +366,7 @@ export default function WorkflowEditorPage() {
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
+          onNodeClick={handleNodeClick}
           nodeTypes={nodeTypes}
           fitView
           deleteKeyCode={['Backspace', 'Delete']}
@@ -410,7 +429,37 @@ export default function WorkflowEditorPage() {
         {showVariables && id && (
           <WorkflowVariablesPanel workflowId={id} onClose={() => setShowVariables(false)} />
         )}
+
+        {/* Step config editor */}
+        {selectedStep && !showVariables && (() => {
+          const node = nodes.find((n) => n.id === selectedStep);
+          if (!node) return null;
+          return (
+            <StepConfigEditor
+              step={{
+                id: node.id,
+                label: node.data.label as string,
+                type: node.data.type as string,
+                config: (node.data.config as Record<string, unknown>) || {},
+                color: node.data.color as string,
+              }}
+              allStepIds={nodes.map((n) => n.id)}
+              onSave={handleStepConfigSave}
+              onClose={() => setSelectedStep(null)}
+            />
+          );
+        })()}
       </div>
+
+      {/* Run dialog */}
+      {showRunDialog && id && workflow && (
+        <ExecutionRunDialog
+          workflowId={id}
+          workflowName={name}
+          onClose={() => setShowRunDialog(false)}
+          onStarted={() => { setShowRunDialog(false); navigate('/executions'); }}
+        />
+      )}
     </div>
   );
 }
