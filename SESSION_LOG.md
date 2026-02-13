@@ -1863,6 +1863,22 @@ rpa-automation-engine/
 
 ---
 
+## Checkpoint #35 — E2E Tests with Playwright (Сесия 8)
+**Дата**: 2026-02-14
+**Commit**: `dd721dc`
+**Какво е направено**:
+- 6 spec файла с 51 Playwright теста (всички минават на Chromium)
+- `auth.spec.ts` (6 теста): login form, validation, redirect, register, login flow, error handling
+- `dashboard.spec.ts` (11 теста): stat cards, Quick Actions, Success Rate ring, System Health, recent executions, sidebar, navigation
+- `workflows.spec.ts` (14 теста): list display, count, create button, statuses, editor, canvas, step nodes, palette, drag & drop, Save/Variables buttons
+- `executions.spec.ts` (9 теста): list, statuses, execution IDs, detail links, retry badges, detail page, status badge, step timeline, metadata
+- `templates.spec.ts` (6 теста): page display, template cards, difficulty badges, search/filter, step count, tags
+- `admin.spec.ts` (6 теста): overview, stat cards, roles tab, create role button, permissions tab, admin role protection
+- Shared helpers: `mockAuthToken`, `mockUser`, `mockApiRoute`, `setupDashboardMocks`, all mock data constants
+- @playwright/test + playwright installed as devDependencies
+
+---
+
 ## Какво следва (приоритет)
 1. ~~Lazy loading~~ ✅
 2. ~~Global search~~ ✅
@@ -1875,6 +1891,6 @@ rpa-automation-engine/
 9. ~~Drag & drop step reorder~~ ✅
 10. ~~Execution detail page~~ ✅
 11. ~~Dashboard widgets~~ ✅
-12. **E2E tests** — Playwright tests for critical flows
+12. ~~E2E tests~~ ✅
 13. **Docker production config** — Multi-stage Dockerfile, nginx reverse proxy
 14. **Documentation** — API docs, deployment guide, user manual
