@@ -1894,7 +1894,18 @@ rpa-automation-engine/
 
 ---
 
-## Какво следва (приоритет)
+## Checkpoint #37 — Documentation (Сесия 8)
+**Дата**: 2026-02-14
+**Commit**: `babf940`
+**Какво е направено**:
+- `docs/API.md` — Пълен API reference за 127 HTTP + 1 WebSocket endpoint
+- `docs/DEPLOYMENT.md` — Docker setup, production config, scaling, backup, SSL, troubleshooting
+- `docs/USER_GUIDE.md` — User guide за всички функции: workflows, executions, agents, credentials, schedules, templates, admin, settings
+- `README.md` — Обновен с пълен tech stack, project structure, docs линкове, Makefile commands
+
+---
+
+## Roadmap — Завършен ✅
 1. ~~Lazy loading~~ ✅
 2. ~~Global search~~ ✅
 3. ~~Notification center~~ ✅
@@ -1906,6 +1917,14 @@ rpa-automation-engine/
 9. ~~Drag & drop step reorder~~ ✅
 10. ~~Execution detail page~~ ✅
 11. ~~Dashboard widgets~~ ✅
-12. ~~E2E tests~~ ✅
+12. ~~E2E tests~~ ✅ (51 Playwright теста)
 13. ~~Docker production config~~ ✅
-14. **Documentation** — API docs, deployment guide, user manual
+14. ~~Documentation~~ ✅
+
+### Потенциални подобрения (бъдещи)
+- Execution detail page: step-by-step view подобрения
+- Drag & drop: edge connections, step reordering
+- Dashboard widget customization
+- E2E tests с реална DB (integration tests)
+- Kubernetes Helm chart
+- CI/CD pipeline (GitHub Actions)
