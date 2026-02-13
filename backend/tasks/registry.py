@@ -12,6 +12,7 @@ from tasks.implementations.ai_task import AI_TASK_TYPES
 from tasks.implementations.integration_task import INTEGRATION_TASK_TYPES
 from tasks.implementations.http_task import HTTP_TASK_TYPES
 from tasks.implementations.script_task import SCRIPT_TASK_TYPES
+from tasks.implementations.browser_task import BROWSER_TASK_TYPES
 
 
 class TaskRegistry:
@@ -37,6 +38,10 @@ class TaskRegistry:
 
         # Script & data tasks
         for task_type, task_class in SCRIPT_TASK_TYPES.items():
+            self.register(task_type, task_class)
+
+        # Browser automation tasks (Playwright)
+        for task_type, task_class in BROWSER_TASK_TYPES.items():
             self.register(task_type, task_class)
 
     def register(self, task_type: str, task_class: Type[BaseTask]):

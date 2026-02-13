@@ -747,58 +747,112 @@ rpa-automation-engine/
 
 ---
 
+## Checkpoint #14 — Browser Tasks, Audit Log, Templates (Сесия 4)
+**Дата**: 2026-02-13
+**Commit**: (pending)
+**Какво е направено**:
+
+### 14a. Playwright Browser Automation Tasks
+- **Нов файл**: `backend/tasks/implementations/browser_task.py` (~520 реда)
+  - `WebScrapeTask` — CSS/XPath selectors, cookies, proxy, custom headers, JS execution
+  - `FormFillTask` — fill, select, check/uncheck, click, credential substitution, screenshot after submit
+  - `ScreenshotTask` — full page or element, PNG/JPEG, viewport config, save to file + base64
+  - `PdfGenerateTask` — A4/Letter/Legal, margins, headers/footers, background graphics
+  - `PageInteractionTask` — multi-step sequences (goto, click, fill, press, wait, scroll, evaluate, screenshot)
+- Task registry updated: 20+ task types total
+
+### 14b. Audit Log API + Frontend Page
+- **Нов файл**: `backend/api/routes/audit.py` — read-only audit trail API
+  - `GET /audit-logs` — paginated, filterable (resource_type, action, user, date range, search)
+  - `GET /audit-logs/stats` — action & resource type breakdown
+  - `GET /audit-logs/resource-types` — distinct types for filter dropdown
+  - `GET /audit-logs/actions` — distinct actions for filter dropdown
+  - JOIN with User for user_email display
+- **Нов файл**: `frontend/src/api/audit.ts`
+- **Нов файл**: `frontend/src/pages/AuditLogPage.tsx`
+  - Stats cards (total, creates, updates, deletes)
+  - Searchable + filterable (action, resource type dropdowns)
+  - Expandable rows with diff viewer (old/new values side-by-side)
+  - Relative timestamps, IP address badges
+
+### 14c. Workflow Templates System
+- **Нов файл**: `backend/api/routes/templates.py` — template library API
+  - 8 built-in templates: Web Scraper, API Monitor, Form Bot, Data Pipeline, PDF Report, Visual Regression, Multi-Page Scraper, AI Classifier
+  - `GET /templates` — list with category/difficulty/search filters
+  - `GET /templates/categories` — distinct categories
+  - `GET /templates/{id}` — full template with step details
+  - `POST /templates/{id}/instantiate` — create workflow from template
+- **Нов файл**: `frontend/src/api/templates.ts`
+- **Нов файл**: `frontend/src/pages/TemplatesPage.tsx`
+  - Card grid layout with hover effects
+  - Category, difficulty, search filters
+  - Difficulty badges (beginner/intermediate/advanced)
+  - Instantiate modal — name + description → create workflow → navigate to editor
+- v1/router.py updated: 18 route groups, 90+ endpoints
+
+### 14d. Frontend Updates
+- Sidebar: 10 nav items (+ Templates, Audit Log)
+- App.tsx: 13 pages total + 2 new routes
+- Build: zero TypeScript errors, clean vite build
+
+---
+
 ## Файлова структура (текущо състояние)
 ```
 rpa-automation-engine/
 ├── SESSION_LOG.md, README.md, ROADMAP.md
 ├── docker-compose.yml
-├── .github/workflows/ci.yml                    ← NEW
+├── .github/workflows/ci.yml (local only)
 ├── backend/
 │   ├── Dockerfile, requirements.txt, pytest.ini
 │   ├── alembic.ini, alembic/
 │   ├── app/ (main.py + metrics + ws, config.py, dependencies.py)
 │   ├── api/
-│   │   ├── v1/router.py (16 route groups)
-│   │   ├── routes/ — ALL 16 ROUTE GROUPS FULLY WIRED
+│   │   ├── v1/router.py (18 route groups)
+│   │   ├── routes/ — 18 ROUTES: health, auth, users, workflows, executions,
+│   │   │             agents, credentials, schedules, analytics, dashboard,
+│   │   │             ai, integrations, triggers, notifications, task_types,
+│   │   │             audit (NEW), templates (NEW), ws
 │   │   ├── schemas/, websockets/
 │   ├── core/
 │   │   ├── security, middleware, logging, exceptions
-│   │   └── metrics.py (Prometheus)              ← NEW
+│   │   └── metrics.py (Prometheus)
 │   ├── db/, integrations/, notifications/, services/
-│   ├── scripts/, tasks/, triggers/, worker/, workflow/
+│   ├── scripts/, tasks/ (+ browser_task.py NEW), triggers/, worker/, workflow/
 │   └── tests/
 ├── frontend/
 │   ├── Dockerfile, nginx.conf
 │   └── src/
-│       ├── api/ (10 modules: client, auth, workflows, executions,
-│       │         triggers, users, dashboard, credentials, schedules, analytics)
+│       ├── api/ (12 modules: + audit, templates)
 │       ├── hooks/ (useWebSocket)
 │       ├── stores/ (authStore)
-│       ├── components/layout/ (Sidebar + 2 nav items, AppLayout, ProtectedRoute)
-│       └── pages/ (11 pages):
+│       ├── components/layout/ (Sidebar 10 items)
+│       └── pages/ (13 pages):
 │           ├── Login, Register, Dashboard
 │           ├── WorkflowList, WorkflowEditor (React Flow)
-│           ├── Executions (+ live WebSocket updates)
-│           ├── Triggers, Schedules (NEW), Credentials (NEW)
-│           ├── Users, Settings
+│           ├── Executions (+ live WebSocket)
+│           ├── Templates (NEW), Triggers, Schedules, Credentials
+│           ├── Users, AuditLog (NEW), Settings
 ```
 
 ## Технически бележки
 - **Git**: `git push` директно с token в URL
 - **Git credentials**: `~/.git-credentials` с token `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`
 - **DB**: SQLite + aiosqlite (dev/test), PostgreSQL + asyncpg (prod)
-- **API**: `/api/v1/` prefix, 16 route groups, 80+ endpoints, ALL FULLY WIRED
+- **API**: `/api/v1/` prefix, 18 route groups, 90+ endpoints, ALL FULLY WIRED
 - **Frontend**: React 19 + TypeScript + Vite 7 + Tailwind 4 + React Flow 11 + Zustand 5
-- **WebSocket**: `/ws?token=<jwt>`, auto-reconnect, live execution status on Executions page
-- **Metrics**: `/metrics` Prometheus endpoint, HTTP request count/duration per path
-- **Vault**: AES-256 (Fernet), audit-logged, reveal on demand in UI
-- **CI/CD**: GitHub Actions — lint, typecheck, test, build, docker (5 jobs)
-- **Docker**: 6 services: postgres, redis, backend, celery-worker, celery-beat, frontend
+- **WebSocket**: `/ws?token=<jwt>`, auto-reconnect, live execution status
+- **Metrics**: `/metrics` Prometheus endpoint
+- **Vault**: AES-256 (Fernet), audit-logged
+- **Browser Tasks**: Playwright (web_scrape, form_fill, screenshot, pdf_generate, page_interaction)
+- **Templates**: 8 built-in workflow templates with instant creation
+- **Audit**: Full trail with diff viewer, stats, filtering
+- **Docker**: 6 services (postgres, redis, backend, celery-worker, celery-beat, frontend)
 
 ## Какво следва (приоритет)
-1. **Browser automation tasks** — Playwright-based web scraping/form filling
-2. **E2E tests** — Playwright for frontend integration tests
-3. **Admin panel** — Multi-tenant admin with role/permission management
-4. **Kubernetes manifests** — k8s deployment configs
-5. **Notification preferences UI** — User-level notification settings
-6. **Workflow templates** — Pre-built workflow templates marketplace
+1. **E2E tests** — Playwright for frontend integration tests
+2. **Admin panel** — Multi-tenant admin with role/permission management
+3. **Kubernetes manifests** — k8s deployment configs
+4. **Notification preferences UI** — User-level notification settings
+5. **Agent management UI** — Distributed agent monitoring page
+6. **Workflow versioning UI** — Version history, rollback, diff view

@@ -19,6 +19,8 @@ from api.routes import (
     ai,
     dashboard,
 )
+from api.routes import audit
+from api.routes import templates
 from api.routes import integrations as integrations_routes
 from api.routes import triggers
 from api.routes import notifications
@@ -127,4 +129,18 @@ api_v1_router.include_router(
     task_types.router,
     prefix="/task-types",
     tags=["Task Types"],
+)
+
+# Audit Logs
+api_v1_router.include_router(
+    audit.router,
+    prefix="/audit-logs",
+    tags=["Audit Logs"],
+)
+
+# Workflow Templates
+api_v1_router.include_router(
+    templates.router,
+    prefix="/templates",
+    tags=["Workflow Templates"],
 )

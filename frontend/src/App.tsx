@@ -19,6 +19,8 @@ import UsersPage from '@/pages/UsersPage';
 import SettingsPage from '@/pages/SettingsPage';
 import CredentialsPage from '@/pages/CredentialsPage';
 import SchedulesPage from '@/pages/SchedulesPage';
+import AuditLogPage from '@/pages/AuditLogPage';
+import TemplatesPage from '@/pages/TemplatesPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -63,6 +65,8 @@ function AppRoutes() {
         <Route path="credentials" element={<CredentialsPage />} />
         <Route path="users" element={<UsersPage />} />
         <Route path="settings" element={<SettingsPage />} />
+        <Route path="templates" element={<TemplatesPage />} />
+        <Route path="audit-log" element={<AuditLogPage />} />
       </Route>
 
       {/* Catch-all */}

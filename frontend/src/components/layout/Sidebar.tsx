@@ -10,6 +10,8 @@ import {
   Settings,
   LogOut,
   Bot,
+  Shield,
+  BookOpen,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 
@@ -17,10 +19,12 @@ const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/workflows', icon: GitBranch, label: 'Workflows' },
   { to: '/executions', icon: Play, label: 'Executions' },
+  { to: '/templates', icon: BookOpen, label: 'Templates' },
   { to: '/triggers', icon: Zap, label: 'Triggers' },
   { to: '/schedules', icon: CalendarClock, label: 'Schedules' },
   { to: '/credentials', icon: Key, label: 'Credentials' },
   { to: '/users', icon: Users, label: 'Users' },
+  { to: '/audit-log', icon: Shield, label: 'Audit Log' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];
 
