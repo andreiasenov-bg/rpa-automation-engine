@@ -35,8 +35,10 @@ import {
   Repeat,
   FolderOpen,
   Search,
+  Variable,
 } from 'lucide-react';
 import { workflowApi } from '@/api/workflows';
+import WorkflowVariablesPanel from '@/components/WorkflowVariablesPanel';
 import type { Workflow, WorkflowStep } from '@/types';
 
 /* ─── Task palette ─── */
@@ -142,6 +144,7 @@ export default function WorkflowEditorPage() {
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
+  const [showVariables, setShowVariables] = useState(false);
   const counterRef = useRef(0);
 
   // Fetch workflow
@@ -290,6 +293,18 @@ export default function WorkflowEditorPage() {
 
         <div className="flex items-center gap-2">
           <button
+            onClick={() => setShowVariables(!showVariables)}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border transition ${
+              showVariables
+                ? 'border-indigo-300 bg-indigo-50 text-indigo-600'
+                : 'border-slate-200 text-slate-500 hover:bg-slate-50'
+            }`}
+            title="Workflow Variables"
+          >
+            <Variable className="w-3.5 h-3.5" />
+            Variables
+          </button>
+          <button
             onClick={handleDeleteSelected}
             className="p-2 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors"
             title="Delete selected"
@@ -390,6 +405,11 @@ export default function WorkflowEditorPage() {
             </div>
           </Panel>
         </ReactFlow>
+
+        {/* Variables panel */}
+        {showVariables && id && (
+          <WorkflowVariablesPanel workflowId={id} onClose={() => setShowVariables(false)} />
+        )}
       </div>
     </div>
   );

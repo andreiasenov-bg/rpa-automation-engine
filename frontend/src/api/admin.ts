@@ -34,6 +34,24 @@ export interface PermissionInfo {
   description: string | null;
 }
 
+export interface UserRolesResponse {
+  user_id: string;
+  email: string;
+  roles: Array<{ id: string; name: string; slug: string; description: string }>;
+}
+
+export interface RoleUsersResponse {
+  role: { id: string; name: string; slug: string };
+  users: Array<{ id: string; email: string; first_name: string; last_name: string; is_active: boolean }>;
+}
+
+export interface BulkAssignResult {
+  success: number;
+  skipped: number;
+  errors: Array<{ user_id: string; error: string }>;
+  role: { id: string; name: string };
+}
+
 export const adminApi = {
   overview: async (): Promise<OrgOverview> => {
     const { data } = await client.get('/admin/overview');
@@ -64,5 +82,34 @@ export const adminApi = {
   permissions: async (): Promise<{ permissions: PermissionInfo[] }> => {
     const { data } = await client.get('/admin/permissions');
     return data;
+  },
+
+  // ─── User-Role Assignment ──────────────────────────────
+  getUserRoles: async (userId: string): Promise<UserRolesResponse> => {
+    const { data } = await client.get(`/user-roles/${userId}/roles`);
+    return data;
+  },
+
+  assignRole: async (userId: string, roleId: string): Promise<void> => {
+    await client.post(`/user-roles/${userId}/roles`, { role_id: roleId });
+  },
+
+  removeRole: async (userId: string, roleId: string): Promise<void> => {
+    await client.delete(`/user-roles/${userId}/roles/${roleId}`);
+  },
+
+  usersByRole: async (roleId: string): Promise<RoleUsersResponse> => {
+    const { data } = await client.get(`/user-roles/by-role/${roleId}`);
+    return data;
+  },
+
+  bulkAssignRole: async (userIds: string[], roleId: string): Promise<BulkAssignResult> => {
+    const { data } = await client.post('/user-roles/bulk-assign', { user_ids: userIds, role_id: roleId });
+    return data;
+  },
+
+  // ─── Role Permission Assignment ────────────────────────
+  updateRolePermissions: async (roleId: string, permissionIds: string[]): Promise<void> => {
+    await client.put(`/admin/roles/${roleId}`, { permission_ids: permissionIds });
   },
 };

@@ -27,6 +27,8 @@ from api.routes import export
 from api.routes import bulk
 from api.routes import agent_tasks
 from api.routes import activity
+from api.routes import user_roles
+from api.routes import workflow_variables
 from api.routes import integrations as integrations_routes
 from api.routes import triggers
 from api.routes import notifications
@@ -189,4 +191,18 @@ api_v1_router.include_router(
     activity.router,
     prefix="/activity",
     tags=["Activity Timeline"],
+)
+
+# User-Role Assignment
+api_v1_router.include_router(
+    user_roles.router,
+    prefix="/user-roles",
+    tags=["User Roles"],
+)
+
+# Workflow Variables
+api_v1_router.include_router(
+    workflow_variables.router,
+    prefix="/workflow-variables",
+    tags=["Workflow Variables"],
 )
