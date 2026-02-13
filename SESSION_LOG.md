@@ -1879,6 +1879,21 @@ rpa-automation-engine/
 
 ---
 
+## Checkpoint #36 — Docker Production Config Polish (Сесия 8)
+**Дата**: 2026-02-14
+**Commit**: `ab40155`
+**Какво е направено**:
+- Multi-stage backend Dockerfile (builder + runtime) — по-малък image без build-essential
+- tini init process за правилно signal handling (SIGTERM/SIGINT)
+- backend/.dockerignore — намален build context
+- Security headers в nginx: X-Frame-Options, X-Content-Type-Options, X-XSS-Protection, Referrer-Policy
+- nginx /health endpoint и защита на hidden файлове
+- Премахнат deprecated `version` ключ от compose файлове
+- Frontend healthcheck в docker-compose.yml
+- Makefile с 15 команди: dev, prod, monitoring, test, migrate, seed, db-shell
+
+---
+
 ## Какво следва (приоритет)
 1. ~~Lazy loading~~ ✅
 2. ~~Global search~~ ✅
@@ -1892,5 +1907,5 @@ rpa-automation-engine/
 10. ~~Execution detail page~~ ✅
 11. ~~Dashboard widgets~~ ✅
 12. ~~E2E tests~~ ✅
-13. **Docker production config** — Multi-stage Dockerfile, nginx reverse proxy
+13. ~~Docker production config~~ ✅
 14. **Documentation** — API docs, deployment guide, user manual
