@@ -4,6 +4,8 @@ import {
   GitBranch,
   Play,
   Zap,
+  CalendarClock,
+  Key,
   Users,
   Settings,
   LogOut,
@@ -16,6 +18,8 @@ const navItems = [
   { to: '/workflows', icon: GitBranch, label: 'Workflows' },
   { to: '/executions', icon: Play, label: 'Executions' },
   { to: '/triggers', icon: Zap, label: 'Triggers' },
+  { to: '/schedules', icon: CalendarClock, label: 'Schedules' },
+  { to: '/credentials', icon: Key, label: 'Credentials' },
   { to: '/users', icon: Users, label: 'Users' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];

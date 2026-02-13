@@ -17,6 +17,8 @@ import ExecutionsPage from '@/pages/ExecutionsPage';
 import TriggersPage from '@/pages/TriggersPage';
 import UsersPage from '@/pages/UsersPage';
 import SettingsPage from '@/pages/SettingsPage';
+import CredentialsPage from '@/pages/CredentialsPage';
+import SchedulesPage from '@/pages/SchedulesPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -57,6 +59,8 @@ function AppRoutes() {
         <Route path="executions" element={<ExecutionsPage />} />
 
         <Route path="triggers" element={<TriggersPage />} />
+        <Route path="schedules" element={<SchedulesPage />} />
+        <Route path="credentials" element={<CredentialsPage />} />
         <Route path="users" element={<UsersPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>

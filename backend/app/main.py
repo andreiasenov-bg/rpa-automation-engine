@@ -19,6 +19,7 @@ from triggers.manager import get_trigger_manager
 from notifications.manager import get_notification_manager
 from core.logging_config import setup_logging
 from core.middleware import RequestTrackingMiddleware, setup_exception_handlers
+from core.metrics import MetricsMiddleware, metrics_router
 
 
 @asynccontextmanager
@@ -105,7 +106,10 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # Request tracking middleware (runs first — outermost)
+    # Prometheus metrics middleware (outermost — measures all requests)
+    app.add_middleware(MetricsMiddleware)
+
+    # Request tracking middleware
     app.add_middleware(RequestTrackingMiddleware)
 
     # CORS middleware
@@ -128,6 +132,9 @@ def create_app() -> FastAPI:
 
     # WebSocket endpoint (not under /api/v1 — mounted directly on the app)
     app.include_router(ws_router)
+
+    # Prometheus metrics (unauthenticated — for scrapers)
+    app.include_router(metrics_router)
 
     return app
 

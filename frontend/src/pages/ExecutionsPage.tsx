@@ -13,9 +13,12 @@ import {
   Ban,
   Activity,
   RotateCcw,
+  Wifi,
+  WifiOff,
 } from 'lucide-react';
 import type { Execution, ExecutionLog } from '@/types';
 import { executionApi } from '@/api/executions';
+import { useWebSocket, type ExecutionStatusPayload } from '@/hooks/useWebSocket';
 
 /* ─── Status config ─── */
 const STATUS_CONFIG: Record<string, { icon: React.ElementType; color: string; bg: string; border: string }> = {
@@ -192,6 +195,9 @@ export default function ExecutionsPage() {
   const [loading, setLoading] = useState(true);
   const perPage = 25;
 
+  // WebSocket: live execution status updates
+  const { readyState, on } = useWebSocket();
+
   const fetchExecutions = useCallback(async () => {
     setLoading(true);
     try {
@@ -221,6 +227,21 @@ export default function ExecutionsPage() {
     const interval = setInterval(() => fetchRef.current(), 5000);
     return () => clearInterval(interval);
   }, [executions]);
+
+  // WebSocket: update execution status in-place when event arrives
+  useEffect(() => {
+    const unsubscribe = on('execution.status_changed', (payload) => {
+      const data = payload as ExecutionStatusPayload;
+      setExecutions((prev) =>
+        prev.map((ex) =>
+          ex.id === data.execution_id
+            ? { ...ex, status: data.status as Execution['status'] }
+            : ex
+        )
+      );
+    });
+    return unsubscribe;
+  }, [on]);
 
   const handleRetry = async (id: string) => {
     try {
@@ -254,13 +275,22 @@ export default function ExecutionsPage() {
             {total} execution{total !== 1 ? 's' : ''} total
           </p>
         </div>
-        <button
-          onClick={fetchExecutions}
-          className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-slate-200 hover:bg-slate-50 transition"
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-3">
+          <span className="inline-flex items-center gap-1.5 text-xs text-slate-400" title={`WebSocket: ${readyState}`}>
+            {readyState === 'open' ? (
+              <><Wifi className="w-3.5 h-3.5 text-emerald-500" /> Live</>
+            ) : (
+              <><WifiOff className="w-3.5 h-3.5 text-slate-400" /> Offline</>
+            )}
+          </span>
+          <button
+            onClick={fetchExecutions}
+            className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-slate-200 hover:bg-slate-50 transition"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* Filters */}

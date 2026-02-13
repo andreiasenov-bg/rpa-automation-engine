@@ -690,10 +690,115 @@ rpa-automation-engine/
 - **Vault**: AES-256 (Fernet), audit-logged access
 - **Docker**: 6 services: postgres, redis, backend, celery-worker, celery-beat, frontend
 
+## Checkpoint #13 — Prometheus, CI/CD, Credentials & Schedules Pages (Сесия 5)
+**Дата**: 2026-02-13
+**Какво е направено**:
+
+### 13a. Prometheus Metrics
+- **`backend/core/metrics.py`** — Lightweight metrics system (no external dependency):
+  - In-process counter/gauge/histogram store with thread-safe access
+  - `MetricsMiddleware` — tracks HTTP request count + duration per method/path/status
+  - UUID normalization in paths (replaces UUIDs with `{id}`)
+  - `GET /metrics` — Prometheus exposition format endpoint
+  - Uptime gauge, bounded histogram memory (max 10K observations)
+  - Wired into `main.py` as outermost middleware
+
+### 13b. GitHub Actions CI/CD Pipeline
+- **`.github/workflows/ci.yml`** — 5-job pipeline:
+  - `backend-lint` — ruff check + format verification
+  - `backend-typecheck` — mypy on core modules
+  - `backend-test` — pytest with SQLite (no external deps needed)
+  - `frontend-lint` — TypeScript type check (`tsc -b`)
+  - `frontend-build` — Vite production build + artifact upload
+  - `docker-build` — Docker image build (backend + frontend), only on main
+  - Concurrency: cancel-in-progress for same branch
+
+### 13c. Credentials Page
+- **`pages/CredentialsPage.tsx`** — Full credential vault management:
+  - Searchable, paginated table with type badges (6 types)
+  - Create modal with name, type selector, value textarea, AES-256 note
+  - Reveal/hide values (fetches decrypted value on demand)
+  - Copy to clipboard
+  - Delete with confirmation
+  - Error handling with inline error messages
+
+### 13d. Schedules Page
+- **`pages/SchedulesPage.tsx`** — Full schedule management:
+  - Paginated table with workflow name, cron expression, timezone
+  - Status toggle (enabled/disabled)
+  - Create modal with workflow selector, cron input, timezone picker
+  - Next-run relative time display ("in 2h", "in 15m")
+  - Delete with confirmation
+
+### 13e. Live Execution Updates
+- **ExecutionsPage.tsx** updated:
+  - Integrated `useWebSocket` hook for real-time execution status changes
+  - Status badge updates in-place without page refresh
+  - WebSocket connection indicator (Live/Offline) with Wifi/WifiOff icons
+  - Maintains existing polling fallback for when WebSocket is disconnected
+
+### 13f. Navigation Updates
+- **Sidebar.tsx** — Added Schedules (CalendarClock) and Credentials (Key) nav items
+- **App.tsx** — Added `/schedules` and `/credentials` routes
+
+### 13g. Build Verification
+- `tsc -b` — zero errors
+- `vite build` — 260KB main (72KB gzip), 147KB flow, 51KB ui, 47KB react, 25KB query
+
+---
+
+## Файлова структура (текущо състояние)
+```
+rpa-automation-engine/
+├── SESSION_LOG.md, README.md, ROADMAP.md
+├── docker-compose.yml
+├── .github/workflows/ci.yml                    ← NEW
+├── backend/
+│   ├── Dockerfile, requirements.txt, pytest.ini
+│   ├── alembic.ini, alembic/
+│   ├── app/ (main.py + metrics + ws, config.py, dependencies.py)
+│   ├── api/
+│   │   ├── v1/router.py (16 route groups)
+│   │   ├── routes/ — ALL 16 ROUTE GROUPS FULLY WIRED
+│   │   ├── schemas/, websockets/
+│   ├── core/
+│   │   ├── security, middleware, logging, exceptions
+│   │   └── metrics.py (Prometheus)              ← NEW
+│   ├── db/, integrations/, notifications/, services/
+│   ├── scripts/, tasks/, triggers/, worker/, workflow/
+│   └── tests/
+├── frontend/
+│   ├── Dockerfile, nginx.conf
+│   └── src/
+│       ├── api/ (10 modules: client, auth, workflows, executions,
+│       │         triggers, users, dashboard, credentials, schedules, analytics)
+│       ├── hooks/ (useWebSocket)
+│       ├── stores/ (authStore)
+│       ├── components/layout/ (Sidebar + 2 nav items, AppLayout, ProtectedRoute)
+│       └── pages/ (11 pages):
+│           ├── Login, Register, Dashboard
+│           ├── WorkflowList, WorkflowEditor (React Flow)
+│           ├── Executions (+ live WebSocket updates)
+│           ├── Triggers, Schedules (NEW), Credentials (NEW)
+│           ├── Users, Settings
+```
+
+## Технически бележки
+- **Git**: `git push` директно с token в URL
+- **Git credentials**: `~/.git-credentials` с token `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`
+- **DB**: SQLite + aiosqlite (dev/test), PostgreSQL + asyncpg (prod)
+- **API**: `/api/v1/` prefix, 16 route groups, 80+ endpoints, ALL FULLY WIRED
+- **Frontend**: React 19 + TypeScript + Vite 7 + Tailwind 4 + React Flow 11 + Zustand 5
+- **WebSocket**: `/ws?token=<jwt>`, auto-reconnect, live execution status on Executions page
+- **Metrics**: `/metrics` Prometheus endpoint, HTTP request count/duration per path
+- **Vault**: AES-256 (Fernet), audit-logged, reveal on demand in UI
+- **CI/CD**: GitHub Actions — lint, typecheck, test, build, docker (5 jobs)
+- **Docker**: 6 services: postgres, redis, backend, celery-worker, celery-beat, frontend
+
 ## Какво следва (приоритет)
-1. **Prometheus metrics** — /metrics endpoint за monitoring
-2. **Browser automation tasks** — Playwright-based web scraping/form filling
-3. **E2E tests** — Cypress or Playwright для frontend integration tests
-4. **CI/CD pipeline** — GitHub Actions for lint, test, build, deploy
-5. **Admin panel** — Multi-tenant admin with role management
-6. **Kubernetes manifests** — k8s deployment configs
+1. **Browser automation tasks** — Playwright-based web scraping/form filling
+2. **E2E tests** — Playwright for frontend integration tests
+3. **Admin panel** — Multi-tenant admin with role/permission management
+4. **Kubernetes manifests** — k8s deployment configs
+5. **Notification preferences UI** — User-level notification settings
+6. **Workflow templates** — Pre-built workflow templates marketplace
