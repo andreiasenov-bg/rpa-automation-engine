@@ -12,6 +12,8 @@ import {
   Bot,
   Shield,
   BookOpen,
+  Server,
+  Bell,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 
@@ -23,7 +25,9 @@ const navItems = [
   { to: '/triggers', icon: Zap, label: 'Triggers' },
   { to: '/schedules', icon: CalendarClock, label: 'Schedules' },
   { to: '/credentials', icon: Key, label: 'Credentials' },
+  { to: '/agents', icon: Server, label: 'Agents' },
   { to: '/users', icon: Users, label: 'Users' },
+  { to: '/notifications', icon: Bell, label: 'Notifications' },
   { to: '/audit-log', icon: Shield, label: 'Audit Log' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];

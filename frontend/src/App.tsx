@@ -21,6 +21,8 @@ import CredentialsPage from '@/pages/CredentialsPage';
 import SchedulesPage from '@/pages/SchedulesPage';
 import AuditLogPage from '@/pages/AuditLogPage';
 import TemplatesPage from '@/pages/TemplatesPage';
+import AgentsPage from '@/pages/AgentsPage';
+import NotificationSettingsPage from '@/pages/NotificationSettingsPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -66,6 +68,8 @@ function AppRoutes() {
         <Route path="users" element={<UsersPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="templates" element={<TemplatesPage />} />
+        <Route path="agents" element={<AgentsPage />} />
+        <Route path="notifications" element={<NotificationSettingsPage />} />
         <Route path="audit-log" element={<AuditLogPage />} />
       </Route>
 
