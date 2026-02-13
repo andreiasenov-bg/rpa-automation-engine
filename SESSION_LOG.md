@@ -922,9 +922,205 @@ rpa-automation-engine/
 - **Docker**: 6 services (postgres, redis, backend, celery-worker, celery-beat, frontend)
 - **Общо**: ~100 файла, ~12,000+ реда код
 
+## Checkpoint #17 — Rate Limiting + Admin Panel (Сесия 5)
+**Дата**: 2026-02-13
+**Commit**: `39287e0`
+**Какво е направено**:
+
+### 17a. Rate Limiting Middleware
+- **Нов файл**: `backend/core/rate_limit.py`
+  - `SlidingWindowCounter` — thread-safe two-bucket sliding window algorithm
+  - Bounded memory (50K keys, 20% eviction on overflow)
+  - Per-IP and per-user rate limiting
+  - Group-based limits: auth (10/min), AI (20/min), write (60/min), read (200/min)
+  - `RateLimitMiddleware` — FastAPI middleware with standard headers (X-RateLimit-*)
+  - Skips health, metrics, and WebSocket paths
+- Wired into `backend/app/main.py`
+
+### 17b. Admin Panel API
+- **Нов файл**: `backend/api/routes/admin.py`
+  - `GET /admin/overview` — org details + resource counts (users, workflows, agents, credentials, executions)
+  - `PUT /admin/organization` — update org name/plan
+  - `GET /admin/roles` — list roles with permissions
+  - `POST /admin/roles` — create role (duplicate slug check)
+  - `PUT /admin/roles/{id}` — update role
+  - `DELETE /admin/roles/{id}` — soft-delete (admin role protected)
+  - `GET /admin/permissions` — list all permissions
+
+### 17c. Admin Panel Frontend
+- **Нов файл**: `frontend/src/api/admin.ts`
+- **Нов файл**: `frontend/src/pages/AdminPage.tsx`
+  - 3-tab layout: Overview, Roles, Permissions
+  - Overview: StatCards for all resource counts, org details
+  - Roles: list with permission badges, create modal with auto-slugify, delete (protected admin role)
+  - Permissions: list view
+- Sidebar: 13 nav items (+ Admin with Wrench icon)
+- v1/router.py: 19 route groups
+
+---
+
+## Checkpoint #18 — E2E Tests + Monitoring Stack + API Keys (Сесия 5)
+**Дата**: 2026-02-13
+**Commit**: `2402973`
+**Какво е направено**:
+
+### 18a. Playwright E2E Test Infrastructure
+- **Нов файл**: `frontend/playwright.config.ts` — 4 browser projects (chromium, firefox, webkit, mobile), web server config
+- **Нов файл**: `frontend/e2e/helpers.ts` — auth helpers, mock API routes, navigation utilities
+- **Нов файл**: `frontend/e2e/auth.spec.ts` — 6 tests (form display, validation, redirect, login success/failure)
+- **Нов файл**: `frontend/e2e/dashboard.spec.ts` — 5 tests (page display, sidebar nav, page navigation)
+- **Нов файл**: `frontend/e2e/workflows.spec.ts` — 6 tests (list display, create, editor, React Flow canvas)
+- **Нов файл**: `frontend/e2e/admin.spec.ts` — 7 tests (overview, stats, roles tab, create modal, permissions tab)
+- Package.json: added `test:e2e`, `test:e2e:ui`, `test:e2e:headed` scripts
+
+### 18b. Prometheus Monitoring Stack
+- **Нов файл**: `monitoring/prometheus.yml` — scrape config for backend, Celery, Redis, Postgres
+- **Нов файл**: `monitoring/alert_rules.yml` — 12 alert rules:
+  - API: HighErrorRate (>5% 5xx), HighLatency (p95>2s), HighRateLimitHits
+  - Workflows: ExecutionFailures, ExecutionStuck (30min unchanged)
+  - Agents: >50% offline, HeartbeatMissed (>5min)
+  - Celery: QueueBacklog (>100), WorkerDown
+  - Infra: HighMemory (>512MB), DBConnectionPoolExhausted (>90%)
+
+### 18c. Grafana Dashboard
+- **Нов файл**: `monitoring/grafana-dashboard.json` — 18 panels organized in 5 rows:
+  - API: request rate, error rate, p50/p95 latency
+  - Stats: rate limit rejections, active connections, uptime, memory
+  - Workflows: execution rate by status, execution duration
+  - Agents: status pie chart, heartbeat rate
+  - Celery: queue lengths, task processing rate
+  - Database: connection pool, query duration
+
+### 18d. Docker Compose Monitoring
+- **Нов файл**: `monitoring/docker-compose.monitoring.yml` — Prometheus + Grafana + Redis/Postgres exporters
+- **Нов файл**: `monitoring/grafana-provisioning/datasources/prometheus.yml`
+- **Нов файл**: `monitoring/grafana-provisioning/dashboards/dashboards.yml`
+
+### 18e. API Key Authentication
+- **Нов файл**: `backend/core/api_keys.py`
+  - SHA-256 key hashing, `rpa_` prefix keys
+  - `APIKeyInfo` with permission checking (wildcard support)
+  - Header (`X-API-Key`) and query parameter (`api_key`) auth
+  - `require_api_permission()` dependency for route-level auth
+
+### 18f. Backend Tests
+- **Нов файл**: `backend/tests/test_rate_limit.py` — 10 tests: classification, sliding window, thread safety, cleanup
+- **Нов файл**: `backend/tests/test_admin.py` — 8 tests: overview structure, role CRUD, permission codes, wildcards
+
+---
+
+## Checkpoint #19 — Plugin System + Health Enhancements (Сесия 5)
+**Дата**: 2026-02-13
+**Commit**: `904e1d9`
+**Какво е направено**:
+
+### 19a. Plugin System
+- **Нов файл**: `backend/core/plugin_system.py`
+  - `PluginManager` — discovers plugins from entry points and local `plugins/` directory
+  - `PluginInfo` — metadata (name, version, author, source, task_types, errors)
+  - Hook system: register/emit async hooks for lifecycle events
+  - 8 hook events: workflow.started/completed/failed, step.started/completed/failed, agent.connected/disconnected
+  - Enable/disable individual plugins at runtime
+- **Нов файл**: `backend/api/routes/plugins.py`
+  - `GET /plugins` — list all discovered plugins
+  - `GET /plugins/{name}` — plugin details
+  - `PUT /plugins/{name}` — enable/disable
+  - `POST /plugins/reload` — re-discover and reload all plugins
+
+### 19b. Plugin Management Frontend
+- **Нов файл**: `frontend/src/api/plugins.ts`
+- **Нов файл**: `frontend/src/pages/PluginsPage.tsx`
+  - Card grid with source badges (builtin/entrypoint/local)
+  - Enable/disable toggle per plugin
+  - Task type tags, error display
+  - Reload all plugins button
+- Sidebar: 15 nav items (+ Plugins with Puzzle icon)
+- v1/router.py: 20 route groups
+
+### 19c. Enhanced Health Checks
+- **Обновен**: `backend/api/routes/health.py`
+  - `GET /health/` — liveness probe (simple status)
+  - `GET /health/health` — deep check with actual DB ping (SELECT 1)
+  - `GET /health/status` — detailed system status: uptime, Python version, platform, component status
+
+---
+
+## Файлова структура (текущо състояние)
+```
+rpa-automation-engine/
+├── SESSION_LOG.md, README.md, ROADMAP.md
+├── docker-compose.yml
+├── .github/workflows/ci.yml (local only)
+├── k8s/ (9 manifests)
+├── monitoring/                                    ← NEW
+│   ├── prometheus.yml, alert_rules.yml
+│   ├── grafana-dashboard.json (18 panels)
+│   ├── docker-compose.monitoring.yml
+│   └── grafana-provisioning/ (datasources + dashboards)
+├── backend/
+│   ├── Dockerfile, requirements.txt, pytest.ini
+│   ├── alembic.ini, alembic/
+│   ├── app/ (main.py + metrics + ws + rate_limit, config.py, dependencies.py)
+│   ├── api/
+│   │   ├── v1/router.py (20 route groups)
+│   │   ├── routes/ — 20 ROUTES (ALL FULLY WIRED):
+│   │   │   ├── admin.py (org management + roles)     ← NEW
+│   │   │   ├── plugins.py (plugin management)         ← NEW
+│   │   │   ├── + all previous routes
+│   │   ├── schemas/, websockets/
+│   ├── core/
+│   │   ├── security, middleware, logging, exceptions, metrics
+│   │   ├── rate_limit.py (sliding window)             ← NEW
+│   │   ├── api_keys.py (SHA-256 hashing)              ← NEW
+│   │   ├── plugin_system.py (extensible plugins)      ← NEW
+│   ├── db/, integrations/, notifications/, services/
+│   ├── scripts/, tasks/, triggers/, worker/, workflow/
+│   └── tests/ (7 test modules: health, auth, models, workflow_engine, services, rate_limit, admin)
+├── frontend/
+│   ├── Dockerfile, nginx.conf
+│   ├── playwright.config.ts                           ← NEW
+│   ├── e2e/ (4 spec files + helpers)                  ← NEW
+│   └── src/
+│       ├── api/ (16 modules: + admin, plugins)
+│       ├── hooks/ (useWebSocket)
+│       ├── stores/ (authStore, toastStore)
+│       ├── components/ (ErrorBoundary, ToastContainer, layout/)
+│       └── pages/ (17 pages):
+│           ├── Login, Register, Dashboard
+│           ├── WorkflowList, WorkflowEditor (React Flow)
+│           ├── Executions (+ live WebSocket)
+│           ├── Templates, Triggers, Schedules, Credentials
+│           ├── Agents, Users, Notifications
+│           ├── AuditLog, Admin (NEW), Plugins (NEW), Settings
+```
+
+## Технически бележки
+- **Git**: `git push` директно с token в URL
+- **Git credentials**: `~/.git-credentials` с token `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`
+- **DB**: SQLite + aiosqlite (dev/test), PostgreSQL + asyncpg (prod)
+- **API**: `/api/v1/` prefix, 20 route groups, 100+ endpoints, ALL FULLY WIRED
+- **Frontend**: React 19 + TypeScript + Vite 7 + Tailwind 4 + React Flow 11 + Zustand 5
+- **WebSocket**: `/ws?token=<jwt>`, auto-reconnect, live execution status
+- **Metrics**: `/metrics` Prometheus endpoint + Grafana dashboard
+- **Rate Limiting**: Sliding window, per-IP/per-user, group-based limits
+- **API Keys**: SHA-256, header/query auth, permission scoping
+- **Plugin System**: Entry point + local directory discovery, hook system
+- **Vault**: AES-256 (Fernet), audit-logged
+- **Browser Tasks**: 5 Playwright tasks
+- **Templates**: 8 built-in workflow templates
+- **Audit**: Full trail with diff viewer
+- **Agents**: Full CRUD, heartbeat, token rotation
+- **Notifications**: 4 channels, 6 event types
+- **K8s**: Full production-ready manifests with HPA, TLS, PVC
+- **Monitoring**: Prometheus + Grafana + 12 alert rules
+- **E2E Tests**: Playwright with 24 test cases
+- **Error handling**: ErrorBoundary + Toast notifications
+- **Docker**: 6 services + monitoring stack (Prometheus, Grafana, exporters)
+- **Общо**: ~120+ файла, ~15,000+ реда код
+
 ## Какво следва (приоритет)
-1. **E2E tests** — Playwright for frontend integration tests
-2. **Admin panel** — Multi-tenant admin with org management
-3. **Rate limiting** — API rate limiting middleware
-4. **Monitoring stack** — Grafana dashboards for Prometheus metrics
-5. **Plugin system** — Extensible task type loading from external packages
+1. **Backend integration tests** — Full API integration tests with test DB
+2. **Data export** — CSV/Excel export for executions and analytics
+3. **Workflow versioning UI** — Version history browser in editor
+4. **Dark mode** — Theme toggle in settings
+5. **i18n** — Internationalization support (BG + EN)
