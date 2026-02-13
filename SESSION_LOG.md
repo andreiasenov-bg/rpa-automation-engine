@@ -1630,9 +1630,132 @@ rpa-automation-engine/
 
 ---
 
+## Checkpoint #30 — User Roles UI + Workflow Variables (Сесия 7)
+**Дата**: 2026-02-13
+**Commit**: `259efa6`
+**Какво е направено**:
+
+### 30a. User-Role Assignment API
+- **Нов файл**: `backend/api/routes/user_roles.py`
+  - `GET /user-roles/{user_id}/roles` — Get user's roles
+  - `POST /user-roles/{user_id}/roles` — Assign role to user
+  - `DELETE /user-roles/{user_id}/roles/{role_id}` — Remove role
+  - `POST /user-roles/bulk-assign` — Bulk assign role to multiple users (max 50)
+  - `GET /user-roles/by-role/{role_id}` — List users by role
+  - All endpoints RBAC-protected (`admin.*`)
+
+### 30b. Workflow Variables API
+- **Нов файл**: `backend/api/routes/workflow_variables.py`
+  - `GET /workflow-variables/{id}/variables` — Get variable schema
+  - `PUT /workflow-variables/{id}/variables` — Update schema (name validation, duplicate check)
+  - `PUT /workflow-variables/{id}/variables/mappings` — Step I/O mappings
+  - `POST /workflow-variables/{id}/variables/validate` — Validate execution variables
+  - 6 variable types: string, number, boolean, json, list, secret
+  - Type validation with `_validate_type()` helper
+
+### 30c. Enhanced Admin Panel Frontend
+- AdminPage rewritten with 4-tab layout: Overview, Roles, Permissions, Users
+- Permission Matrix: table view of roles × permissions with checkmarks
+- RoleUsersPanel: expandable per-role user list with remove button
+- AssignRoleModal: user + role selectors for assignment
+- Users tab: user list with role badges and "Assign Role" button
+- Full dark mode + i18n support
+
+### 30d. Workflow Variables Panel
+- **Нов файл**: `frontend/src/components/WorkflowVariablesPanel.tsx`
+  - Slide-out side panel in workflow editor
+  - Add/remove/edit variable definitions
+  - 6 type selectors with icons: String, Number, Boolean, JSON, List, Secret
+  - Required/sensitive flags, default values, descriptions
+  - Save with dirty state tracking, name validation
+- Integrated "Variables" button in WorkflowEditorPage toolbar
+- **Нов файл**: `frontend/src/api/workflowVariables.ts` — full CRUD + validate
+
+### 30e. Tests
+- **Нов файл**: `backend/tests/test_user_roles.py` — 6 tests
+- **Нов файл**: `backend/tests/test_workflow_variables.py` — 28 tests
+- v1/router.py: 26 route groups total
+
+---
+
+## Файлова структура (текущо състояние)
+```
+rpa-automation-engine/
+├── SESSION_LOG.md, README.md, ROADMAP.md
+├── docker-compose.yml, docker-compose.prod.yml
+├── .env.example
+├── k8s/ (9 manifests)
+├── monitoring/ (6 files)
+├── backend/
+│   ├── Dockerfile, requirements.txt, pytest.ini
+│   ├── alembic.ini, alembic/
+│   ├── app/ (main.py, config.py, dependencies.py)
+│   ├── api/
+│   │   ├── v1/router.py (26 route groups)
+│   │   ├── routes/ — 26 ROUTES:
+│   │   │   ├── health, auth, users, workflows, executions
+│   │   │   ├── agents, agent_tasks, credentials, schedules
+│   │   │   ├── analytics, dashboard, ai, integrations, triggers
+│   │   │   ├── notifications, task_types, audit, templates
+│   │   │   ├── admin, plugins, export, bulk
+│   │   │   ├── activity, ws
+│   │   │   ├── user_roles (NEW), workflow_variables (NEW)
+│   │   ├── schemas/, websockets/
+│   ├── core/ (security, middleware, rate_limit, api_keys, rbac,
+│   │          webhook_signing, metrics, plugin_system, logging, exceptions)
+│   ├── db/, integrations/, notifications/, services/
+│   ├── scripts/, tasks/, triggers/, worker/
+│   ├── workflow/
+│   │   ├── engine.py, checkpoint.py, recovery.py
+│   │   └── retry_strategies.py
+│   └── tests/ (14 test modules, 120+ test cases)
+├── frontend/
+│   ├── Dockerfile, nginx.conf, playwright.config.ts
+│   ├── e2e/ (4 spec files + helpers)
+│   └── src/
+│       ├── api/ (19 modules: + workflowVariables)
+│       ├── hooks/ (useWebSocket)
+│       ├── i18n/ (index.ts — 170+ keys, EN + BG)
+│       ├── stores/ (authStore, toastStore, themeStore)
+│       ├── components/
+│       │   ├── ErrorBoundary, ToastContainer, layout/ (Sidebar, AppLayout, TopBar)
+│       │   ├── ThemeToggle, LocaleToggle
+│       │   ├── WorkflowVersionHistory
+│       │   ├── AnalyticsDashboard (Recharts)
+│       │   ├── ActivityTimeline
+│       │   ├── GlobalSearch (Cmd/Ctrl+K)
+│       │   ├── NotificationCenter
+│       │   └── WorkflowVariablesPanel (NEW)
+│       └── pages/ (18 pages, 15 lazy-loaded):
+│           ├── Login, Register, Dashboard (analytics + activity)
+│           ├── WorkflowList, WorkflowEditor (React Flow + Variables)
+│           ├── Executions (+ live WebSocket + export)
+│           ├── Templates, Triggers, Schedules, Credentials
+│           ├── Agents, Users, Notifications
+│           ├── AuditLog, Admin (enhanced: 4 tabs + matrix), Plugins
+│           ├── ApiDocs, Settings (theme + locale)
+```
+
+## Технически бележки
+- **API**: `/api/v1/` prefix, 26 route groups, 140+ endpoints
+- **Frontend**: React 19 + TypeScript + Vite 7 + Tailwind 4 + React Flow 11 + Zustand 5 + Recharts
+- **RBAC**: Permission enforcement + user-role assignment API
+- **Workflow Variables**: 6 types, schema validation, step I/O mapping
+- **Lazy Loading**: 15 pages via React.lazy(), main bundle 237KB
+- **Global Search**: Cmd/Ctrl+K command palette
+- **Notification Center**: Bell + unread badge + polling
+- **Permission Matrix**: Visual roles × permissions table
+- **Code Splitting**: 8+ chunks (main 237KB, charts 382KB, flow 134KB)
+- **Tests**: 14 test modules, 120+ test cases
+- **Docker**: 6 services + monitoring stack + production overlay
+- **Общо**: ~170+ файла, ~28,000+ реда код
+
 ## Какво следва (приоритет)
 1. ~~Lazy loading~~ ✅
 2. ~~Global search~~ ✅
 3. ~~Notification center~~ ✅
-4. **User roles UI** — Assign/manage roles from Admin panel
-5. **Workflow variables** — Variable passing between steps
+4. ~~User roles UI~~ ✅
+5. ~~Workflow variables~~ ✅
+6. **Step config editor** — Config panel per step in workflow editor
+7. **Execution input variables** — Pass variables when starting execution
+8. **WebSocket live logs** — Real-time log streaming in execution detail
