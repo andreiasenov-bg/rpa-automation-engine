@@ -4,13 +4,13 @@ from fastapi import APIRouter, HTTPException, status, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 import logging
 
-from core.security import get_current_user, TokenPayload
+from core.security import TokenPayload
 from api.schemas.common import PaginationParams, MessageResponse
-from app.dependencies import get_db
+from app.dependencies import get_db, get_current_active_user
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/agents", tags=["agents"])
+router = APIRouter(tags=["agents"])
 
 
 class AgentResponse:
@@ -28,7 +28,7 @@ class AgentRegisterRequest:
 @router.get("/", response_model=dict)
 async def list_agents(
     pagination: PaginationParams = Depends(),
-    current_user: TokenPayload = Depends(get_current_user),
+    current_user: TokenPayload = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """
@@ -53,7 +53,7 @@ async def list_agents(
 
 @router.post("/register", response_model=dict, status_code=status.HTTP_201_CREATED)
 async def register_agent(
-    current_user: TokenPayload = Depends(get_current_user),
+    current_user: TokenPayload = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """
@@ -81,7 +81,7 @@ async def register_agent(
 @router.get("/{agent_id}", response_model=dict)
 async def get_agent(
     agent_id: str,
-    current_user: TokenPayload = Depends(get_current_user),
+    current_user: TokenPayload = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """
@@ -108,7 +108,7 @@ async def get_agent(
 @router.delete("/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def remove_agent(
     agent_id: str,
-    current_user: TokenPayload = Depends(get_current_user),
+    current_user: TokenPayload = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
     """

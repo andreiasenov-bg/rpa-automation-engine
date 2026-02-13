@@ -75,22 +75,34 @@ export default function WorkflowListPage() {
   };
 
   const handlePublish = async (id: string) => {
-    await workflowApi.publish(id);
-    setActionMenu(null);
-    fetchWorkflows();
+    try {
+      await workflowApi.publish(id);
+      setActionMenu(null);
+      fetchWorkflows();
+    } catch {
+      // Silently handled — user sees stale data
+    }
   };
 
   const handleArchive = async (id: string) => {
-    await workflowApi.archive(id);
-    setActionMenu(null);
-    fetchWorkflows();
+    try {
+      await workflowApi.archive(id);
+      setActionMenu(null);
+      fetchWorkflows();
+    } catch {
+      // Silently handled
+    }
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this workflow?')) return;
-    await workflowApi.delete(id);
-    setActionMenu(null);
-    fetchWorkflows();
+    try {
+      await workflowApi.delete(id);
+      setActionMenu(null);
+      fetchWorkflows();
+    } catch {
+      // Silently handled
+    }
   };
 
   const handleExecute = async (id: string) => {
@@ -98,7 +110,7 @@ export default function WorkflowListPage() {
       await workflowApi.execute(id);
       setActionMenu(null);
     } catch {
-      // handle error
+      // Silently handled
     }
   };
 

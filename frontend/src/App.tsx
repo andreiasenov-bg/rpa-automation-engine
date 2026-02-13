@@ -14,6 +14,9 @@ import DashboardPage from '@/pages/DashboardPage';
 import WorkflowListPage from '@/pages/WorkflowListPage';
 import WorkflowEditorPage from '@/pages/WorkflowEditorPage';
 import ExecutionsPage from '@/pages/ExecutionsPage';
+import TriggersPage from '@/pages/TriggersPage';
+import UsersPage from '@/pages/UsersPage';
+import SettingsPage from '@/pages/SettingsPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -26,11 +29,13 @@ const queryClient = new QueryClient({
 });
 
 function AppRoutes() {
-  const { isAuthenticated, loadUser } = useAuthStore();
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const loadUser = useAuthStore((s) => s.loadUser);
 
   useEffect(() => {
     loadUser();
-  }, [loadUser]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <Routes>
@@ -51,24 +56,14 @@ function AppRoutes() {
         <Route path="workflows/:id/edit" element={<WorkflowEditorPage />} />
         <Route path="executions" element={<ExecutionsPage />} />
 
-        {/* Placeholder routes for sidebar items */}
-        <Route path="triggers" element={<PlaceholderPage title="Triggers" />} />
-        <Route path="users" element={<PlaceholderPage title="Users" />} />
-        <Route path="settings" element={<PlaceholderPage title="Settings" />} />
+        <Route path="triggers" element={<TriggersPage />} />
+        <Route path="users" element={<UsersPage />} />
+        <Route path="settings" element={<SettingsPage />} />
       </Route>
 
       {/* Catch-all */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
-  );
-}
-
-function PlaceholderPage({ title }: { title: string }) {
-  return (
-    <div>
-      <h1 className="text-2xl font-bold text-slate-900 mb-2">{title}</h1>
-      <p className="text-sm text-slate-500">This page is under construction. It will be available in a future update.</p>
-    </div>
   );
 }
 

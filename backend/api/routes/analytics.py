@@ -12,7 +12,7 @@ from core.utils import utc_now
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/analytics", tags=["analytics"])
+router = APIRouter(tags=["analytics"])
 
 
 @router.get("/overview", response_model=dict)

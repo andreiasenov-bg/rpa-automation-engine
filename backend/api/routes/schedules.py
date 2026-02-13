@@ -10,7 +10,7 @@ from app.dependencies import get_db
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/schedules", tags=["schedules"])
+router = APIRouter(tags=["schedules"])
 
 
 class ScheduleCreateRequest:

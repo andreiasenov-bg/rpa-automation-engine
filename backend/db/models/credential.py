@@ -31,7 +31,7 @@ class Credential(BaseModel):
         nullable=False,
         index=True,
     )
-    created_by_id: Mapped[str] = mapped_column(
+    created_by_id: Mapped[Optional[str]] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
@@ -41,7 +41,9 @@ class Credential(BaseModel):
         default=CredentialType.API_KEY.value, index=True
     )
     encrypted_value: Mapped[str] = mapped_column(nullable=False)
-    metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    extra_data: Mapped[Optional[dict]] = mapped_column(
+        "metadata", JSON, nullable=True
+    )  # Column name stays "metadata" in DB, attribute renamed to avoid SQLAlchemy reserved word
 
     # Relationships
     organization: Mapped["Organization"] = relationship(

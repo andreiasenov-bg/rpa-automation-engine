@@ -1,5 +1,7 @@
 """Permission model and role_permissions association table."""
 
+from typing import Optional
+
 from sqlalchemy import ForeignKey, Table, Column
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -31,7 +33,7 @@ class Permission(BaseModel):
     __tablename__ = "permissions"
 
     code: Mapped[str] = mapped_column(nullable=False, unique=True, index=True)  # e.g. "workflows:read"
-    organization_id: Mapped[str] = mapped_column(
+    organization_id: Mapped[Optional[str]] = mapped_column(
         ForeignKey("organizations.id", ondelete="CASCADE"),
         nullable=True,
         index=True,

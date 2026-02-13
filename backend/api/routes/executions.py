@@ -19,7 +19,7 @@ from core.utils import calculate_offset
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/executions", tags=["executions"])
+router = APIRouter(tags=["executions"])
 
 
 def _execution_to_response(ex) -> ExecutionResponse:

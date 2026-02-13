@@ -15,7 +15,7 @@ from core.utils import calculate_offset
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/users", tags=["users"])
+router = APIRouter(tags=["users"])
 
 
 class UserUpdateRequest(BaseModel):

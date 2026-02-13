@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Play,
@@ -212,12 +212,15 @@ export default function ExecutionsPage() {
   }, [fetchExecutions]);
 
   // Auto-refresh every 5s if there are running executions
+  const fetchRef = useRef(fetchExecutions);
+  fetchRef.current = fetchExecutions;
+
   useEffect(() => {
     const hasRunning = executions.some((e) => e.status === 'running' || e.status === 'pending');
     if (!hasRunning) return;
-    const interval = setInterval(fetchExecutions, 5000);
+    const interval = setInterval(() => fetchRef.current(), 5000);
     return () => clearInterval(interval);
-  }, [executions, fetchExecutions]);
+  }, [executions]);
 
   const handleRetry = async (id: string) => {
     try {
