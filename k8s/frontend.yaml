@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rpa-frontend
+  namespace: rpa-engine
+  labels:
+    app.kubernetes.io/name: rpa-frontend
+    app.kubernetes.io/part-of: rpa-automation-engine
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: rpa-frontend
+  template:
+    metadata:
+      labels:
+        app: rpa-frontend
+    spec:
+      containers:
+        - name: nginx
+          image: rpa-engine/frontend:latest
+          ports:
+            - containerPort: 80
+              name: http
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rpa-frontend-svc
+  namespace: rpa-engine
+spec:
+  selector:
+    app: rpa-frontend
+  ports:
+    - port: 80
+      targetPort: 80
+      name: http

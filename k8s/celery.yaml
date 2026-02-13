@@ -1,0 +1,120 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: celery-worker
+  namespace: rpa-engine
+  labels:
+    app.kubernetes.io/name: celery-worker
+    app.kubernetes.io/part-of: rpa-automation-engine
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: celery-worker
+  template:
+    metadata:
+      labels:
+        app: celery-worker
+    spec:
+      containers:
+        - name: worker
+          image: rpa-engine/backend:latest
+          envFrom:
+            - configMapRef:
+                name: rpa-engine-config
+            - secretRef:
+                name: rpa-engine-secrets
+          env:
+            - name: APP_ROLE
+              value: worker
+          command:
+            - celery
+            - -A
+            - worker.celery_app
+            - worker
+            - --loglevel=info
+            - --concurrency=4
+            - -Q
+            - workflows,triggers,notifications,health,default
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          livenessProbe:
+            exec:
+              command:
+                - celery
+                - -A
+                - worker.celery_app
+                - inspect
+                - ping
+                - --timeout=5
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: celery-beat
+  namespace: rpa-engine
+  labels:
+    app.kubernetes.io/name: celery-beat
+    app.kubernetes.io/part-of: rpa-automation-engine
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: celery-beat
+  template:
+    metadata:
+      labels:
+        app: celery-beat
+    spec:
+      containers:
+        - name: beat
+          image: rpa-engine/backend:latest
+          envFrom:
+            - configMapRef:
+                name: rpa-engine-config
+            - secretRef:
+                name: rpa-engine-secrets
+          env:
+            - name: APP_ROLE
+              value: beat
+          command:
+            - celery
+            - -A
+            - worker.celery_app
+            - beat
+            - --loglevel=info
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: celery-worker-hpa
+  namespace: rpa-engine
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: celery-worker
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

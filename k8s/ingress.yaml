@@ -1,0 +1,53 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: rpa-engine-ingress
+  namespace: rpa-engine
+  labels:
+    app.kubernetes.io/name: rpa-engine
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
+    nginx.ingress.kubernetes.io/websocket-services: rpa-backend-svc
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - rpa.example.com
+      secretName: rpa-engine-tls
+  rules:
+    - host: rpa.example.com
+      http:
+        paths:
+          # API & WebSocket
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: rpa-backend-svc
+                port:
+                  number: 8000
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service:
+                name: rpa-backend-svc
+                port:
+                  number: 8000
+          - path: /metrics
+            pathType: Exact
+            backend:
+              service:
+                name: rpa-backend-svc
+                port:
+                  number: 8000
+          # Frontend (catch-all)
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: rpa-frontend-svc
+                port:
+                  number: 80

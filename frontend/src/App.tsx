@@ -23,6 +23,8 @@ import AuditLogPage from '@/pages/AuditLogPage';
 import TemplatesPage from '@/pages/TemplatesPage';
 import AgentsPage from '@/pages/AgentsPage';
 import NotificationSettingsPage from '@/pages/NotificationSettingsPage';
+import ErrorBoundary from '@/components/ErrorBoundary';
+import ToastContainer from '@/components/ToastContainer';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -81,10 +83,13 @@ function AppRoutes() {
 
 export default function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <AppRoutes />
-      </BrowserRouter>
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
+          <AppRoutes />
+          <ToastContainer />
+        </BrowserRouter>
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 }

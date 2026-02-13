@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rpa-engine-config
+  namespace: rpa-engine
+  labels:
+    app.kubernetes.io/name: rpa-engine
+data:
+  DATABASE_URL: "postgresql+asyncpg://rpa:changeme@postgres-svc:5432/rpa_engine"
+  REDIS_URL: "redis://redis-svc:6379/0"
+  ENVIRONMENT: "production"
+  LOG_LEVEL: "info"
+  LOG_FORMAT: "json"
+  API_V1_PREFIX: "/api/v1"
+  CORS_ORIGINS: "https://rpa.example.com"
+  CELERY_BROKER_URL: "redis://redis-svc:6379/1"
+  CELERY_RESULT_BACKEND: "redis://redis-svc:6379/2"

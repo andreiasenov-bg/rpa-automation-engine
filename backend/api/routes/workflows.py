@@ -1,6 +1,10 @@
-"""Workflow CRUD endpoints — list, create, get, update, delete, execute, publish, archive."""
+"""Workflow CRUD endpoints — list, create, get, update, delete, execute, publish, archive, version history."""
 
-from fastapi import APIRouter, HTTPException, status, Depends
+import copy
+from typing import Optional
+
+from fastapi import APIRouter, HTTPException, status, Depends, Query
+from sqlalchemy import select, desc, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 import logging
 
@@ -16,6 +20,7 @@ from api.schemas.common import PaginationParams
 from app.dependencies import get_db, get_current_active_user
 from services.workflow_service import WorkflowService
 from core.utils import calculate_offset
+from db.models.audit_log import AuditLog
 
 logger = logging.getLogger(__name__)
 
@@ -232,3 +237,82 @@ async def trigger_workflow_execution(
         trigger_type="manual",
         status="pending",
     )
+
+
+@router.get("/{workflow_id}/history")
+async def get_workflow_history(
+    workflow_id: str,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    current_user: TokenPayload = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get audit history for a workflow (version changes, publishes, etc.).
+    """
+    conditions = and_(
+        AuditLog.organization_id == current_user.org,
+        AuditLog.resource_type == "workflow",
+        AuditLog.resource_id == workflow_id,
+        AuditLog.is_deleted == False,
+    )
+
+    total = (await db.execute(
+        select(func.count()).select_from(AuditLog).where(conditions)
+    )).scalar() or 0
+
+    offset = (page - 1) * per_page
+    from db.models.user import User
+    query = (
+        select(AuditLog, User.email)
+        .outerjoin(User, AuditLog.user_id == User.id)
+        .where(conditions)
+        .order_by(desc(AuditLog.created_at))
+        .offset(offset)
+        .limit(per_page)
+    )
+    rows = (await db.execute(query)).all()
+
+    history = []
+    for row in rows:
+        log = row[0]
+        user_email = row[1]
+        history.append({
+            "id": log.id,
+            "action": log.action,
+            "user_email": user_email,
+            "old_values": log.old_values,
+            "new_values": log.new_values,
+            "created_at": log.created_at.isoformat() if log.created_at else None,
+        })
+
+    return {"history": history, "total": total, "page": page, "per_page": per_page}
+
+
+@router.post("/{workflow_id}/clone", response_model=WorkflowResponse, status_code=status.HTTP_201_CREATED)
+async def clone_workflow(
+    workflow_id: str,
+    current_user: TokenPayload = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+) -> WorkflowResponse:
+    """
+    Clone a workflow (create a copy with version 1).
+    """
+    svc = WorkflowService(db)
+    original = await svc.get_by_id_and_org(workflow_id, current_user.org_id)
+
+    if not original:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workflow not found",
+        )
+
+    cloned = await svc.create_workflow(
+        organization_id=current_user.org_id,
+        name=f"{original.name} (Copy)",
+        description=original.description,
+        definition=copy.deepcopy(original.definition) if original.definition else {},
+        created_by_id=current_user.sub,
+    )
+
+    return _workflow_to_response(cloned)
