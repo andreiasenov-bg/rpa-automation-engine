@@ -749,7 +749,7 @@ rpa-automation-engine/
 
 ## Checkpoint #14 — Browser Tasks, Audit Log, Templates (Сесия 4)
 **Дата**: 2026-02-13
-**Commit**: (pending)
+**Commit**: `e570563`
 **Какво е направено**:
 
 ### 14a. Playwright Browser Automation Tasks
@@ -797,62 +797,134 @@ rpa-automation-engine/
 
 ---
 
+## Checkpoint #15 — Agent Management + Notifications (Сесия 4)
+**Дата**: 2026-02-13
+**Commit**: `a8aa4e4`
+**Какво е направено**:
+
+### 15a. Agent API — Fully Wired
+- `backend/api/routes/agents.py` — rewritten from stubs to full implementation
+  - `GET /agents` — paginated list with status filter, search, online count
+  - `POST /agents` — register agent with SHA-256 token hashing
+  - `GET /agents/stats` — total, online, by_status breakdown
+  - `GET /agents/{id}` — get agent details
+  - `PUT /agents/{id}` — update name/version/capabilities
+  - `DELETE /agents/{id}` — soft-delete
+  - `POST /agents/{id}/heartbeat` — update heartbeat + set active
+  - `POST /agents/{id}/rotate-token` — rotate auth token
+
+### 15b. Agent Management Page
+- `frontend/src/api/agents.ts` — full CRUD + stats + token rotation
+- `frontend/src/pages/AgentsPage.tsx`
+  - Stats cards (total, online, inactive, errors)
+  - Register modal → one-time token display
+  - Token reveal/copy functionality
+  - Status badges with pulse animation for active
+  - Heartbeat relative timestamps
+
+### 15c. Notification Settings Page
+- `frontend/src/pages/NotificationSettingsPage.tsx`
+  - 4 notification channels (Email SMTP, Slack webhook, Custom webhook, WebSocket)
+  - Per-channel enable/disable toggles with config forms
+  - Test notification button per channel
+  - 6 event subscriptions with toggles
+  - LocalStorage persistence + backend channel configuration
+
+---
+
+## Checkpoint #16 — Kubernetes + Error Handling (Сесия 4)
+**Дата**: 2026-02-13
+**Commit**: `fad10ee`
+**Какво е направено**:
+
+### 16a. Kubernetes Manifests
+- `k8s/namespace.yaml` — rpa-engine namespace
+- `k8s/configmap.yaml` — app config (DB URL, Redis, CORS, Celery)
+- `k8s/secrets.yaml` — JWT secret, encryption key, DB password
+- `k8s/postgres.yaml` — StatefulSet + PVC (10Gi) + headless Service, liveness/readiness probes
+- `k8s/redis.yaml` — Deployment + Service, memory limits, LRU eviction
+- `k8s/backend.yaml` — Deployment (2 replicas) + HPA (2-8, CPU 70%) + init container for migrations
+- `k8s/celery.yaml` — Worker Deployment (2 replicas) + HPA (2-10) + Beat Deployment (1 replica)
+- `k8s/frontend.yaml` — Deployment (2 replicas) + Service
+- `k8s/ingress.yaml` — nginx ingress with TLS (cert-manager), WebSocket support, /api + /ws + /metrics routing
+
+### 16b. Workflow Version History
+- `GET /workflows/{id}/history` — audit trail per workflow with user email JOIN
+- `POST /workflows/{id}/clone` — deep-copy workflow as new draft
+
+### 16c. Error Handling & Toast System
+- `frontend/src/components/ErrorBoundary.tsx` — React error boundary with recovery UI
+- `frontend/src/stores/toastStore.ts` — Zustand toast store with auto-dismiss
+- `frontend/src/components/ToastContainer.tsx` — animated toast notifications (success/error/warning/info)
+- Integrated into App root
+
+---
+
 ## Файлова структура (текущо състояние)
 ```
 rpa-automation-engine/
 ├── SESSION_LOG.md, README.md, ROADMAP.md
 ├── docker-compose.yml
 ├── .github/workflows/ci.yml (local only)
+├── k8s/                                         ← NEW
+│   ├── namespace.yaml, configmap.yaml, secrets.yaml
+│   ├── postgres.yaml (StatefulSet+PVC)
+│   ├── redis.yaml (Deployment)
+│   ├── backend.yaml (Deployment+HPA)
+│   ├── celery.yaml (Worker+Beat+HPA)
+│   ├── frontend.yaml (Deployment)
+│   └── ingress.yaml (nginx+TLS)
 ├── backend/
 │   ├── Dockerfile, requirements.txt, pytest.ini
 │   ├── alembic.ini, alembic/
 │   ├── app/ (main.py + metrics + ws, config.py, dependencies.py)
 │   ├── api/
 │   │   ├── v1/router.py (18 route groups)
-│   │   ├── routes/ — 18 ROUTES: health, auth, users, workflows, executions,
-│   │   │             agents, credentials, schedules, analytics, dashboard,
-│   │   │             ai, integrations, triggers, notifications, task_types,
-│   │   │             audit (NEW), templates (NEW), ws
+│   │   ├── routes/ — 18 ROUTES (ALL FULLY WIRED)
 │   │   ├── schemas/, websockets/
-│   ├── core/
-│   │   ├── security, middleware, logging, exceptions
-│   │   └── metrics.py (Prometheus)
+│   ├── core/ (security, middleware, logging, exceptions, metrics)
 │   ├── db/, integrations/, notifications/, services/
-│   ├── scripts/, tasks/ (+ browser_task.py NEW), triggers/, worker/, workflow/
+│   ├── scripts/, tasks/ (ai, http, script, integration, browser)
+│   ├── triggers/, worker/, workflow/
 │   └── tests/
 ├── frontend/
 │   ├── Dockerfile, nginx.conf
 │   └── src/
-│       ├── api/ (12 modules: + audit, templates)
+│       ├── api/ (14 modules)
 │       ├── hooks/ (useWebSocket)
-│       ├── stores/ (authStore)
-│       ├── components/layout/ (Sidebar 10 items)
-│       └── pages/ (13 pages):
+│       ├── stores/ (authStore, toastStore)
+│       ├── components/ (ErrorBoundary, ToastContainer, layout/)
+│       └── pages/ (15 pages):
 │           ├── Login, Register, Dashboard
 │           ├── WorkflowList, WorkflowEditor (React Flow)
 │           ├── Executions (+ live WebSocket)
-│           ├── Templates (NEW), Triggers, Schedules, Credentials
-│           ├── Users, AuditLog (NEW), Settings
+│           ├── Templates, Triggers, Schedules, Credentials
+│           ├── Agents (NEW), Users, Notifications (NEW)
+│           ├── AuditLog, Settings
 ```
 
 ## Технически бележки
 - **Git**: `git push` директно с token в URL
 - **Git credentials**: `~/.git-credentials` с token `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`
 - **DB**: SQLite + aiosqlite (dev/test), PostgreSQL + asyncpg (prod)
-- **API**: `/api/v1/` prefix, 18 route groups, 90+ endpoints, ALL FULLY WIRED
+- **API**: `/api/v1/` prefix, 18 route groups, 95+ endpoints, ALL FULLY WIRED
 - **Frontend**: React 19 + TypeScript + Vite 7 + Tailwind 4 + React Flow 11 + Zustand 5
 - **WebSocket**: `/ws?token=<jwt>`, auto-reconnect, live execution status
 - **Metrics**: `/metrics` Prometheus endpoint
 - **Vault**: AES-256 (Fernet), audit-logged
-- **Browser Tasks**: Playwright (web_scrape, form_fill, screenshot, pdf_generate, page_interaction)
-- **Templates**: 8 built-in workflow templates with instant creation
+- **Browser Tasks**: 5 Playwright tasks (web_scrape, form_fill, screenshot, pdf_generate, page_interaction)
+- **Templates**: 8 built-in workflow templates
 - **Audit**: Full trail with diff viewer, stats, filtering
+- **Agents**: Full CRUD, heartbeat, token rotation, stats
+- **Notifications**: 4 channels (email, slack, webhook, ws), 6 event types, test
+- **K8s**: Full production-ready manifests with HPA, TLS, PVC
+- **Error handling**: ErrorBoundary + Toast notifications
 - **Docker**: 6 services (postgres, redis, backend, celery-worker, celery-beat, frontend)
+- **Общо**: ~100 файла, ~12,000+ реда код
 
 ## Какво следва (приоритет)
 1. **E2E tests** — Playwright for frontend integration tests
-2. **Admin panel** — Multi-tenant admin with role/permission management
-3. **Kubernetes manifests** — k8s deployment configs
-4. **Notification preferences UI** — User-level notification settings
-5. **Agent management UI** — Distributed agent monitoring page
-6. **Workflow versioning UI** — Version history, rollback, diff view
+2. **Admin panel** — Multi-tenant admin with org management
+3. **Rate limiting** — API rate limiting middleware
+4. **Monitoring stack** — Grafana dashboards for Prometheus metrics
+5. **Plugin system** — Extensible task type loading from external packages
