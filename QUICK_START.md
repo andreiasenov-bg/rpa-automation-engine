@@ -36,7 +36,7 @@ http://localhost:3000
 ```
 
 **Вход:**
-- Email: `admin@rpa-engine.local`
+- Email: `admin@rpa-engine.com`
 - Парола: `admin123!`
 
 ---
