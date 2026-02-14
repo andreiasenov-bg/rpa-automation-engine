@@ -352,9 +352,13 @@ class DataTransformTask(BaseTask):
             return data
 
 
+# Import custom script task (browser-aware)
+from tasks.implementations.custom_script_task import CustomScriptTask
+
 # Export for task registry
 SCRIPT_TASK_TYPES = {
     "python_script": PythonScriptTask,
     "shell_command": ShellCommandTask,
     "data_transform": DataTransformTask,
+    "custom_script": CustomScriptTask,
 }

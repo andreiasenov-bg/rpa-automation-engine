@@ -643,24 +643,26 @@ class PageInteractionTask(BaseTask):
         if not _check_playwright():
             return TaskResult(success=False, error="Playwright not installed")
 
-        url = config.get("url")
-        if not url:
-            return TaskResult(success=False, error="Missing required config: url")
-
         steps = config.get("steps", [])
         if not steps:
             return TaskResult(success=False, error="Missing required config: steps")
 
+        # URL can come from config top-level or from first navigate/goto step
+        url = config.get("url")
         viewport = config.get("viewport", {"width": 1280, "height": 720})
         default_timeout = config.get("timeout", 10000)
+        headless = config.get("headless", True)
 
         pw = None
         browser = None
         try:
-            pw, browser = await _get_browser()
+            pw, browser = await _get_browser(headless=headless)
             ctx = await browser.new_context(viewport=viewport)
             page = await ctx.new_page()
-            await page.goto(url, wait_until="domcontentloaded", timeout=default_timeout)
+
+            # Only navigate to initial URL if provided (templates may use navigate action instead)
+            if url:
+                await page.goto(url, wait_until="domcontentloaded", timeout=default_timeout)
 
             step_results: List[Dict[str, Any]] = []
             screenshots: Dict[str, str] = {}
@@ -671,16 +673,27 @@ class PageInteractionTask(BaseTask):
                 step_info: Dict[str, Any] = {"step": i + 1, "action": action, "success": True}
 
                 try:
-                    if action == "goto":
-                        await page.goto(step["url"], wait_until="domcontentloaded", timeout=timeout)
+                    if action in ("goto", "navigate"):
+                        target_url = step.get("url", url)
+                        await page.goto(target_url, wait_until="domcontentloaded", timeout=timeout)
                     elif action == "click":
-                        await page.click(step["selector"], timeout=timeout)
+                        optional = step.get("optional", False)
+                        try:
+                            await page.click(step["selector"], timeout=timeout)
+                        except Exception:
+                            if not optional:
+                                raise
                     elif action == "fill":
                         await page.fill(step["selector"], str(step.get("value", "")))
                     elif action == "press":
                         await page.keyboard.press(step["key"])
                     elif action == "wait":
-                        await page.wait_for_selector(step["selector"], timeout=timeout)
+                        if "selector" in step:
+                            await page.wait_for_selector(step["selector"], timeout=timeout)
+                        else:
+                            wait_s = step.get("timeout", step.get("duration", 1))
+                            wait_ms = int(wait_s * 1000) if isinstance(wait_s, (int, float)) and wait_s < 100 else int(wait_s)
+                            await page.wait_for_timeout(wait_ms)
                     elif action == "wait_ms":
                         await page.wait_for_timeout(step.get("duration", 1000))
                     elif action == "select":

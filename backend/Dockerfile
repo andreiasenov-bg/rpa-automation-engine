@@ -28,15 +28,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy pre-built Python packages from builder
 COPY --from=builder /install /usr/local
 
+# Install Playwright browsers (chromium) + system deps for headless browser
+RUN python -m playwright install --with-deps chromium
+
 # Copy application code
 COPY . .
 
 # Make entrypoint executable
 RUN chmod +x scripts/entrypoint.sh
 
-# Create non-root user
+# Create non-root user — also own playwright browser cache
 RUN adduser --disabled-password --gecos '' appuser \
-    && chown -R appuser:appuser /app
+    && chown -R appuser:appuser /app \
+    && chown -R appuser:appuser /root/.cache 2>/dev/null || true
 USER appuser
 
 EXPOSE 8000

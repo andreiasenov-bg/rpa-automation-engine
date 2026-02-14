@@ -343,6 +343,8 @@ class StepExecutor:
             return await self._execute_set_variable(step_def, resolved_config, context, result)
         elif step_type == "log":
             return await self._execute_log(step_def, resolved_config, context, result)
+        elif step_type == "loop":
+            return await self._execute_loop(step_def, resolved_config, context, result)
 
         # Delegate to task registry for custom step types
         attempt = 0
@@ -395,26 +397,45 @@ class StepExecutor:
             raise ValueError(f"Unknown task type: {task_type}")
 
         task_instance = task_class()
-        result = await task_instance.run(config)
+
+        # Build context dict for tasks that need step results / variables
+        context_dict = {
+            "steps": {
+                sid: {"output": sr.output, "status": sr.status.value if hasattr(sr.status, 'value') else sr.status}
+                for sid, sr in context.steps.items()
+            },
+            "variables": context.variables,
+            "loop_item": context.loop_item,
+            "workflow_id": context.workflow_id,
+        }
+
+        result = await task_instance.run(config, context_dict)
         return result.output if hasattr(result, "output") else result
 
     async def _execute_condition(
         self, step_def: dict, config: dict, context: ExecutionContext, result: StepResult
     ) -> StepResult:
         """Execute a conditional branch step."""
-        expression = config.get("expression", "false")
+        # Support both "expression" and "condition" keys (template compatibility)
+        expression = config.get("expression") or config.get("condition", "false")
         evaluated = self._evaluator.evaluate(expression, context)
 
         branch_key = "true" if evaluated else "false"
+        # Store on_true/on_false for the engine to determine next steps
         result.status = StepStatus.COMPLETED
-        result.output = {"branch": branch_key, "evaluated": evaluated}
+        result.output = {
+            "branch": branch_key,
+            "evaluated": evaluated,
+            "on_true": config.get("on_true"),
+            "on_false": config.get("on_false"),
+        }
         result.completed_at = datetime.now(timezone.utc).isoformat()
         return result
 
     async def _execute_foreach(
         self, step_def: dict, config: dict, context: ExecutionContext, result: StepResult
     ) -> StepResult:
-        """Execute a for-each loop step."""
+        """Execute a for-each loop step — iterate and run body steps."""
         collection = config.get("collection", [])
         if isinstance(collection, str):
             collection = self._evaluator.evaluate(collection, context)
@@ -425,10 +446,110 @@ class StepExecutor:
             result.completed_at = datetime.now(timezone.utc).isoformat()
             return result
 
+        body_step_ids = config.get("body", [])
+        iteration_results = []
+        errors = []
+
+        for i, item in enumerate(collection):
+            context.loop_item = item
+            context.set_variable("_loop_index", i)
+
+            for body_step_id in body_step_ids:
+                # Find step definition in workflow
+                body_step = None
+                for s in context.workflow_steps if hasattr(context, 'workflow_steps') else []:
+                    if s.get("id") == body_step_id:
+                        body_step = s
+                        break
+                if body_step:
+                    try:
+                        body_result = await self.execute_step(body_step, context)
+                        iteration_results.append(body_result.output)
+                    except Exception as e:
+                        errors.append(f"Iteration {i}: {str(e)}")
+
+        context.loop_item = None
         result.status = StepStatus.COMPLETED
         result.output = {
             "collection_size": len(collection),
-            "iterations_completed": len(collection),
+            "iterations_completed": len(collection) - len(errors),
+            "results": iteration_results,
+            "errors": errors,
+        }
+        result.completed_at = datetime.now(timezone.utc).isoformat()
+        return result
+
+    async def _execute_loop(
+        self, step_def: dict, config: dict, context: ExecutionContext, result: StepResult
+    ) -> StepResult:
+        """Execute a loop step — iterates items and runs embedded step template."""
+        items = config.get("items", [])
+        if isinstance(items, str):
+            items = self._evaluator.evaluate(items, context)
+
+        if not isinstance(items, (list, tuple)):
+            result.status = StepStatus.FAILED
+            result.error = f"loop items is not iterable: {type(items)}"
+            result.completed_at = datetime.now(timezone.utc).isoformat()
+            return result
+
+        # Embedded step template to run per item
+        inner_step = config.get("step", step_def.get("step", {}))
+        max_parallel = config.get("max_parallel", 1)
+        delay_config = config.get("delay_between", {})
+        on_error = config.get("on_error", "stop")
+
+        iteration_results = []
+        errors = []
+
+        for i, item in enumerate(items):
+            # Set loop context
+            context.loop_item = item
+            context.set_variable("_loop_index", i)
+            context.set_variable("_loop_total", len(items))
+
+            # Build a temporary step definition from the embedded step template
+            temp_step_def = {
+                "id": f"{step_def['id']}_iter_{i}",
+                "type": inner_step.get("type", "custom_script"),
+                "name": f"{step_def.get('name', 'loop')} [{i+1}/{len(items)}]",
+                "config": inner_step.get("config", {}),
+                "timeout": inner_step.get("timeout", step_def.get("timeout", 300)),
+            }
+
+            try:
+                iter_result = await self.execute_step(temp_step_def, context)
+                iteration_results.append(iter_result.output)
+
+                if iter_result.status == StepStatus.FAILED and on_error == "stop":
+                    errors.append(f"Iteration {i}: {iter_result.error}")
+                    break
+                elif iter_result.status == StepStatus.FAILED:
+                    errors.append(f"Iteration {i}: {iter_result.error}")
+
+            except Exception as e:
+                errors.append(f"Iteration {i}: {str(e)}")
+                if on_error == "stop":
+                    break
+
+            # Delay between iterations
+            if delay_config and i < len(items) - 1:
+                import random as rng
+                min_delay = delay_config.get("min", 1)
+                max_delay = delay_config.get("max", min_delay)
+                unit = delay_config.get("unit", "seconds")
+                wait = rng.uniform(min_delay, max_delay)
+                if unit == "milliseconds":
+                    wait /= 1000
+                await asyncio.sleep(wait)
+
+        context.loop_item = None
+        result.status = StepStatus.COMPLETED
+        result.output = {
+            "total_items": len(items),
+            "iterations_completed": len(iteration_results),
+            "results": iteration_results,
+            "errors": errors,
         }
         result.completed_at = datetime.now(timezone.utc).isoformat()
         return result
@@ -557,6 +678,21 @@ class WorkflowEngine:
                 logger.warning(f"Workflow {workflow_id} has no steps")
                 return context
 
+            # Convert depends_on to next pointers if needed
+            # Templates use depends_on (backward), engine uses next (forward)
+            has_next = any(s.get("next") for s in steps)
+            has_depends = any(s.get("depends_on") for s in steps)
+            if has_depends and not has_next:
+                for step in steps:
+                    for dep_id in step.get("depends_on", []):
+                        # Find the dependency step and add this step to its next list
+                        for dep_step in steps:
+                            if dep_step["id"] == dep_id:
+                                if "next" not in dep_step:
+                                    dep_step["next"] = []
+                                if step["id"] not in dep_step["next"]:
+                                    dep_step["next"].append(step["id"])
+
             # Build step index for quick lookup
             step_index = {s["id"]: s for s in steps}
 
@@ -669,10 +805,31 @@ class WorkflowEngine:
             # Determine next steps based on step type
             if step_def.get("type") == "condition" and result.output:
                 branch = result.output.get("branch", "false")
+
+                # Support both formats:
+                # 1. branches: {"true": ["step-x"], "false": ["step-y"]}
+                # 2. config: {on_true: "step-x", on_false: "step-y"}
                 branches = step_def.get("branches", {})
                 next_steps = branches.get(branch, [])
+
+                if not next_steps and result.output:
+                    # Template format: on_true / on_false in config/output
+                    target = result.output.get(f"on_{branch}")
+                    if target:
+                        next_steps = [target] if isinstance(target, str) else target
+
                 if next_steps:
                     await self._execute_steps(next_steps, step_index, context)
+
+            elif step_def.get("type") == "loop" and result.status == StepStatus.COMPLETED:
+                # Loop body already executed in StepExecutor._execute_loop()
+                # Just follow next/depends_on pointers
+                next_steps = step_def.get("next", [])
+                dep_next = step_def.get("depends_on_next", [])
+                if next_steps:
+                    await self._execute_steps(next_steps, step_index, context)
+                elif dep_next:
+                    await self._execute_steps(dep_next, step_index, context)
 
             elif step_def.get("type") == "foreach" and result.status == StepStatus.COMPLETED:
                 body_steps = step_def.get("body", [])
