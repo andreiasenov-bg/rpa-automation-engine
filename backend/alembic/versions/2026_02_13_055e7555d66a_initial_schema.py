@@ -158,7 +158,7 @@ def upgrade() -> None:
     sa.Column('last_name', sa.String(), nullable=False),
     sa.Column('is_active', sa.Boolean(), nullable=False),
     sa.Column('is_superadmin', sa.Boolean(), nullable=False),
-    sa.Column('last_login_at', sa.DateTime(), nullable=True),
+    sa.Column('last_login_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('id', sa.String(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
