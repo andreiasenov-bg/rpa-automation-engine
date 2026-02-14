@@ -56,6 +56,10 @@ async def init_db():
     from db.base import Base
 
     async with engine.begin() as conn:
+        from sqlalchemy import text
+        is_pg = settings.DATABASE_URL.startswith("postgresql")
+        if is_pg:
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS btree_gin"))
         await conn.run_sync(Base.metadata.create_all)
 
 

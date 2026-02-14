@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, Text, JSON
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from db.base import BaseModel
 
@@ -27,7 +27,7 @@ class ExecutionStateModel(BaseModel):
     __tablename__ = "execution_states"
 
     execution_id = Column(String(36), unique=True, nullable=False, index=True)
-    state_data = Column(JSON, nullable=False, default=dict)
+    state_data = Column(JSONB, nullable=False, default=dict)
     updated_at = Column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
