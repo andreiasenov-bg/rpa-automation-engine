@@ -208,6 +208,10 @@ async def archive_workflow(
     return _workflow_to_response(wf)
 
 
+# Store background tasks to prevent garbage collection
+_background_tasks: set = set()
+
+
 @router.post("/{workflow_id}/execute", status_code=status.HTTP_202_ACCEPTED)
 async def trigger_workflow_execution(
     workflow_id: str,
@@ -216,8 +220,10 @@ async def trigger_workflow_execution(
 ):
     """
     Trigger manual execution of a workflow.
-    Runs the engine directly in-process and updates DB status.
+    Creates an execution record and runs the engine in the background.
+    Returns immediately with the execution_id so the frontend can poll.
     """
+    import asyncio
     import time
     from datetime import datetime, timezone
     from uuid import uuid4
@@ -235,95 +241,99 @@ async def trigger_workflow_execution(
 
     execution_id = str(uuid4())
     definition = wf.definition or {}
+    org_id = current_user.org_id
 
-    # Create execution record
+    # Create execution record as "pending"
     execution = ExecModel(
         id=execution_id,
-        organization_id=current_user.org_id,
+        organization_id=org_id,
         workflow_id=workflow_id,
         trigger_type="manual",
-        status="running",
-        started_at=datetime.now(timezone.utc),
+        status="pending",
     )
     db.add(execution)
     await db.commit()
 
-    # Run engine directly (proven to work via execute-test)
-    try:
-        from workflow.engine import WorkflowEngine
-        from workflow.checkpoint import CheckpointManager
-        from tasks.registry import get_task_registry
-
+    # Background coroutine: runs engine and updates DB
+    async def _run_in_background():
         start = time.time()
-        engine = WorkflowEngine(
-            task_registry=get_task_registry(),
-            checkpoint_manager=CheckpointManager(),
-        )
+        try:
+            from workflow.engine import WorkflowEngine
+            from workflow.checkpoint import CheckpointManager
+            from tasks.registry import get_task_registry
 
-        context = await engine.execute(
-            execution_id=execution_id,
-            workflow_id=workflow_id,
-            organization_id=current_user.org_id,
-            definition=definition,
-            variables={},
-        )
-        duration_ms = int((time.time() - start) * 1000)
-
-        # Check for failures
-        failed_steps = [
-            sid for sid, r in context.steps.items()
-            if hasattr(r, 'status') and str(r.status) == 'failed'
-        ]
-
-        final_status = "failed" if failed_steps else "completed"
-        error_msg = f"Steps failed: {', '.join(failed_steps)}" if failed_steps else None
-
-        # Update DB directly
-        async with AsyncSessionLocal() as session:
-            await session.execute(
-                sa_update(ExecModel)
-                .where(ExecModel.id == execution_id)
-                .values(
-                    status=final_status,
-                    duration_ms=duration_ms,
-                    completed_at=datetime.now(timezone.utc),
-                    error_message=error_msg,
+            # Mark as running
+            async with AsyncSessionLocal() as session:
+                await session.execute(
+                    sa_update(ExecModel).where(ExecModel.id == execution_id)
+                    .values(status="running", started_at=datetime.now(timezone.utc))
                 )
+                await session.commit()
+
+            engine = WorkflowEngine(
+                task_registry=get_task_registry(),
+                checkpoint_manager=CheckpointManager(),
             )
-            await session.commit()
 
-        return {
-            "id": execution_id,
-            "workflow_id": workflow_id,
-            "trigger_type": "manual",
-            "status": final_status,
-            "duration_ms": duration_ms,
-            "error_message": error_msg,
-            "steps_completed": len(context.steps) - len(failed_steps),
-            "steps_failed": len(failed_steps),
-        }
+            context = await engine.execute(
+                execution_id=execution_id,
+                workflow_id=workflow_id,
+                organization_id=org_id,
+                definition=definition,
+                variables={},
+            )
+            duration_ms = int((time.time() - start) * 1000)
 
-    except Exception as e:
-        logger.error(f"Execution {execution_id} failed: {e}", exc_info=True)
-        async with AsyncSessionLocal() as session:
-            await session.execute(
-                sa_update(ExecModel)
-                .where(ExecModel.id == execution_id)
-                .values(
-                    status="failed",
-                    completed_at=datetime.now(timezone.utc),
-                    error_message=str(e),
+            # Check for failures
+            failed_steps = [
+                sid for sid, r in context.steps.items()
+                if hasattr(r, 'status') and str(r.status) == 'failed'
+            ]
+            final_status = "failed" if failed_steps else "completed"
+            error_msg = f"Steps failed: {', '.join(failed_steps)}" if failed_steps else None
+
+            async with AsyncSessionLocal() as session:
+                await session.execute(
+                    sa_update(ExecModel).where(ExecModel.id == execution_id)
+                    .values(
+                        status=final_status,
+                        duration_ms=duration_ms,
+                        completed_at=datetime.now(timezone.utc),
+                        error_message=error_msg,
+                    )
                 )
-            )
-            await session.commit()
+                await session.commit()
+            logger.info(f"Execution {execution_id} finished: {final_status} in {duration_ms}ms")
 
-        return {
-            "id": execution_id,
-            "workflow_id": workflow_id,
-            "trigger_type": "manual",
-            "status": "failed",
-            "error_message": str(e),
-        }
+        except Exception as e:
+            duration_ms = int((time.time() - start) * 1000)
+            logger.error(f"Execution {execution_id} failed: {e}", exc_info=True)
+            try:
+                async with AsyncSessionLocal() as session:
+                    await session.execute(
+                        sa_update(ExecModel).where(ExecModel.id == execution_id)
+                        .values(
+                            status="failed",
+                            duration_ms=duration_ms,
+                            completed_at=datetime.now(timezone.utc),
+                            error_message=str(e)[:500],
+                        )
+                    )
+                    await session.commit()
+            except Exception as db_err:
+                logger.error(f"Failed to update execution status: {db_err}")
+
+    # Launch background task and store reference to prevent GC
+    task = asyncio.create_task(_run_in_background())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+    return {
+        "id": execution_id,
+        "workflow_id": workflow_id,
+        "trigger_type": "manual",
+        "status": "pending",
+    }
 
 
 @router.post("/{workflow_id}/execute-test")
