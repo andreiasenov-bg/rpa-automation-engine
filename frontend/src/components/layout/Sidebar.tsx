@@ -17,6 +17,7 @@ import {
   Wrench,
   Puzzle,
   FileText,
+  Wand2,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import { useLocale } from '@/i18n';
@@ -26,6 +27,7 @@ const navItems = [
   { to: '/workflows', icon: GitBranch, i18nKey: 'nav.workflows' },
   { to: '/executions', icon: Play, i18nKey: 'nav.executions' },
   { to: '/templates', icon: BookOpen, i18nKey: 'nav.templates' },
+  { to: '/create', icon: Wand2, i18nKey: 'nav.aiCreator' },
   { to: '/triggers', icon: Zap, i18nKey: 'nav.triggers' },
   { to: '/schedules', icon: CalendarClock, i18nKey: 'nav.schedules' },
   { to: '/credentials', icon: Key, i18nKey: 'nav.credentials' },

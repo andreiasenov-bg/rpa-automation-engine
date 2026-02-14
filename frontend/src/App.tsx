@@ -30,6 +30,7 @@ const AdminPage = lazy(() => import('@/pages/AdminPage'));
 const PluginsPage = lazy(() => import('@/pages/PluginsPage'));
 const ApiDocsPage = lazy(() => import('@/pages/ApiDocsPage'));
 const ExecutionDetailPage = lazy(() => import('@/pages/ExecutionDetailPage'));
+const AICreatorPage = lazy(() => import('@/pages/AICreatorPage'));
 
 import ErrorBoundary from '@/components/ErrorBoundary';
 import ToastContainer from '@/components/ToastContainer';
@@ -87,6 +88,7 @@ function AppRoutes() {
         <Route path="users" element={<Suspense fallback={<PageLoader />}><UsersPage /></Suspense>} />
         <Route path="settings" element={<Suspense fallback={<PageLoader />}><SettingsPage /></Suspense>} />
         <Route path="templates" element={<Suspense fallback={<PageLoader />}><TemplatesPage /></Suspense>} />
+        <Route path="create" element={<Suspense fallback={<PageLoader />}><AICreatorPage /></Suspense>} />
         <Route path="agents" element={<Suspense fallback={<PageLoader />}><AgentsPage /></Suspense>} />
         <Route path="notifications" element={<Suspense fallback={<PageLoader />}><NotificationSettingsPage /></Suspense>} />
         <Route path="audit-log" element={<Suspense fallback={<PageLoader />}><AuditLogPage /></Suspense>} />
