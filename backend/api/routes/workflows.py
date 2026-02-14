@@ -208,35 +208,124 @@ async def archive_workflow(
     return _workflow_to_response(wf)
 
 
-@router.post("/{workflow_id}/execute", response_model=ExecutionResponse, status_code=status.HTTP_202_ACCEPTED)
+@router.post("/{workflow_id}/execute", status_code=status.HTTP_202_ACCEPTED)
 async def trigger_workflow_execution(
     workflow_id: str,
+    background_tasks: "BackgroundTasks" = None,
     current_user: TokenPayload = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
-) -> ExecutionResponse:
+):
     """
     Trigger manual execution of a workflow.
-    Returns 202 Accepted with the execution record.
+    Runs the engine directly in-process and updates DB status.
     """
-    svc = WorkflowService(db)
-    execution_id = await svc.execute(
-        workflow_id=workflow_id,
-        organization_id=current_user.org_id,
-        trigger_type="manual",
-    )
+    import time
+    from datetime import datetime, timezone
+    from uuid import uuid4
+    from fastapi import BackgroundTasks
+    from db.session import AsyncSessionLocal
+    from db.models.execution import Execution as ExecModel
+    from sqlalchemy import update as sa_update
 
-    if not execution_id:
+    svc = WorkflowService(db)
+    wf = await svc.get_by_id_and_org(workflow_id, current_user.org_id)
+    if not wf or not wf.is_enabled:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Workflow not found or disabled",
         )
 
-    return ExecutionResponse(
+    execution_id = str(uuid4())
+    definition = wf.definition or {}
+
+    # Create execution record
+    execution = ExecModel(
         id=execution_id,
+        organization_id=current_user.org_id,
         workflow_id=workflow_id,
         trigger_type="manual",
-        status="pending",
+        status="running",
+        started_at=datetime.now(timezone.utc),
     )
+    db.add(execution)
+    await db.commit()
+
+    # Run engine directly (proven to work via execute-test)
+    try:
+        from workflow.engine import WorkflowEngine
+        from workflow.checkpoint import CheckpointManager
+        from tasks.registry import get_task_registry
+
+        start = time.time()
+        engine = WorkflowEngine(
+            task_registry=get_task_registry(),
+            checkpoint_manager=CheckpointManager(),
+        )
+
+        context = await engine.execute(
+            execution_id=execution_id,
+            workflow_id=workflow_id,
+            organization_id=current_user.org_id,
+            definition=definition,
+            variables={},
+        )
+        duration_ms = int((time.time() - start) * 1000)
+
+        # Check for failures
+        failed_steps = [
+            sid for sid, r in context.steps.items()
+            if hasattr(r, 'status') and str(r.status) == 'failed'
+        ]
+
+        final_status = "failed" if failed_steps else "completed"
+        error_msg = f"Steps failed: {', '.join(failed_steps)}" if failed_steps else None
+
+        # Update DB directly
+        async with AsyncSessionLocal() as session:
+            await session.execute(
+                sa_update(ExecModel)
+                .where(ExecModel.id == execution_id)
+                .values(
+                    status=final_status,
+                    duration_ms=duration_ms,
+                    completed_at=datetime.now(timezone.utc),
+                    error_message=error_msg,
+                )
+            )
+            await session.commit()
+
+        return {
+            "id": execution_id,
+            "workflow_id": workflow_id,
+            "trigger_type": "manual",
+            "status": final_status,
+            "duration_ms": duration_ms,
+            "error_message": error_msg,
+            "steps_completed": len(context.steps) - len(failed_steps),
+            "steps_failed": len(failed_steps),
+        }
+
+    except Exception as e:
+        logger.error(f"Execution {execution_id} failed: {e}", exc_info=True)
+        async with AsyncSessionLocal() as session:
+            await session.execute(
+                sa_update(ExecModel)
+                .where(ExecModel.id == execution_id)
+                .values(
+                    status="failed",
+                    completed_at=datetime.now(timezone.utc),
+                    error_message=str(e),
+                )
+            )
+            await session.commit()
+
+        return {
+            "id": execution_id,
+            "workflow_id": workflow_id,
+            "trigger_type": "manual",
+            "status": "failed",
+            "error_message": str(e),
+        }
 
 
 @router.post("/{workflow_id}/execute-test")

@@ -177,29 +177,47 @@ class ExecutionContext:
 
 # ─── Expression Evaluator ─────────────────────────────────────
 
+class _DotDict(dict):
+    """Dict that supports attribute-style access for eval expressions.
+    Handles step ID mismatches: step-1 vs step_1."""
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError:
+            alt = name.replace('_', '-')
+            if alt in self:
+                return self[alt]
+            raise AttributeError(f"No key '{name}' or '{alt}'")
+
+    def __setattr__(self, name, value):
+        self[name] = value
+
+
+def _make_dot_dict(obj):
+    """Recursively convert dicts to _DotDict for eval-friendly access."""
+    if isinstance(obj, dict) and not isinstance(obj, _DotDict):
+        return _DotDict({k: _make_dot_dict(v) for k, v in obj.items()})
+    elif isinstance(obj, list):
+        return [_make_dot_dict(item) for item in obj]
+    return obj
+
+
 class ExpressionEvaluator:
     """Evaluates template expressions like {{ steps.step_1.output.name }}.
 
     Supports:
     - Variable references: {{ variables.input_file }}
-    - Step output references: {{ steps.step_1.output }}
+    - Step output references: {{ steps.step_1.categories }}
     - Trigger data: {{ trigger.payload.order_id }}
     - Loop data: {{ loop.index }}, {{ loop.item }}
-    - Simple comparisons: {{ steps.step_1.status_code == 200 }}
-    - String operations: {{ variables.name | upper }}
+    - Comparisons: {{ steps.step_1.status_code == 200 }}
+    - List slicing: {{ steps.step_1.categories[0:5] }}
+    - Builtins: not, len, True, False, None
     """
 
     @staticmethod
     def evaluate(expression: str, context: ExecutionContext) -> Any:
-        """Evaluate a template expression against the execution context.
-
-        Args:
-            expression: Expression string, possibly with {{ }} markers
-            context: Current execution context
-
-        Returns:
-            Evaluated value
-        """
+        """Evaluate a template expression against the execution context."""
         if not isinstance(expression, str):
             return expression
 
@@ -210,46 +228,74 @@ class ExpressionEvaluator:
         elif "{{" not in expr:
             return expression  # Not a template expression
 
-        # Build evaluation namespace
-        namespace = {
-            "variables": context.variables,
-            "steps": {},
-            "trigger": {"payload": context.trigger_payload},
-            "loop": {
-                "index": context.loop_index,
-                "item": context.loop_item,
-            },
-        }
-
-        # Populate step outputs
+        # Build evaluation namespace with DotDict for attribute access
+        steps_ns = _DotDict()
         for sid, result in context.steps.items():
-            namespace["steps"][sid] = {
-                "output": result.output,
-                "status": result.status.value,
+            step_data = _DotDict({
+                "output": _make_dot_dict(result.output) if result.output else None,
+                "status": result.status.value if hasattr(result.status, 'value') else str(result.status),
                 "error": result.error,
                 "duration_ms": result.duration_ms,
-            }
+            })
+            # Flatten output fields to step level for convenience:
+            # steps.step_1.categories instead of steps.step_1.output.categories
+            if isinstance(result.output, dict):
+                for k, v in result.output.items():
+                    if k not in step_data:
+                        step_data[k] = _make_dot_dict(v)
+            steps_ns[sid] = step_data
 
-        # Resolve dot-notation path
+        namespace = _DotDict({
+            "variables": _make_dot_dict(context.variables),
+            "steps": steps_ns,
+            "trigger": _DotDict({"payload": _make_dot_dict(context.trigger_payload)}),
+            "loop": _DotDict({
+                "index": context.loop_index,
+                "item": _make_dot_dict(context.loop_item) if isinstance(context.loop_item, dict) else context.loop_item,
+            }),
+            "item": _make_dot_dict(context.loop_item) if isinstance(context.loop_item, dict) else context.loop_item,
+        })
+
+        # Try simple dot-notation path first (fast path)
         try:
             return ExpressionEvaluator._resolve_path(expr, namespace)
         except Exception:
-            # Try as a simple Python expression (safe subset)
-            try:
-                return eval(expr, {"__builtins__": {}}, namespace)
-            except Exception as e:
-                logger.warning(f"Expression eval failed: {expr} -> {e}")
-                return expression
+            pass
+
+        # Fall back to Python eval with safe builtins
+        safe_builtins = {
+            "True": True, "False": False, "None": None,
+            "not": lambda x: not x, "len": len,
+            "int": int, "float": float, "str": str,
+            "bool": bool, "list": list, "abs": abs,
+            "min": min, "max": max, "range": range,
+        }
+        try:
+            return eval(expr, {"__builtins__": safe_builtins}, namespace)
+        except Exception as e:
+            logger.warning(f"Expression eval failed: {expr} -> {e}")
+            return expression
 
     @staticmethod
     def _resolve_path(path: str, namespace: dict) -> Any:
         """Resolve a dot-notation path like 'steps.step_1.output.name'."""
+        # Can't resolve paths with brackets, comparisons, or function calls
+        if any(c in path for c in "[]()!=<>+-*/"):
+            raise ValueError("Not a simple dot path")
+
         parts = path.split(".")
         current = namespace
 
         for part in parts:
             if isinstance(current, dict):
-                current = current[part]
+                if part in current:
+                    current = current[part]
+                else:
+                    alt = part.replace('_', '-') if '_' in part else part.replace('-', '_')
+                    if alt in current:
+                        current = current[alt]
+                    else:
+                        raise KeyError(f"Cannot resolve '{part}' in path '{path}'")
             elif isinstance(current, list):
                 current = current[int(part)]
             elif hasattr(current, part):
