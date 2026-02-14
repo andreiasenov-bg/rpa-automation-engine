@@ -239,123 +239,6 @@ def find_best_answer(question: str) -> dict:
     return KNOWLEDGE_BASE[best_topic]
 
 
-def detect_smart_actions(user_message: str, ai_response: str) -> list[dict]:
-    """Detect what the user wants and generate action buttons server-side.
-
-    This is the RELIABLE action generation — doesn't depend on AI output format.
-    Analyzes the user message + AI response to produce appropriate actions.
-    """
-    from api.routes.template_library import BUILTIN_TEMPLATES
-
-    q = (user_message + " " + ai_response).lower()
-    actions = []
-
-    # ── Intent: User wants to CREATE something ──────────────────────────────
-    create_keywords = [
-        "създай", "направи", "create", "build", "make", "генерирай",
-        "generate", "искам", "i want", "need", "трябва ми", "може ли",
-        "помогни ми да направя", "help me create", "set up", "настрой",
-    ]
-    wants_creation = any(kw in user_message.lower() for kw in create_keywords)
-
-    if wants_creation:
-        # Try to match a template
-        best_template = None
-        best_score = 0
-        for tpl in BUILTIN_TEMPLATES:
-            score = 0
-            match_text = user_message.lower()
-            # Check template name words
-            for word in tpl["name"].lower().split():
-                if len(word) > 3 and word in match_text:
-                    score += 3
-            # Check tags
-            for tag in tpl.get("tags", []):
-                if tag.lower() in match_text:
-                    score += 2
-            # Check category
-            if tpl["category"].replace("-", " ") in match_text:
-                score += 1
-            # Check description keywords
-            for word in tpl["description"].lower().split():
-                if len(word) > 4 and word in match_text:
-                    score += 1
-
-            if score > best_score:
-                best_score = score
-                best_template = tpl
-
-        if best_template and best_score >= 3:
-            actions.append({
-                "type": "create_from_template",
-                "label": f"Create: {best_template['name']}",
-                "icon": "Plus",
-                "params": {
-                    "template_id": best_template["id"],
-                    "name": best_template["name"],
-                },
-            })
-        # Also offer to create from scratch
-        actions.append({
-            "type": "create_workflow",
-            "label": "Create from scratch",
-            "icon": "Plus",
-            "params": {},
-        })
-
-        # Also browse templates if no good match
-        if not best_template or best_score < 3:
-            actions.append({
-                "type": "navigate",
-                "label": "Browse Templates",
-                "icon": "ArrowRight",
-                "params": {"path": "/templates"},
-            })
-
-    # ── Intent: Navigate somewhere specific ─────────────────────────────────
-    nav_keywords = {
-        "workflow": "/workflows",
-        "execution": "/executions",
-        "trigger": "/triggers",
-        "schedule": "/schedules",
-        "credential": "/credentials",
-        "agent": "/agents",
-        "template": "/templates",
-        "dashboard": "/",
-        "plugin": "/plugins",
-        "audit": "/audit-log",
-        "admin": "/admin",
-        "setting": "/settings",
-    }
-    if not wants_creation:
-        for keyword, path in nav_keywords.items():
-            if keyword in q:
-                actions.append({
-                    "type": "navigate",
-                    "label": f"Go to {keyword.title()}s",
-                    "icon": "ArrowRight",
-                    "params": {"path": path},
-                })
-                break
-
-    # ── Always have at least one action ────────────────────────────────────
-    if not actions:
-        actions.append({
-            "type": "navigate",
-            "label": "Browse Templates",
-            "icon": "ArrowRight",
-            "params": {"path": "/templates"},
-        })
-        actions.append({
-            "type": "navigate",
-            "label": "Go to Workflows",
-            "icon": "ArrowRight",
-            "params": {"path": "/workflows"},
-        })
-
-    return actions
-
-
 def match_template(user_message: str) -> tuple:
     """Match user message to a template. Returns (template, score) or (None, 0)."""
     from api.routes.template_library import BUILTIN_TEMPLATES
@@ -407,6 +290,7 @@ async def send_chat_message(
         conversations[conv_id] = []
     conversations[conv_id].append({"role": "user", "content": req.message})
 
+    answer = ""
     actions: list[dict] = []
 
     # Try external AI API first
