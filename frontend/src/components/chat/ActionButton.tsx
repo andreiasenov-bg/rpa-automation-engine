@@ -75,7 +75,7 @@ export default function ActionButton({ action, conversationId }: Props) {
         if (result.redirect) {
           setTimeout(() => {
             navigate(result.redirect!);
-            useChatStore.getState().closeChat();
+            // Don't close chat — let user see the result
           }, 800);
         }
       } else {
