@@ -3,16 +3,59 @@
 These tasks bridge the Celery worker with the WorkflowEngine.
 When a trigger fires or a user clicks "Execute", a Celery task
 is dispatched to run the workflow asynchronously.
+
+Status updates are written directly to the database so the frontend
+can track progress in real time.
 """
 
 import asyncio
 import logging
+import time
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from worker.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
+
+# ─── Database helpers (run inside the worker's event loop) ───────
+
+async def _update_execution_status(
+    execution_id: str,
+    status: str,
+    error_message: str = None,
+    duration_ms: int = None,
+):
+    """Update execution record directly via async session."""
+    from db.session import AsyncSessionLocal
+    from db.models.execution import Execution
+    from sqlalchemy import update
+
+    values: dict = {"status": status}
+    if error_message:
+        values["error_message"] = error_message
+    if duration_ms is not None:
+        values["duration_ms"] = duration_ms
+    if status == "running":
+        values["started_at"] = datetime.now(timezone.utc)
+    if status in ("completed", "failed", "cancelled"):
+        values["completed_at"] = datetime.now(timezone.utc)
+
+    try:
+        async with AsyncSessionLocal() as session:
+            await session.execute(
+                update(Execution)
+                .where(Execution.id == execution_id)
+                .values(**values)
+            )
+            await session.commit()
+        logger.info(f"Execution {execution_id} → {status}")
+    except Exception as e:
+        logger.error(f"Failed to update execution {execution_id} to {status}: {e}")
+
+
+# ─── Main execution task ─────────────────────────────────────────
 
 @celery_app.task(
     name="worker.tasks.workflow.execute_workflow",
@@ -43,30 +86,80 @@ def execute_workflow(
     """
     logger.info(f"Starting workflow execution: {execution_id} (workflow: {workflow_id})")
 
-    try:
-        # Run async engine in sync Celery context
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
 
-        try:
-            result = loop.run_until_complete(
-                _run_workflow(
-                    execution_id=execution_id,
-                    workflow_id=workflow_id,
-                    organization_id=organization_id,
-                    definition=definition,
-                    variables=variables or {},
-                    trigger_payload=trigger_payload or {},
-                )
+    start_time = time.time()
+
+    try:
+        # Mark as running
+        loop.run_until_complete(
+            _update_execution_status(execution_id, "running")
+        )
+
+        # Execute
+        result = loop.run_until_complete(
+            _run_workflow(
+                execution_id=execution_id,
+                workflow_id=workflow_id,
+                organization_id=organization_id,
+                definition=definition,
+                variables=variables or {},
+                trigger_payload=trigger_payload or {},
             )
-            return result
-        finally:
-            loop.close()
+        )
+
+        duration_ms = int((time.time() - start_time) * 1000)
+
+        # Mark as completed
+        loop.run_until_complete(
+            _update_execution_status(
+                execution_id,
+                "completed",
+                duration_ms=duration_ms,
+            )
+        )
+
+        logger.info(f"Workflow {execution_id} completed in {duration_ms}ms")
+        return result
 
     except Exception as exc:
-        logger.error(f"Workflow execution failed: {execution_id}: {exc}")
-        raise self.retry(exc=exc)
+        duration_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(exc)
+        logger.error(f"Workflow execution failed: {execution_id}: {error_msg}")
 
+        # Mark as failed in DB
+        try:
+            loop.run_until_complete(
+                _update_execution_status(
+                    execution_id,
+                    "failed",
+                    error_message=error_msg,
+                    duration_ms=duration_ms,
+                )
+            )
+        except Exception:
+            logger.error(f"Could not update failed status for {execution_id}")
+
+        # Only retry on transient errors, not on workflow logic errors
+        if self.request.retries < self.max_retries and _is_transient_error(exc):
+            raise self.retry(exc=exc)
+        # Don't retry workflow logic errors — they'll just fail again
+        return {"error": error_msg, "status": "failed"}
+
+    finally:
+        loop.close()
+
+
+def _is_transient_error(exc: Exception) -> bool:
+    """Check if an error is transient (worth retrying)."""
+    transient_types = (ConnectionError, TimeoutError, OSError)
+    error_msg = str(exc).lower()
+    transient_keywords = ["connection", "timeout", "unavailable", "reset"]
+    return isinstance(exc, transient_types) or any(kw in error_msg for kw in transient_keywords)
+
+
+# ─── Async workflow runner ──────────────────────────────────────
 
 async def _run_workflow(
     execution_id: str,
@@ -84,9 +177,17 @@ async def _run_workflow(
     task_registry = get_task_registry()
     checkpoint_mgr = CheckpointManager()
 
+    # Step progress callback — updates DB per step
+    async def on_step_complete(context, step_result):
+        """Callback fired after each step completes."""
+        step_id = getattr(step_result, 'step_id', None) or 'unknown'
+        status = getattr(step_result, 'status', 'unknown')
+        logger.info(f"Step {step_id} → {status} (execution: {execution_id})")
+
     engine = WorkflowEngine(
         task_registry=task_registry,
         checkpoint_manager=checkpoint_mgr,
+        on_step_complete=on_step_complete,
     )
 
     context = await engine.execute(
@@ -100,6 +201,8 @@ async def _run_workflow(
 
     return context.to_dict()
 
+
+# ─── Resume task ─────────────────────────────────────────────────
 
 @celery_app.task(
     name="worker.tasks.workflow.resume_workflow",
