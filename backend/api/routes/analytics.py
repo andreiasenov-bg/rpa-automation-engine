@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, HTTPException, status, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, desc
+from sqlalchemy import select, func, and_, desc, case
 from typing import Optional
 from datetime import datetime, timedelta
 import logging
@@ -199,13 +199,13 @@ async def get_workflow_performance(
         Workflow.name.label("workflow_name"),
         func.count(Execution.id).label("execution_count"),
         func.sum(
-            func.case(
+            case(
                 (Execution.status == "completed", 1),
                 else_=0,
             )
         ).label("success_count"),
         func.sum(
-            func.case(
+            case(
                 (Execution.status == "failed", 1),
                 else_=0,
             )
