@@ -186,7 +186,7 @@ async def seed():
         print(f"[seed] {len(roles)} roles ready")
 
         # 4. Create admin user
-        admin_email = os.environ.get("ADMIN_EMAIL", "admin@rpa-engine.local")
+        admin_email = os.environ.get("ADMIN_EMAIL", "admin@rpa-engine.com")
         admin_password = os.environ.get("ADMIN_PASSWORD", "admin123!")
 
         result = await db.execute(
