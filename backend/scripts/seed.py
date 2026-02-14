@@ -21,7 +21,7 @@ async def seed():
     from db.models.permission import Permission
     from core.security import hash_password
     from core.utils import generate_slug
-    from sqlalchemy import select
+    from sqlalchemy import select, insert
 
     # Initialize DB tables
     await init_db()
@@ -170,10 +170,16 @@ async def seed():
                 )
                 db.add(role)
                 await db.flush()
-                # Assign permissions
+                # Assign permissions via association table
+                from db.models.permission import role_permissions
                 for perm_code in role_def["permissions"]:
                     if perm_code in permissions:
-                        role.permissions.append(permissions[perm_code])
+                        await db.execute(
+                            insert(role_permissions).values(
+                                role_id=role.id,
+                                permission_id=permissions[perm_code].id,
+                            )
+                        )
             roles[slug] = role
 
         await db.flush()
@@ -201,9 +207,15 @@ async def seed():
             db.add(admin_user)
             await db.flush()
 
-            # Assign admin role
+            # Assign admin role via association table
             if "admin" in roles:
-                admin_user.roles.append(roles["admin"])
+                from db.models.role import user_roles
+                await db.execute(
+                    insert(user_roles).values(
+                        user_id=admin_user.id,
+                        role_id=roles["admin"].id,
+                    )
+                )
 
             print(f"[seed] Created admin user: {admin_email} (password: {admin_password})")
         else:

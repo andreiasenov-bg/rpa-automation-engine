@@ -13,7 +13,7 @@ from typing import Optional, Callable, Any, List
 import os
 
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthCredentials
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials as HTTPAuthCredentials
 from passlib.context import CryptContext
 from pydantic import BaseModel
 import jwt

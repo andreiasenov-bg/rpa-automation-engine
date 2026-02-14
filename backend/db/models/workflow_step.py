@@ -47,7 +47,8 @@ class WorkflowStep(BaseModel):
     )
     error_handler_step: Mapped[Optional["WorkflowStep"]] = relationship(
         "WorkflowStep",
-        remote_side=[id],
+        remote_side="WorkflowStep.id",
+        foreign_keys=[error_handler_step_id],
         backref="handled_by",
         lazy="selectin",
     )
