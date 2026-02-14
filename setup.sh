@@ -75,7 +75,7 @@ if [ ! -f .env ]; then
 
     echo -e "  ${GREEN}✓${NC} Created .env from .env.example"
     echo -e "  ${YELLOW}ℹ${NC} Default admin credentials:"
-    echo -e "    Email:    ${BOLD}admin@rpa-engine.local${NC}"
+    echo -e "    Email:    ${BOLD}admin@rpa-engine.com${NC}"
     echo -e "    Password: ${BOLD}admin123!${NC}"
 else
     echo -e "  ${GREEN}✓${NC} .env already exists (keeping current values)"
@@ -166,7 +166,7 @@ echo ""
 echo -e "  ${BOLD}🌐 Open in browser:${NC}  ${CYAN}http://localhost:3000${NC}"
 echo ""
 echo -e "  ${BOLD}Login:${NC}"
-echo -e "    Email:    ${CYAN}admin@rpa-engine.local${NC}"
+echo -e "    Email:    ${CYAN}admin@rpa-engine.com${NC}"
 echo -e "    Password: ${CYAN}admin123!${NC}"
 echo ""
 echo -e "  ${BOLD}Useful URLs:${NC}"
