@@ -805,10 +805,10 @@ class WorkflowEngine:
             # Checkpoint before step
             if self._checkpoint_manager:
                 try:
+                    from workflow.checkpoint import CheckpointType
                     await self._checkpoint_manager.save_checkpoint(
                         execution_id=context.execution_id,
-                        state=context.to_dict(),
-                        checkpoint_type="before_step",
+                        checkpoint_type=CheckpointType.STEP_STARTING,
                         step_id=step_id,
                     )
                 except Exception as e:
@@ -821,11 +821,13 @@ class WorkflowEngine:
             # Checkpoint after step
             if self._checkpoint_manager:
                 try:
+                    from workflow.checkpoint import CheckpointType
+                    cp_type = CheckpointType.STEP_COMPLETED if result.status == StepStatus.COMPLETED else CheckpointType.STEP_FAILED
                     await self._checkpoint_manager.save_checkpoint(
                         execution_id=context.execution_id,
-                        state=context.to_dict(),
-                        checkpoint_type="after_step",
+                        checkpoint_type=cp_type,
                         step_id=step_id,
+                        data={"output": result.output, "error": result.error},
                     )
                 except Exception as e:
                     logger.warning(f"Checkpoint save failed: {e}")

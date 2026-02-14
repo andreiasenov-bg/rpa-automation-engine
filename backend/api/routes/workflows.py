@@ -211,7 +211,6 @@ async def archive_workflow(
 @router.post("/{workflow_id}/execute", status_code=status.HTTP_202_ACCEPTED)
 async def trigger_workflow_execution(
     workflow_id: str,
-    background_tasks: "BackgroundTasks" = None,
     current_user: TokenPayload = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -222,7 +221,6 @@ async def trigger_workflow_execution(
     import time
     from datetime import datetime, timezone
     from uuid import uuid4
-    from fastapi import BackgroundTasks
     from db.session import AsyncSessionLocal
     from db.models.execution import Execution as ExecModel
     from sqlalchemy import update as sa_update
