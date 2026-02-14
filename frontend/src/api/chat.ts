@@ -1,12 +1,29 @@
 import client from './client';
+import type { ChatAction } from '../stores/chatStore';
+
+interface ChatActionResponse {
+  type: string;
+  label: string;
+  icon: string;
+  params: Record<string, any>;
+  confirm?: boolean;
+}
 
 interface ChatResponse {
   response: string;
   conversationId: string;
+  actions?: ChatActionResponse[];
 }
 
 interface SuggestionsResponse {
   suggestions: string[];
+}
+
+interface ExecuteActionResponse {
+  success: boolean;
+  message: string;
+  execution_id?: string;
+  redirect?: string;
 }
 
 export const chatApi = {
@@ -15,6 +32,14 @@ export const chatApi = {
       message,
       conversation_id: conversationId,
       page_context: pageContext,
+    });
+    return data;
+  },
+
+  async executeAction(conversationId: string, action: ChatAction): Promise<ExecuteActionResponse> {
+    const { data } = await client.post<ExecuteActionResponse>('/chat/execute-action', {
+      conversation_id: conversationId,
+      action,
     });
     return data;
   },
