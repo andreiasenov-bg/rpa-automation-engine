@@ -356,10 +356,48 @@ def detect_smart_actions(user_message: str, ai_response: str) -> list[dict]:
     return actions
 
 
+def match_template(user_message: str) -> tuple:
+    """Match user message to a template. Returns (template, score) or (None, 0)."""
+    from api.routes.template_library import BUILTIN_TEMPLATES
+
+    best_template = None
+    best_score = 0
+    match_text = user_message.lower()
+
+    for tpl in BUILTIN_TEMPLATES:
+        score = 0
+        for word in tpl["name"].lower().split():
+            if len(word) > 3 and word in match_text:
+                score += 3
+        for tag in tpl.get("tags", []):
+            if tag.lower() in match_text:
+                score += 2
+        if tpl["category"].replace("-", " ") in match_text:
+            score += 1
+        for word in tpl["description"].lower().split():
+            if len(word) > 4 and word in match_text:
+                score += 1
+        if score > best_score:
+            best_score = score
+            best_template = tpl
+
+    return (best_template, best_score)
+
+
+def wants_to_create(user_message: str) -> bool:
+    """Check if user wants to create/build something."""
+    create_keywords = [
+        "създай", "направи", "create", "build", "make", "генерирай",
+        "generate", "искам", "i want", "need", "трябва ми", "може ли",
+        "помогни ми да направя", "help me create", "set up", "настрой",
+    ]
+    return any(kw in user_message.lower() for kw in create_keywords)
+
+
 @router.post("/message", response_model=ChatResponse)
 async def send_chat_message(
     req: ChatRequest,
-    current_user=Depends(get_current_user),
+    current_user: TokenPayload = Depends(get_current_user),
 ):
     """Send a message to the AI chat assistant."""
     conv_id = req.conversation_id or str(uuid.uuid4())[:8]
@@ -461,12 +499,112 @@ Available workflow templates (you can mention these by name):
         kb = find_best_answer(req.message)
         answer = kb["text"]
 
-    # ── SERVER-SIDE ACTION GENERATION (always reliable) ───────────────────
-    actions = detect_smart_actions(req.message, answer)
+    # ── IMMEDIATE WORKFLOW CREATION (no second round-trip needed) ─────────
+    # If user wants to create something and we match a template, CREATE IT NOW
+    # and return a navigate button to the created workflow.
+    actions: list[dict] = []
+
+    if wants_to_create(req.message):
+        template, score = match_template(req.message)
+        if template and score >= 3:
+            # CREATE the workflow right here, right now
+            try:
+                from db.database import AsyncSessionLocal
+                from db.models.workflow import Workflow
+
+                async with AsyncSessionLocal() as session:
+                    wf_id = str(uuid.uuid4())
+                    workflow = Workflow(
+                        id=wf_id,
+                        organization_id=current_user.org_id,
+                        created_by_id=current_user.sub,
+                        name=template["name"],
+                        description=template["description"],
+                        definition={
+                            "steps": template["steps"],
+                            "source_template": template["id"],
+                        },
+                        version=1,
+                        status="draft",
+                    )
+                    session.add(workflow)
+                    await session.commit()
+
+                    # Success! Add navigate button to the new workflow
+                    actions.append({
+                        "type": "navigate",
+                        "label": f"Open: {template['name']}",
+                        "icon": "ArrowRight",
+                        "params": {"path": f"/workflows/{wf_id}/edit"},
+                    })
+                    actions.append({
+                        "type": "navigate",
+                        "label": "View All Workflows",
+                        "icon": "Eye",
+                        "params": {"path": "/workflows"},
+                    })
+                    # Prepend creation confirmation to AI answer
+                    answer = f"✅ Workflow **{template['name']}** е създаден! Натисни бутона за да го отвориш в редактора.\n\n{answer}"
+
+                    print(f"[CHAT] Created workflow {wf_id} from template {template['id']}")
+
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                print(f"[CHAT ERROR] Failed to create workflow: {e}")
+                # Still provide action buttons even if DB fails
+                actions.append({
+                    "type": "navigate",
+                    "label": "Browse Templates",
+                    "icon": "ArrowRight",
+                    "params": {"path": "/templates"},
+                })
+        else:
+            # No good template match — offer browse
+            actions.append({
+                "type": "navigate",
+                "label": "Browse Templates",
+                "icon": "ArrowRight",
+                "params": {"path": "/templates"},
+            })
+            actions.append({
+                "type": "navigate",
+                "label": "Create from Scratch",
+                "icon": "Plus",
+                "params": {"path": "/workflows?action=create"},
+            })
+    else:
+        # Not a creation request — add relevant navigation
+        nav_keywords = {
+            "workflow": "/workflows", "execution": "/executions",
+            "trigger": "/triggers", "schedule": "/schedules",
+            "credential": "/credentials", "agent": "/agents",
+            "template": "/templates", "dashboard": "/",
+            "plugin": "/plugins", "audit": "/audit-log",
+            "admin": "/admin", "setting": "/settings",
+        }
+        q = req.message.lower()
+        for keyword, path in nav_keywords.items():
+            if keyword in q:
+                actions.append({
+                    "type": "navigate",
+                    "label": f"Go to {keyword.title()}s",
+                    "icon": "ArrowRight",
+                    "params": {"path": path},
+                })
+                break
+
+    # Always have at least one action
+    if not actions:
+        actions.append({
+            "type": "navigate",
+            "label": "Browse Templates",
+            "icon": "ArrowRight",
+            "params": {"path": "/templates"},
+        })
 
     conversations[conv_id].append({"role": "assistant", "content": answer})
 
-    # Keep conversation history manageable
     if len(conversations[conv_id]) > 20:
         conversations[conv_id] = conversations[conv_id][-20:]
 
