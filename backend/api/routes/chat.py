@@ -499,21 +499,18 @@ Available workflow templates (you can mention these by name):
         kb = find_best_answer(req.message)
         answer = kb["text"]
 
-    # ── IMMEDIATE WORKFLOW CREATION (no second round-trip needed) ─────────
-    # If user wants to create something and we match a template, CREATE IT NOW
-    # and return a navigate button to the created workflow.
+    # ── IMMEDIATE WORKFLOW CREATION ──────────────────────────────────────────
     actions: list[dict] = []
 
     if wants_to_create(req.message):
         template, score = match_template(req.message)
         if template and score >= 3:
-            # CREATE the workflow right here, right now
             try:
                 from db.database import AsyncSessionLocal
                 from db.models.workflow import Workflow
 
+                wf_id = str(uuid.uuid4())
                 async with AsyncSessionLocal() as session:
-                    wf_id = str(uuid.uuid4())
                     workflow = Workflow(
                         id=wf_id,
                         organization_id=current_user.org_id,
@@ -529,30 +526,27 @@ Available workflow templates (you can mention these by name):
                     )
                     session.add(workflow)
                     await session.commit()
+                    print(f"[CHAT OK] Created workflow {wf_id} from {template['id']}")
 
-                    # Success! Add navigate button to the new workflow
-                    actions.append({
-                        "type": "navigate",
-                        "label": f"Open: {template['name']}",
-                        "icon": "ArrowRight",
-                        "params": {"path": f"/workflows/{wf_id}/edit"},
-                    })
-                    actions.append({
-                        "type": "navigate",
-                        "label": "View All Workflows",
-                        "icon": "Eye",
-                        "params": {"path": "/workflows"},
-                    })
-                    # Prepend creation confirmation to AI answer
-                    answer = f"✅ Workflow **{template['name']}** е създаден! Натисни бутона за да го отвориш в редактора.\n\n{answer}"
-
-                    print(f"[CHAT] Created workflow {wf_id} from template {template['id']}")
+                # Override AI answer with clear confirmation
+                answer = (
+                    f"✅ **Workflow \"{template['name']}\" е създаден успешно!**\n\n"
+                    f"📋 {len(template['steps'])} стъпки са конфигурирани автоматично.\n"
+                    f"Отвори го от списъка с Workflows за да го прегледаш и публикуваш."
+                )
+                actions.append({
+                    "type": "navigate",
+                    "label": "Open Workflows",
+                    "icon": "ArrowRight",
+                    "params": {"path": "/workflows"},
+                })
 
             except Exception as e:
                 import traceback
                 traceback.print_exc()
-                print(f"[CHAT ERROR] Failed to create workflow: {e}")
-                # Still provide action buttons even if DB fails
+                err_str = str(e)
+                print(f"[CHAT ERROR] {err_str}")
+                answer = f"❌ Грешка при създаване: {err_str}\n\nОпитай от Templates страницата."
                 actions.append({
                     "type": "navigate",
                     "label": "Browse Templates",
@@ -560,21 +554,13 @@ Available workflow templates (you can mention these by name):
                     "params": {"path": "/templates"},
                 })
         else:
-            # No good template match — offer browse
             actions.append({
                 "type": "navigate",
                 "label": "Browse Templates",
                 "icon": "ArrowRight",
                 "params": {"path": "/templates"},
             })
-            actions.append({
-                "type": "navigate",
-                "label": "Create from Scratch",
-                "icon": "Plus",
-                "params": {"path": "/workflows?action=create"},
-            })
     else:
-        # Not a creation request — add relevant navigation
         nav_keywords = {
             "workflow": "/workflows", "execution": "/executions",
             "trigger": "/triggers", "schedule": "/schedules",
@@ -594,7 +580,6 @@ Available workflow templates (you can mention these by name):
                 })
                 break
 
-    # Always have at least one action
     if not actions:
         actions.append({
             "type": "navigate",

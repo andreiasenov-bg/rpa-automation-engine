@@ -52,8 +52,9 @@ export default function ActionButton({ action, conversationId }: Props) {
     if (action.type === 'navigate') {
       const path = action.params.path as string;
       if (path) {
+        setStatus('success');
         navigate(path);
-        useChatStore.getState().closeChat();
+        // Don't close chat — let user see the confirmation message
       }
       return;
     }
