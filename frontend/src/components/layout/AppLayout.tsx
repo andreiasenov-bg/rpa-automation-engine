@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
@@ -18,6 +18,20 @@ export default function AppLayout() {
     }
   }, []);
 
+  // Global Cmd/Ctrl+K listener to open search
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setSearchOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  const handleCloseSearch = useCallback(() => setSearchOpen(false), []);
+
   return (
     <div className="flex min-h-screen">
       <Sidebar />
@@ -29,7 +43,7 @@ export default function AppLayout() {
           </div>
         </main>
       </div>
-      {searchOpen && <GlobalSearch />}
+      {searchOpen && <GlobalSearch onClose={handleCloseSearch} />}
       <ChatAssistant />
       <OnboardingTour />
     </div>

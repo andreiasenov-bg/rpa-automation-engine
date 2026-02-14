@@ -32,12 +32,16 @@ interface SearchResult {
   url: string;
 }
 
+interface GlobalSearchProps {
+  onClose: () => void;
+}
+
 const TYPE_CONFIG: Record<string, { icon: React.ElementType; color: string; label: string }> = {
-  workflow: { icon: GitBranch, color: 'text-indigo-500 bg-indigo-50', label: 'Workflow' },
-  execution: { icon: Play, color: 'text-blue-500 bg-blue-50', label: 'Execution' },
-  agent: { icon: Server, color: 'text-emerald-500 bg-emerald-50', label: 'Agent' },
-  template: { icon: BookOpen, color: 'text-violet-500 bg-violet-50', label: 'Template' },
-  user: { icon: Users, color: 'text-amber-500 bg-amber-50', label: 'User' },
+  workflow: { icon: GitBranch, color: 'text-indigo-500 bg-indigo-50 dark:bg-indigo-900/30', label: 'Workflow' },
+  execution: { icon: Play, color: 'text-blue-500 bg-blue-50 dark:bg-blue-900/30', label: 'Execution' },
+  agent: { icon: Server, color: 'text-emerald-500 bg-emerald-50 dark:bg-emerald-900/30', label: 'Agent' },
+  template: { icon: BookOpen, color: 'text-violet-500 bg-violet-50 dark:bg-violet-900/30', label: 'Template' },
+  user: { icon: Users, color: 'text-amber-500 bg-amber-50 dark:bg-amber-900/30', label: 'User' },
 };
 
 /* ─── Search logic ─── */
@@ -109,10 +113,9 @@ async function performSearch(query: string): Promise<SearchResult[]> {
 
 /* ─── Component ─── */
 
-export default function GlobalSearch() {
+export default function GlobalSearch({ onClose }: GlobalSearchProps) {
   const { t } = useLocale();
   const navigate = useNavigate();
-  const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -120,30 +123,25 @@ export default function GlobalSearch() {
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  // Keyboard shortcut: Cmd/Ctrl+K
+  // Keyboard shortcut: Escape to close, Cmd/Ctrl+K to toggle
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
-        setOpen((prev) => !prev);
-      }
-      if (e.key === 'Escape') {
-        setOpen(false);
+        onClose();
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, []);
+  }, [onClose]);
 
-  // Focus input when opened
+  // Auto-focus input on mount
   useEffect(() => {
-    if (open) {
-      setTimeout(() => inputRef.current?.focus(), 50);
-      setQuery('');
-      setResults([]);
-      setSelectedIndex(0);
-    }
-  }, [open]);
+    setTimeout(() => inputRef.current?.focus(), 50);
+  }, []);
 
   // Debounced search
   const handleQueryChange = useCallback((value: string) => {
@@ -176,21 +174,19 @@ export default function GlobalSearch() {
     } else if (e.key === 'Enter' && results[selectedIndex]) {
       e.preventDefault();
       navigate(results[selectedIndex].url);
-      setOpen(false);
+      onClose();
     }
   };
 
   const handleSelect = (result: SearchResult) => {
     navigate(result.url);
-    setOpen(false);
+    onClose();
   };
-
-  if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-50">
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setOpen(false)} />
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
 
       {/* Modal */}
       <div className="absolute top-[15%] left-1/2 -translate-x-1/2 w-full max-w-lg">
@@ -208,7 +204,7 @@ export default function GlobalSearch() {
               className="flex-1 bg-transparent text-sm text-slate-900 dark:text-white outline-none placeholder:text-slate-400"
             />
             {loading && <Loader2 className="w-4 h-4 text-slate-400 animate-spin" />}
-            <button onClick={() => setOpen(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
               <X className="w-4 h-4" />
             </button>
           </div>
