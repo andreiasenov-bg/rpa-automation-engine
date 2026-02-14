@@ -18,11 +18,15 @@ from db.models.workflow import Workflow
 router = APIRouter()
 
 
-# ─── Built-in template library ─────────────────────────────────────────────
+# ─── Import comprehensive template library ─────────────────────────────────
 
-BUILTIN_TEMPLATES = [
+from api.routes.template_library import BUILTIN_TEMPLATES
+
+
+# Legacy templates moved to template_library.py
+_LEGACY = [
     {
-        "id": "tpl-web-scraper",
+        "id": "tpl-web-scraper-OLD",
         "name": "Web Scraper",
         "description": "Scrape data from a website using CSS selectors, then save results to a file.",
         "category": "data-extraction",

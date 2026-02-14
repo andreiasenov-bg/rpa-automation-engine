@@ -26,6 +26,14 @@ const CATEGORY_LABELS: Record<string, string> = {
   'browser-automation': 'Browser Automation',
   'reporting': 'Reporting',
   'ai-powered': 'AI Powered',
+  'finance': 'Finance & Accounting',
+  'hr': 'HR & Recruitment',
+  'e-commerce': 'E-Commerce',
+  'devops': 'DevOps & IT',
+  'customer-support': 'Customer Support',
+  'marketing': 'Marketing',
+  'compliance': 'Compliance & Legal',
+  'sales': 'Sales & CRM',
 };
 
 function DifficultyBadge({ difficulty }: { difficulty: string }) {
