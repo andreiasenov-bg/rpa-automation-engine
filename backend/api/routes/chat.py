@@ -265,34 +265,25 @@ async def send_chat_message(
 
             # Build template list for AI context
             from api.routes.template_library import BUILTIN_TEMPLATES
-            tpl_list = ", ".join([f"{t['id']} ({t['name']})" for t in BUILTIN_TEMPLATES])
+            tpl_list = "\n".join([f"- {t['id']}: {t['name']} — {t['description'][:80]}" for t in BUILTIN_TEMPLATES])
 
             page_hint = PAGE_CONTEXT_HINTS.get(req.page_context or "/", "")
             system_prompt = f"""You are an intelligent, ACTION-ORIENTED assistant for the RPA Automation Engine platform.
 {page_hint}
 
 CRITICAL RULES:
-1. When the user asks you to CREATE, BUILD, or MAKE something — DO IT immediately using actions. Don't just explain.
-2. If the user wants a workflow and a matching template exists — use create_from_template action.
-3. If the user asks "how to" do something — give a SHORT answer AND include action buttons to do it.
+1. When the user asks you to CREATE, BUILD, or MAKE something — DO IT immediately using the suggest_actions tool. Don't just explain.
+2. If the user wants a workflow and a matching template exists — use the suggest_actions tool with create_from_template type.
+3. If the user asks "how to" do something — give a SHORT answer AND use suggest_actions to offer buttons.
 4. If the user writes in Bulgarian, respond in Bulgarian.
-5. Be concise. Max 3-4 sentences of explanation, then actions.
+5. Be concise. Max 2-3 sentences, then use suggest_actions.
+6. ALWAYS call the suggest_actions tool with at least one action. The user expects you to DO things, not just talk.
 
-AVAILABLE TEMPLATES (use create_from_template with the template_id):
+AVAILABLE TEMPLATES:
 {tpl_list}
 
-After your text response, you MUST include an ACTIONS_JSON block on a new line when relevant.
-Format: ACTIONS_JSON:[{{"type":"create_from_template","label":"Create X","icon":"Plus","params":{{"template_id":"tpl-xxx","name":"My Workflow Name"}},"confirm":false}}]
-
-Action types:
-- navigate: Go to a page. params: {{"path": "/workflows"}}
-- create_from_template: Create a workflow from template. params: {{"template_id": "tpl-xxx", "name": "Workflow Name"}}
-- execute_workflow: Run a workflow. params: {{"workflow_id": "..."}}
-- retry_execution: Retry failed execution. params: {{"execution_id": "..."}}
-- view_logs: View execution logs. params: {{"execution_id": "..."}}
-Icons: ArrowRight, Play, RotateCcw, XCircle, Eye, Plus
-
-ALWAYS include at least one action button. The user expects you to DO things, not just talk."""
+Example: If user says "create an Amazon price tracker", call suggest_actions with:
+  type=create_from_template, template_id=tpl-amazon-price-tracker, name=Amazon Price Tracker"""
 
             # Build messages (without system for Anthropic — it goes separately)
             chat_messages = []
@@ -301,9 +292,51 @@ ALWAYS include at least one action button. The user expects you to DO things, no
 
             is_anthropic = "anthropic.com" in chat_api_url
 
+            # Define tools for structured action output
+            tools = [
+                {
+                    "name": "suggest_actions",
+                    "description": "Suggest action buttons for the user to click. ALWAYS use this tool to provide actionable buttons. This is required for every response.",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "actions": {
+                                "type": "array",
+                                "description": "List of action buttons to show the user",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "type": {
+                                            "type": "string",
+                                            "enum": ["navigate", "create_from_template", "execute_workflow", "retry_execution", "view_logs", "create_workflow"],
+                                            "description": "Action type"
+                                        },
+                                        "label": {
+                                            "type": "string",
+                                            "description": "Button text shown to user"
+                                        },
+                                        "icon": {
+                                            "type": "string",
+                                            "enum": ["ArrowRight", "Play", "RotateCcw", "XCircle", "Eye", "Plus"],
+                                            "description": "Lucide icon name"
+                                        },
+                                        "params": {
+                                            "type": "object",
+                                            "description": "Action parameters. For navigate: {path: '/workflows'}. For create_from_template: {template_id: 'tpl-xxx', name: 'Workflow Name'}. For execute_workflow: {workflow_id: '...'}."
+                                        }
+                                    },
+                                    "required": ["type", "label", "icon", "params"]
+                                }
+                            }
+                        },
+                        "required": ["actions"]
+                    }
+                }
+            ]
+
             async with httpx.AsyncClient(timeout=30.0) as http_client:
                 if is_anthropic:
-                    # Anthropic Messages API format
+                    # Anthropic Messages API with tool_use
                     resp = await http_client.post(
                         chat_api_url,
                         json={
@@ -311,6 +344,8 @@ ALWAYS include at least one action button. The user expects you to DO things, no
                             "system": system_prompt,
                             "messages": chat_messages,
                             "max_tokens": 1024,
+                            "tools": tools,
+                            "tool_choice": {"type": "auto"},
                         },
                         headers={
                             "x-api-key": chat_api_key,
@@ -319,7 +354,7 @@ ALWAYS include at least one action button. The user expects you to DO things, no
                         },
                     )
                 else:
-                    # OpenAI-compatible format
+                    # OpenAI-compatible format (no tool_use, use text-based fallback)
                     all_messages = [{"role": "system", "content": system_prompt}] + chat_messages
                     resp = await http_client.post(
                         chat_api_url,
@@ -335,28 +370,58 @@ ALWAYS include at least one action button. The user expects you to DO things, no
                     )
 
                 data = resp.json()
+                answer = ""
 
                 # Parse response based on API format
                 if "content" in data and isinstance(data["content"], list):
-                    # Anthropic format
-                    answer = data["content"][0]["text"]
+                    # Anthropic format — may have text + tool_use blocks
+                    for block in data["content"]:
+                        if block.get("type") == "text":
+                            answer += block["text"]
+                        elif block.get("type") == "tool_use" and block.get("name") == "suggest_actions":
+                            # Extract structured actions from tool call
+                            tool_input = block.get("input", {})
+                            tool_actions = tool_input.get("actions", [])
+                            for ta in tool_actions:
+                                actions.append({
+                                    "type": ta.get("type", "navigate"),
+                                    "label": ta.get("label", "Action"),
+                                    "icon": ta.get("icon", "ArrowRight"),
+                                    "params": ta.get("params", {}),
+                                    "confirm": ta.get("confirm", False),
+                                })
                 elif "choices" in data:
                     # OpenAI format
                     answer = data["choices"][0]["message"]["content"]
                 else:
-                    # Fallback to knowledge base
+                    # API error — check for error message
+                    error_msg = data.get("error", {}).get("message", "")
+                    if error_msg:
+                        print(f"[CHAT API ERROR] {error_msg}")
                     kb = find_best_answer(req.message)
                     answer = kb["text"]
                     actions = kb.get("actions", [])
 
-                # Parse actions from AI response if present
+                # Clean up any leftover ACTIONS_JSON from text (backward compat)
                 if "ACTIONS_JSON:" in answer:
                     parts = answer.split("ACTIONS_JSON:")
                     answer = parts[0].strip()
-                    try:
-                        actions = json_module.loads(parts[1].strip())
-                    except (json_module.JSONDecodeError, IndexError):
-                        pass
+                    if not actions:
+                        try:
+                            raw = parts[1].strip()
+                            # Handle markdown code blocks
+                            if raw.startswith("```"):
+                                raw = raw.split("```")[1]
+                                if raw.startswith("json"):
+                                    raw = raw[4:]
+                            actions = json_module.loads(raw)
+                        except (json_module.JSONDecodeError, IndexError):
+                            pass
+
+                answer = answer.strip()
+                if not answer:
+                    answer = "Done!"
+
                 if not actions:
                     # Fallback: add relevant actions from knowledge base
                     kb = find_best_answer(req.message)
