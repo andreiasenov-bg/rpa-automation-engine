@@ -15,7 +15,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from core.security import get_current_user
+from core.security import get_current_user, TokenPayload
 
 router = APIRouter()
 
@@ -263,24 +263,36 @@ async def send_chat_message(
             import httpx
             import json as json_module
 
-            page_hint = PAGE_CONTEXT_HINTS.get(req.page_context or "/", "")
-            system_prompt = f"""You are an intelligent assistant for the RPA Automation Engine platform.
-You help users with creating workflows, managing executions, configuring triggers,
-storing credentials, and understanding all platform features.
-{page_hint}
-Be concise, helpful, and provide actionable answers.
-If the user writes in Bulgarian, respond in Bulgarian.
-Platform features: Workflows (visual drag-and-drop editor with 10 task types),
-Executions (real-time monitoring), Credentials (AES-256 encrypted vault),
-Triggers (cron, webhook, file watcher, email, database, API poll, manual, event),
-Schedules (cron-based), Agents (distributed workers), Templates (pre-built patterns),
-Admin (roles, permissions, RBAC), Audit Log, Plugins, Analytics Dashboard.
+            # Build template list for AI context
+            from api.routes.template_library import BUILTIN_TEMPLATES
+            tpl_list = ", ".join([f"{t['id']} ({t['name']})" for t in BUILTIN_TEMPLATES])
 
-IMPORTANT: After your text response, you may include a JSON actions block on a NEW LINE.
-Format: ACTIONS_JSON:[{{"type":"navigate","label":"Go to X","icon":"ArrowRight","params":{{"path":"/x"}},"confirm":false}}]
-Action types: navigate, execute_workflow, retry_execution, cancel_execution, view_logs, create_workflow
+            page_hint = PAGE_CONTEXT_HINTS.get(req.page_context or "/", "")
+            system_prompt = f"""You are an intelligent, ACTION-ORIENTED assistant for the RPA Automation Engine platform.
+{page_hint}
+
+CRITICAL RULES:
+1. When the user asks you to CREATE, BUILD, or MAKE something — DO IT immediately using actions. Don't just explain.
+2. If the user wants a workflow and a matching template exists — use create_from_template action.
+3. If the user asks "how to" do something — give a SHORT answer AND include action buttons to do it.
+4. If the user writes in Bulgarian, respond in Bulgarian.
+5. Be concise. Max 3-4 sentences of explanation, then actions.
+
+AVAILABLE TEMPLATES (use create_from_template with the template_id):
+{tpl_list}
+
+After your text response, you MUST include an ACTIONS_JSON block on a new line when relevant.
+Format: ACTIONS_JSON:[{{"type":"create_from_template","label":"Create X","icon":"Plus","params":{{"template_id":"tpl-xxx","name":"My Workflow Name"}},"confirm":false}}]
+
+Action types:
+- navigate: Go to a page. params: {{"path": "/workflows"}}
+- create_from_template: Create a workflow from template. params: {{"template_id": "tpl-xxx", "name": "Workflow Name"}}
+- execute_workflow: Run a workflow. params: {{"workflow_id": "..."}}
+- retry_execution: Retry failed execution. params: {{"execution_id": "..."}}
+- view_logs: View execution logs. params: {{"execution_id": "..."}}
 Icons: ArrowRight, Play, RotateCcw, XCircle, Eye, Plus
-Only include actions that are directly relevant to the user's question."""
+
+ALWAYS include at least one action button. The user expects you to DO things, not just talk."""
 
             # Build messages (without system for Anthropic — it goes separately)
             chat_messages = []
@@ -378,12 +390,12 @@ Only include actions that are directly relevant to the user's question."""
 @router.post("/execute-action", response_model=ExecuteActionResponse)
 async def execute_action(
     req: ExecuteActionRequest,
-    current_user=Depends(get_current_user),
+    current_user: TokenPayload = Depends(get_current_user),
 ):
     """Execute an action from the chat assistant.
 
     Supports: navigate, execute_workflow, retry_execution,
-    cancel_execution, view_logs, create_workflow.
+    cancel_execution, view_logs, create_workflow, create_from_template.
     """
     action = req.action
     action_type = action.type
@@ -401,31 +413,34 @@ async def execute_action(
             workflow_id = params.get("workflow_id")
             if not workflow_id:
                 return ExecuteActionResponse(success=False, message="No workflow ID provided.")
-            # Import and call workflow execution service
             try:
-                from db.database import get_db
-                from sqlalchemy.orm import Session
-                db: Session = next(get_db())
+                from db.database import AsyncSessionLocal
                 from db.models.execution import Execution
                 from db.models.workflow import Workflow
-                wf = db.query(Workflow).filter(Workflow.id == workflow_id).first()
-                if not wf:
-                    return ExecuteActionResponse(success=False, message=f"Workflow {workflow_id} not found.")
-                new_exec = Execution(
-                    workflow_id=wf.id,
-                    status="pending",
-                    triggered_by=current_user.get("sub", "chat"),
-                    trigger_type="manual",
-                )
-                db.add(new_exec)
-                db.commit()
-                db.refresh(new_exec)
-                return ExecuteActionResponse(
-                    success=True,
-                    message=f"Workflow '{wf.name}' started successfully!",
-                    execution_id=str(new_exec.id),
-                    redirect=f"/executions",
-                )
+                from sqlalchemy import select
+
+                async with AsyncSessionLocal() as session:
+                    result = await session.execute(
+                        select(Workflow).where(Workflow.id == workflow_id)
+                    )
+                    wf = result.scalar_one_or_none()
+                    if not wf:
+                        return ExecuteActionResponse(success=False, message=f"Workflow {workflow_id} not found.")
+                    new_exec = Execution(
+                        workflow_id=wf.id,
+                        status="pending",
+                        triggered_by=current_user.sub,
+                        trigger_type="manual",
+                    )
+                    session.add(new_exec)
+                    await session.commit()
+                    await session.refresh(new_exec)
+                    return ExecuteActionResponse(
+                        success=True,
+                        message=f"Workflow '{wf.name}' started successfully!",
+                        execution_id=str(new_exec.id),
+                        redirect="/executions",
+                    )
             except Exception as e:
                 return ExecuteActionResponse(success=False, message=f"Could not start workflow: {str(e)}")
 
@@ -434,28 +449,32 @@ async def execute_action(
             if not execution_id:
                 return ExecuteActionResponse(success=False, message="No execution ID provided.")
             try:
-                from db.database import get_db
-                from sqlalchemy.orm import Session
-                db: Session = next(get_db())
+                from db.database import AsyncSessionLocal
                 from db.models.execution import Execution
-                old_exec = db.query(Execution).filter(Execution.id == execution_id).first()
-                if not old_exec:
-                    return ExecuteActionResponse(success=False, message=f"Execution {execution_id} not found.")
-                new_exec = Execution(
-                    workflow_id=old_exec.workflow_id,
-                    status="pending",
-                    triggered_by=current_user.get("sub", "chat"),
-                    trigger_type="retry",
-                )
-                db.add(new_exec)
-                db.commit()
-                db.refresh(new_exec)
-                return ExecuteActionResponse(
-                    success=True,
-                    message=f"Execution retried! New execution ID: {new_exec.id}",
-                    execution_id=str(new_exec.id),
-                    redirect="/executions",
-                )
+                from sqlalchemy import select
+
+                async with AsyncSessionLocal() as session:
+                    result = await session.execute(
+                        select(Execution).where(Execution.id == execution_id)
+                    )
+                    old_exec = result.scalar_one_or_none()
+                    if not old_exec:
+                        return ExecuteActionResponse(success=False, message=f"Execution {execution_id} not found.")
+                    new_exec = Execution(
+                        workflow_id=old_exec.workflow_id,
+                        status="pending",
+                        triggered_by=current_user.sub,
+                        trigger_type="retry",
+                    )
+                    session.add(new_exec)
+                    await session.commit()
+                    await session.refresh(new_exec)
+                    return ExecuteActionResponse(
+                        success=True,
+                        message=f"Execution retried! New execution ID: {new_exec.id}",
+                        execution_id=str(new_exec.id),
+                        redirect="/executions",
+                    )
             except Exception as e:
                 return ExecuteActionResponse(success=False, message=f"Retry failed: {str(e)}")
 
@@ -464,22 +483,26 @@ async def execute_action(
             if not execution_id:
                 return ExecuteActionResponse(success=False, message="No execution ID provided.")
             try:
-                from db.database import get_db
-                from sqlalchemy.orm import Session
-                db: Session = next(get_db())
+                from db.database import AsyncSessionLocal
                 from db.models.execution import Execution
-                ex = db.query(Execution).filter(Execution.id == execution_id).first()
-                if not ex:
-                    return ExecuteActionResponse(success=False, message=f"Execution {execution_id} not found.")
-                if ex.status not in ("pending", "running"):
-                    return ExecuteActionResponse(success=False, message=f"Cannot cancel — status is '{ex.status}'.")
-                ex.status = "cancelled"
-                db.commit()
-                return ExecuteActionResponse(
-                    success=True,
-                    message=f"Execution {execution_id} cancelled.",
-                    redirect="/executions",
-                )
+                from sqlalchemy import select
+
+                async with AsyncSessionLocal() as session:
+                    result = await session.execute(
+                        select(Execution).where(Execution.id == execution_id)
+                    )
+                    ex = result.scalar_one_or_none()
+                    if not ex:
+                        return ExecuteActionResponse(success=False, message=f"Execution {execution_id} not found.")
+                    if ex.status not in ("pending", "running"):
+                        return ExecuteActionResponse(success=False, message=f"Cannot cancel — status is '{ex.status}'.")
+                    ex.status = "cancelled"
+                    await session.commit()
+                    return ExecuteActionResponse(
+                        success=True,
+                        message=f"Execution {execution_id} cancelled.",
+                        redirect="/executions",
+                    )
             except Exception as e:
                 return ExecuteActionResponse(success=False, message=f"Cancel failed: {str(e)}")
 
@@ -499,6 +522,60 @@ async def execute_action(
                 message="Opening workflow creator...",
                 redirect="/workflows?action=create",
             )
+
+        elif action_type == "create_from_template":
+            template_id = params.get("template_id")
+            workflow_name = params.get("name", "New Workflow")
+            if not template_id:
+                return ExecuteActionResponse(success=False, message="No template ID provided.")
+            try:
+                from api.routes.template_library import BUILTIN_TEMPLATES
+                from db.database import AsyncSessionLocal
+                from db.models.workflow import Workflow
+
+                # Find the template
+                template = None
+                for t in BUILTIN_TEMPLATES:
+                    if t["id"] == template_id:
+                        template = t
+                        break
+                if not template:
+                    return ExecuteActionResponse(
+                        success=False,
+                        message=f"Template '{template_id}' not found.",
+                    )
+
+                # Create workflow from template using async DB
+                async with AsyncSessionLocal() as session:
+                    workflow = Workflow(
+                        id=str(uuid.uuid4()),
+                        organization_id=current_user.org_id,
+                        created_by=current_user.sub,
+                        name=workflow_name,
+                        description=template["description"],
+                        definition={
+                            "steps": template["steps"],
+                            "source_template": template_id,
+                        },
+                        version=1,
+                        status="draft",
+                    )
+                    session.add(workflow)
+                    await session.commit()
+                    await session.refresh(workflow)
+
+                    return ExecuteActionResponse(
+                        success=True,
+                        message=f"Workflow '{workflow_name}' created from template '{template['name']}'! Open the editor to configure and publish it.",
+                        redirect=f"/workflows/{workflow.id}/edit",
+                    )
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                return ExecuteActionResponse(
+                    success=False,
+                    message=f"Could not create workflow from template: {str(e)}",
+                )
 
         else:
             return ExecuteActionResponse(success=False, message=f"Unknown action type: {action_type}")

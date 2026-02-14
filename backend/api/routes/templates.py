@@ -114,7 +114,7 @@ async def instantiate_template(
 
     workflow = Workflow(
         id=str(uuid.uuid4()),
-        organization_id=current_user.org,
+        organization_id=current_user.org_id,
         created_by=current_user.sub,
         name=body.name,
         description=body.description or template["description"],
