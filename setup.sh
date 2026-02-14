@@ -59,6 +59,20 @@ echo -e "${BLUE}[2/5]${NC} Setting up environment..."
 
 if [ ! -f .env ]; then
     cp .env.example .env
+
+    # Generate unique Fernet encryption key
+    if command -v python3 &>/dev/null; then
+        NEW_KEY=$(python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" 2>/dev/null || echo "")
+        if [ -n "$NEW_KEY" ]; then
+            if [[ "$OSTYPE" == "darwin"* ]]; then
+                sed -i '' "s|ENCRYPTION_KEY=.*|ENCRYPTION_KEY=${NEW_KEY}|" .env
+            else
+                sed -i "s|ENCRYPTION_KEY=.*|ENCRYPTION_KEY=${NEW_KEY}|" .env
+            fi
+            echo -e "  ${GREEN}✓${NC} Generated unique encryption key"
+        fi
+    fi
+
     echo -e "  ${GREEN}✓${NC} Created .env from .env.example"
     echo -e "  ${YELLOW}ℹ${NC} Default admin credentials:"
     echo -e "    Email:    ${BOLD}admin@rpa-engine.local${NC}"
