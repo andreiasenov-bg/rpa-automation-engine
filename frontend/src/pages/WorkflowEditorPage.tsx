@@ -457,7 +457,7 @@ export default function WorkflowEditorPage() {
       const closest = findClosestNodeAbove(position, newNode.id);
       if (closest) {
         setEdges((eds) =>
-          addEdge({ source: closest.id, target: newNode.id, ...defaultEdgeOptions }, eds)
+          addEdge({ id: `e-${closest.id}-${newNode.id}`, source: closest.id, target: newNode.id, ...defaultEdgeOptions }, eds)
         );
       }
     },
