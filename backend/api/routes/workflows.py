@@ -239,6 +239,120 @@ async def trigger_workflow_execution(
     )
 
 
+@router.post("/{workflow_id}/execute-test")
+async def test_workflow_execution(
+    workflow_id: str,
+    current_user: TokenPayload = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Debug endpoint: runs workflow synchronously and returns full result/error.
+    """
+    import traceback
+    import time
+    from datetime import datetime, timezone
+
+    svc = WorkflowService(db)
+    wf = await svc.get_by_id_and_org(workflow_id, current_user.org_id)
+    if not wf:
+        return {"error": "Workflow not found"}
+
+    definition = wf.definition or {}
+    steps = definition.get("steps", [])
+
+    result = {
+        "workflow_id": workflow_id,
+        "workflow_name": wf.name,
+        "step_count": len(steps),
+        "step_types": [s.get("type", "unknown") for s in steps],
+        "stages": [],
+    }
+
+    # Stage 1: Check imports
+    try:
+        from workflow.engine import WorkflowEngine
+        from workflow.checkpoint import CheckpointManager
+        from tasks.registry import get_task_registry
+        result["stages"].append({"stage": "imports", "status": "ok"})
+    except Exception as e:
+        result["stages"].append({"stage": "imports", "status": "failed", "error": traceback.format_exc()})
+        return result
+
+    # Stage 2: Check task registry
+    try:
+        registry = get_task_registry()
+        available = registry.available_types
+        result["stages"].append({
+            "stage": "registry",
+            "status": "ok",
+            "available_types": available,
+            "needed_types": list(set(s.get("type", "unknown") for s in steps)),
+        })
+    except Exception as e:
+        result["stages"].append({"stage": "registry", "status": "failed", "error": traceback.format_exc()})
+        return result
+
+    # Stage 3: Check DB update
+    try:
+        from db.session import AsyncSessionLocal
+        from db.models.execution import Execution
+        from sqlalchemy import update as sa_update
+        async with AsyncSessionLocal() as session:
+            # Just test that we can query
+            r = await session.execute(
+                sa_update(Execution)
+                .where(Execution.id == "test-nonexistent")
+                .values(status="test")
+            )
+            await session.rollback()
+        result["stages"].append({"stage": "db_update", "status": "ok"})
+    except Exception as e:
+        result["stages"].append({"stage": "db_update", "status": "failed", "error": traceback.format_exc()})
+        return result
+
+    # Stage 4: Actually run the engine
+    try:
+        engine = WorkflowEngine(
+            task_registry=registry,
+            checkpoint_manager=CheckpointManager(),
+        )
+
+        start = time.time()
+        context = await engine.execute(
+            execution_id=f"test-{int(time.time())}",
+            workflow_id=workflow_id,
+            organization_id=current_user.org_id,
+            definition=definition,
+            variables={},
+        )
+        duration = int((time.time() - start) * 1000)
+
+        step_results = {}
+        for sid, sr in context.steps.items():
+            step_results[sid] = {
+                "status": str(sr.status.value if hasattr(sr.status, 'value') else sr.status),
+                "error": sr.error,
+                "duration_ms": sr.duration_ms,
+                "has_output": sr.output is not None,
+            }
+
+        result["stages"].append({
+            "stage": "engine_run",
+            "status": "ok",
+            "duration_ms": duration,
+            "step_results": step_results,
+        })
+
+    except Exception as e:
+        result["stages"].append({
+            "stage": "engine_run",
+            "status": "failed",
+            "error": traceback.format_exc(),
+        })
+
+    return result
+
+
 @router.get("/{workflow_id}/history")
 async def get_workflow_history(
     workflow_id: str,
