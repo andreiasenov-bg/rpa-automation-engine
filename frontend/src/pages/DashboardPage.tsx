@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import client from '@/api/client';
 import { useLocale } from '@/i18n';
+import ContextualHelp from '@/components/help/ContextualHelp';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import AnalyticsDashboard from '@/components/AnalyticsDashboard';
 import ActivityTimeline from '@/components/ActivityTimeline';
@@ -332,7 +333,7 @@ function SystemHealth({ stats, wsState }: { stats: DashboardStats; wsState: stri
 
 /* ─── Main page ─── */
 export default function DashboardPage() {
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [recent, setRecent] = useState<RecentExecution[]>([]);
   const [loading, setLoading] = useState(true);
@@ -422,7 +423,15 @@ export default function DashboardPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{t('dashboard.title')}</h1>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+            {t('dashboard.title')}
+            <ContextualHelp
+              id="dashboard-overview"
+              title={locale === 'bg' ? 'Табло' : 'Dashboard'}
+              content={locale === 'bg' ? 'Вашият център за управление. Кликнете на карта със статистика за детайли. Персонализирайте уиджети чрез иконата за настройки.' : 'Your command center. Click stat cards for details. Customize widgets with the gear icon.'}
+              position="bottom"
+            />
+          </h1>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">{t('dashboard.subtitle')}</p>
         </div>
         <div className="flex items-center gap-3">

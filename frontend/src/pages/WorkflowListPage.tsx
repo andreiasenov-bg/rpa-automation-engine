@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import type { Workflow } from '@/types';
 import { workflowApi } from '@/api/workflows';
+import ContextualHelp from '@/components/help/ContextualHelp';
 
 function StatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
@@ -129,7 +130,15 @@ export default function WorkflowListPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Workflows</h1>
+          <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
+            Workflows
+            <ContextualHelp
+              id="workflows-overview"
+              title="Workflows"
+              content="Create and manage automated processes. A workflow must be Published before it can be executed. Click a workflow name to open it in the visual editor."
+              position="bottom"
+            />
+          </h1>
           <p className="text-sm text-slate-500 mt-1">
             {total} workflow{total !== 1 ? 's' : ''} total
           </p>

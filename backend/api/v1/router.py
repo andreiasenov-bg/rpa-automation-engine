@@ -29,6 +29,7 @@ from api.routes import agent_tasks
 from api.routes import activity
 from api.routes import user_roles
 from api.routes import workflow_variables
+from api.routes import chat
 from api.routes import integrations as integrations_routes
 from api.routes import triggers
 from api.routes import notifications
@@ -205,4 +206,11 @@ api_v1_router.include_router(
     workflow_variables.router,
     prefix="/workflow-variables",
     tags=["Workflow Variables"],
+)
+
+# Chat Assistant
+api_v1_router.include_router(
+    chat.router,
+    prefix="/chat",
+    tags=["Chat Assistant"],
 )
