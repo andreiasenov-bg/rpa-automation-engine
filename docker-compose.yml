@@ -68,6 +68,9 @@ services:
       <<: *backend-env
       APP_ROLE: api
       UVICORN_WORKERS: "1"
+      CHAT_API_URL: ${CHAT_API_URL:-}
+      CHAT_API_KEY: ${CHAT_API_KEY:-}
+      CHAT_MODEL: ${CHAT_MODEL:-claude-sonnet-4-20250514}
     # Dev override: use uvicorn --reload directly
     command: >
       uvicorn app.main:app

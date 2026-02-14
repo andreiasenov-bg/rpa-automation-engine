@@ -261,6 +261,7 @@ async def send_chat_message(
     if chat_api_url and chat_api_key:
         try:
             import httpx
+            import json as json_module
 
             page_hint = PAGE_CONTEXT_HINTS.get(req.page_context or "/", "")
             system_prompt = f"""You are an intelligent assistant for the RPA Automation Engine platform.
@@ -275,48 +276,84 @@ Triggers (cron, webhook, file watcher, email, database, API poll, manual, event)
 Schedules (cron-based), Agents (distributed workers), Templates (pre-built patterns),
 Admin (roles, permissions, RBAC), Audit Log, Plugins, Analytics Dashboard.
 
-IMPORTANT: After your text response, you may include a JSON actions block.
+IMPORTANT: After your text response, you may include a JSON actions block on a NEW LINE.
 Format: ACTIONS_JSON:[{{"type":"navigate","label":"Go to X","icon":"ArrowRight","params":{{"path":"/x"}},"confirm":false}}]
 Action types: navigate, execute_workflow, retry_execution, cancel_execution, view_logs, create_workflow
 Icons: ArrowRight, Play, RotateCcw, XCircle, Eye, Plus
 Only include actions that are directly relevant to the user's question."""
 
-            messages = [{"role": "system", "content": system_prompt}]
+            # Build messages (without system for Anthropic — it goes separately)
+            chat_messages = []
             for msg in conversations[conv_id][-10:]:
-                messages.append(msg)
+                chat_messages.append({"role": msg["role"], "content": msg["content"]})
 
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.post(
-                    chat_api_url,
-                    json={"model": os.environ.get("CHAT_MODEL", "claude-sonnet-4-20250514"), "messages": messages, "max_tokens": 600},
-                    headers={"Authorization": f"Bearer {chat_api_key}", "Content-Type": "application/json"},
-                )
+            is_anthropic = "anthropic.com" in chat_api_url
+
+            async with httpx.AsyncClient(timeout=30.0) as http_client:
+                if is_anthropic:
+                    # Anthropic Messages API format
+                    resp = await http_client.post(
+                        chat_api_url,
+                        json={
+                            "model": os.environ.get("CHAT_MODEL", "claude-sonnet-4-20250514"),
+                            "system": system_prompt,
+                            "messages": chat_messages,
+                            "max_tokens": 1024,
+                        },
+                        headers={
+                            "x-api-key": chat_api_key,
+                            "anthropic-version": "2023-06-01",
+                            "Content-Type": "application/json",
+                        },
+                    )
+                else:
+                    # OpenAI-compatible format
+                    all_messages = [{"role": "system", "content": system_prompt}] + chat_messages
+                    resp = await http_client.post(
+                        chat_api_url,
+                        json={
+                            "model": os.environ.get("CHAT_MODEL", "gpt-4o"),
+                            "messages": all_messages,
+                            "max_tokens": 1024,
+                        },
+                        headers={
+                            "Authorization": f"Bearer {chat_api_key}",
+                            "Content-Type": "application/json",
+                        },
+                    )
+
                 data = resp.json()
 
-                if "choices" in data:
-                    answer = data["choices"][0]["message"]["content"]
-                elif "content" in data:
+                # Parse response based on API format
+                if "content" in data and isinstance(data["content"], list):
+                    # Anthropic format
                     answer = data["content"][0]["text"]
+                elif "choices" in data:
+                    # OpenAI format
+                    answer = data["choices"][0]["message"]["content"]
                 else:
+                    # Fallback to knowledge base
                     kb = find_best_answer(req.message)
                     answer = kb["text"]
                     actions = kb.get("actions", [])
 
                 # Parse actions from AI response if present
                 if "ACTIONS_JSON:" in answer:
-                    import json
                     parts = answer.split("ACTIONS_JSON:")
                     answer = parts[0].strip()
                     try:
-                        actions = json.loads(parts[1].strip())
-                    except (json.JSONDecodeError, IndexError):
+                        actions = json_module.loads(parts[1].strip())
+                    except (json_module.JSONDecodeError, IndexError):
                         pass
-                elif not actions:
+                if not actions:
                     # Fallback: add relevant actions from knowledge base
                     kb = find_best_answer(req.message)
                     actions = kb.get("actions", [])
 
-        except Exception:
+        except Exception as e:
+            # Log error for debugging, fall back to knowledge base
+            import traceback
+            traceback.print_exc()
             kb = find_best_answer(req.message)
             answer = kb["text"]
             actions = kb.get("actions", [])
