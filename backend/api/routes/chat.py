@@ -239,6 +239,123 @@ def find_best_answer(question: str) -> dict:
     return KNOWLEDGE_BASE[best_topic]
 
 
+def detect_smart_actions(user_message: str, ai_response: str) -> list[dict]:
+    """Detect what the user wants and generate action buttons server-side.
+
+    This is the RELIABLE action generation — doesn't depend on AI output format.
+    Analyzes the user message + AI response to produce appropriate actions.
+    """
+    from api.routes.template_library import BUILTIN_TEMPLATES
+
+    q = (user_message + " " + ai_response).lower()
+    actions = []
+
+    # ── Intent: User wants to CREATE something ──────────────────────────────
+    create_keywords = [
+        "създай", "направи", "create", "build", "make", "генерирай",
+        "generate", "искам", "i want", "need", "трябва ми", "може ли",
+        "помогни ми да направя", "help me create", "set up", "настрой",
+    ]
+    wants_creation = any(kw in user_message.lower() for kw in create_keywords)
+
+    if wants_creation:
+        # Try to match a template
+        best_template = None
+        best_score = 0
+        for tpl in BUILTIN_TEMPLATES:
+            score = 0
+            match_text = user_message.lower()
+            # Check template name words
+            for word in tpl["name"].lower().split():
+                if len(word) > 3 and word in match_text:
+                    score += 3
+            # Check tags
+            for tag in tpl.get("tags", []):
+                if tag.lower() in match_text:
+                    score += 2
+            # Check category
+            if tpl["category"].replace("-", " ") in match_text:
+                score += 1
+            # Check description keywords
+            for word in tpl["description"].lower().split():
+                if len(word) > 4 and word in match_text:
+                    score += 1
+
+            if score > best_score:
+                best_score = score
+                best_template = tpl
+
+        if best_template and best_score >= 3:
+            actions.append({
+                "type": "create_from_template",
+                "label": f"Create: {best_template['name']}",
+                "icon": "Plus",
+                "params": {
+                    "template_id": best_template["id"],
+                    "name": best_template["name"],
+                },
+            })
+        # Also offer to create from scratch
+        actions.append({
+            "type": "create_workflow",
+            "label": "Create from scratch",
+            "icon": "Plus",
+            "params": {},
+        })
+
+        # Also browse templates if no good match
+        if not best_template or best_score < 3:
+            actions.append({
+                "type": "navigate",
+                "label": "Browse Templates",
+                "icon": "ArrowRight",
+                "params": {"path": "/templates"},
+            })
+
+    # ── Intent: Navigate somewhere specific ─────────────────────────────────
+    nav_keywords = {
+        "workflow": "/workflows",
+        "execution": "/executions",
+        "trigger": "/triggers",
+        "schedule": "/schedules",
+        "credential": "/credentials",
+        "agent": "/agents",
+        "template": "/templates",
+        "dashboard": "/",
+        "plugin": "/plugins",
+        "audit": "/audit-log",
+        "admin": "/admin",
+        "setting": "/settings",
+    }
+    if not wants_creation:
+        for keyword, path in nav_keywords.items():
+            if keyword in q:
+                actions.append({
+                    "type": "navigate",
+                    "label": f"Go to {keyword.title()}s",
+                    "icon": "ArrowRight",
+                    "params": {"path": path},
+                })
+                break
+
+    # ── Always have at least one action ────────────────────────────────────
+    if not actions:
+        actions.append({
+            "type": "navigate",
+            "label": "Browse Templates",
+            "icon": "ArrowRight",
+            "params": {"path": "/templates"},
+        })
+        actions.append({
+            "type": "navigate",
+            "label": "Go to Workflows",
+            "icon": "ArrowRight",
+            "params": {"path": "/workflows"},
+        })
+
+    return actions
+
+
 @router.post("/message", response_model=ChatResponse)
 async def send_chat_message(
     req: ChatRequest,
@@ -261,91 +378,40 @@ async def send_chat_message(
     if chat_api_url and chat_api_key:
         try:
             import httpx
-            import json as json_module
 
             # Build template list for AI context
             from api.routes.template_library import BUILTIN_TEMPLATES
-            tpl_list = "\n".join([f"- {t['id']}: {t['name']} — {t['description'][:80]}" for t in BUILTIN_TEMPLATES])
+            tpl_list = "\n".join([f"- {t['name']}: {t['description'][:80]}" for t in BUILTIN_TEMPLATES[:15]])
 
             page_hint = PAGE_CONTEXT_HINTS.get(req.page_context or "/", "")
-            system_prompt = f"""You are an intelligent, ACTION-ORIENTED assistant for the RPA Automation Engine platform.
+            system_prompt = f"""You are a concise, action-oriented assistant for an RPA Automation Engine.
 {page_hint}
 
-CRITICAL RULES:
-1. When the user asks you to CREATE, BUILD, or MAKE something — DO IT immediately using the suggest_actions tool. Don't just explain.
-2. If the user wants a workflow and a matching template exists — use the suggest_actions tool with create_from_template type.
-3. If the user asks "how to" do something — give a SHORT answer AND use suggest_actions to offer buttons.
-4. If the user writes in Bulgarian, respond in Bulgarian.
-5. Be concise. Max 2-3 sentences, then use suggest_actions.
-6. ALWAYS call the suggest_actions tool with at least one action. The user expects you to DO things, not just talk.
+RULES:
+1. If the user writes in Bulgarian, respond in Bulgarian.
+2. Be CONCISE: max 2-3 sentences. No long explanations.
+3. If the user wants to create something, tell them you'll do it (the system will add action buttons automatically).
+4. Don't list steps — just confirm what you'll create and the system handles the rest.
 
-AVAILABLE TEMPLATES:
-{tpl_list}
+Available workflow templates (you can mention these by name):
+{tpl_list}"""
 
-Example: If user says "create an Amazon price tracker", call suggest_actions with:
-  type=create_from_template, template_id=tpl-amazon-price-tracker, name=Amazon Price Tracker"""
-
-            # Build messages (without system for Anthropic — it goes separately)
+            # Build messages for API
             chat_messages = []
             for msg in conversations[conv_id][-10:]:
                 chat_messages.append({"role": msg["role"], "content": msg["content"]})
 
             is_anthropic = "anthropic.com" in chat_api_url
 
-            # Define tools for structured action output
-            tools = [
-                {
-                    "name": "suggest_actions",
-                    "description": "Suggest action buttons for the user to click. ALWAYS use this tool to provide actionable buttons. This is required for every response.",
-                    "input_schema": {
-                        "type": "object",
-                        "properties": {
-                            "actions": {
-                                "type": "array",
-                                "description": "List of action buttons to show the user",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "type": {
-                                            "type": "string",
-                                            "enum": ["navigate", "create_from_template", "execute_workflow", "retry_execution", "view_logs", "create_workflow"],
-                                            "description": "Action type"
-                                        },
-                                        "label": {
-                                            "type": "string",
-                                            "description": "Button text shown to user"
-                                        },
-                                        "icon": {
-                                            "type": "string",
-                                            "enum": ["ArrowRight", "Play", "RotateCcw", "XCircle", "Eye", "Plus"],
-                                            "description": "Lucide icon name"
-                                        },
-                                        "params": {
-                                            "type": "object",
-                                            "description": "Action parameters. For navigate: {path: '/workflows'}. For create_from_template: {template_id: 'tpl-xxx', name: 'Workflow Name'}. For execute_workflow: {workflow_id: '...'}."
-                                        }
-                                    },
-                                    "required": ["type", "label", "icon", "params"]
-                                }
-                            }
-                        },
-                        "required": ["actions"]
-                    }
-                }
-            ]
-
             async with httpx.AsyncClient(timeout=30.0) as http_client:
                 if is_anthropic:
-                    # Anthropic Messages API with tool_use
                     resp = await http_client.post(
                         chat_api_url,
                         json={
                             "model": os.environ.get("CHAT_MODEL", "claude-sonnet-4-20250514"),
                             "system": system_prompt,
                             "messages": chat_messages,
-                            "max_tokens": 1024,
-                            "tools": tools,
-                            "tool_choice": {"type": "auto"},
+                            "max_tokens": 512,
                         },
                         headers={
                             "x-api-key": chat_api_key,
@@ -354,14 +420,13 @@ Example: If user says "create an Amazon price tracker", call suggest_actions wit
                         },
                     )
                 else:
-                    # OpenAI-compatible format (no tool_use, use text-based fallback)
                     all_messages = [{"role": "system", "content": system_prompt}] + chat_messages
                     resp = await http_client.post(
                         chat_api_url,
                         json={
                             "model": os.environ.get("CHAT_MODEL", "gpt-4o"),
                             "messages": all_messages,
-                            "max_tokens": 1024,
+                            "max_tokens": 512,
                         },
                         headers={
                             "Authorization": f"Bearer {chat_api_key}",
@@ -370,74 +435,34 @@ Example: If user says "create an Amazon price tracker", call suggest_actions wit
                     )
 
                 data = resp.json()
-                answer = ""
+                print(f"[CHAT DEBUG] API response status: {resp.status_code}")
 
-                # Parse response based on API format
+                # Parse AI text response
                 if "content" in data and isinstance(data["content"], list):
-                    # Anthropic format — may have text + tool_use blocks
                     for block in data["content"]:
                         if block.get("type") == "text":
                             answer += block["text"]
-                        elif block.get("type") == "tool_use" and block.get("name") == "suggest_actions":
-                            # Extract structured actions from tool call
-                            tool_input = block.get("input", {})
-                            tool_actions = tool_input.get("actions", [])
-                            for ta in tool_actions:
-                                actions.append({
-                                    "type": ta.get("type", "navigate"),
-                                    "label": ta.get("label", "Action"),
-                                    "icon": ta.get("icon", "ArrowRight"),
-                                    "params": ta.get("params", {}),
-                                    "confirm": ta.get("confirm", False),
-                                })
                 elif "choices" in data:
-                    # OpenAI format
                     answer = data["choices"][0]["message"]["content"]
                 else:
-                    # API error — check for error message
-                    error_msg = data.get("error", {}).get("message", "")
-                    if error_msg:
-                        print(f"[CHAT API ERROR] {error_msg}")
-                    kb = find_best_answer(req.message)
-                    answer = kb["text"]
-                    actions = kb.get("actions", [])
-
-                # Clean up any leftover ACTIONS_JSON from text (backward compat)
-                if "ACTIONS_JSON:" in answer:
-                    parts = answer.split("ACTIONS_JSON:")
-                    answer = parts[0].strip()
-                    if not actions:
-                        try:
-                            raw = parts[1].strip()
-                            # Handle markdown code blocks
-                            if raw.startswith("```"):
-                                raw = raw.split("```")[1]
-                                if raw.startswith("json"):
-                                    raw = raw[4:]
-                            actions = json_module.loads(raw)
-                        except (json_module.JSONDecodeError, IndexError):
-                            pass
+                    error_msg = data.get("error", {}).get("message", "Unknown error")
+                    print(f"[CHAT API ERROR] {error_msg}")
+                    answer = ""
 
                 answer = answer.strip()
-                if not answer:
-                    answer = "Done!"
-
-                if not actions:
-                    # Fallback: add relevant actions from knowledge base
-                    kb = find_best_answer(req.message)
-                    actions = kb.get("actions", [])
 
         except Exception as e:
-            # Log error for debugging, fall back to knowledge base
             import traceback
             traceback.print_exc()
-            kb = find_best_answer(req.message)
-            answer = kb["text"]
-            actions = kb.get("actions", [])
-    else:
+            answer = ""
+
+    # Fallback to knowledge base if no AI response
+    if not answer:
         kb = find_best_answer(req.message)
         answer = kb["text"]
-        actions = kb.get("actions", [])
+
+    # ── SERVER-SIDE ACTION GENERATION (always reliable) ───────────────────
+    actions = detect_smart_actions(req.message, answer)
 
     conversations[conv_id].append({"role": "assistant", "content": answer})
 
