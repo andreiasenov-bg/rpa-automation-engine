@@ -492,9 +492,10 @@ async def execute_action(
                     if not wf:
                         return ExecuteActionResponse(success=False, message=f"Workflow {workflow_id} not found.")
                     new_exec = Execution(
+                        id=str(uuid.uuid4()),
+                        organization_id=wf.organization_id,
                         workflow_id=wf.id,
                         status="pending",
-                        triggered_by=current_user.sub,
                         trigger_type="manual",
                     )
                     session.add(new_exec)
@@ -526,10 +527,11 @@ async def execute_action(
                     if not old_exec:
                         return ExecuteActionResponse(success=False, message=f"Execution {execution_id} not found.")
                     new_exec = Execution(
+                        id=str(uuid.uuid4()),
+                        organization_id=old_exec.organization_id,
                         workflow_id=old_exec.workflow_id,
                         status="pending",
-                        triggered_by=current_user.sub,
-                        trigger_type="retry",
+                        trigger_type="manual",
                     )
                     session.add(new_exec)
                     await session.commit()
@@ -615,7 +617,7 @@ async def execute_action(
                     workflow = Workflow(
                         id=str(uuid.uuid4()),
                         organization_id=current_user.org_id,
-                        created_by=current_user.sub,
+                        created_by_id=current_user.sub,
                         name=workflow_name,
                         description=template["description"],
                         definition={
