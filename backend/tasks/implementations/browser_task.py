@@ -1116,12 +1116,22 @@ class BrowserClickTask(BaseTask):
 class BrowserExtractTask(BaseTask):
     """Extract text/data from the current page in the shared browser session.
 
-    Config:
+    Supports three extraction modes:
+
+    1) **javascript** mode (recommended for complex scraping):
+       Run a custom JS function that returns structured data.
+       Config: { "javascript": "Array.from(document.querySelectorAll('.item')).map(..." }
+
+    2) **selectors** mode (multi-field extraction):
+       Extract multiple named fields using CSS selectors.
+       Config: { "selectors": [{"name": "titles", "selector": "h2", "extract": "text", "multiple": true}, ...] }
+
+    3) **selector** mode (simple single-field):
+       Extract from one CSS selector.
+       Config: { "selector": "h2.title", "extract": "text", "multiple": true }
+
+    Common config:
         url: Page URL — navigates only if needed (optional if preceded by navigate)
-        selector: CSS selector to extract from (required)
-        extract: What to extract — text | html | attribute (default: text)
-        attribute: Attribute name when extract=attribute
-        multiple: Extract all matching elements (default: false)
         wait_for: CSS selector to wait for before extraction
         wait_timeout: Max wait time in ms (default: 15000)
     """
@@ -1135,16 +1145,15 @@ class BrowserExtractTask(BaseTask):
         if not _check_playwright():
             return TaskResult(success=False, error="Playwright not installed")
 
-        selector = config.get("selector")
-        if not selector:
-            return TaskResult(success=False, error="Missing required config: selector")
-
         url = config.get("url")
-        extract = config.get("extract", "text")
-        attribute = config.get("attribute", "")
-        multiple = config.get("multiple", False)
         wait_for = config.get("wait_for")
         wait_timeout = config.get("wait_timeout", 15000)
+        javascript = config.get("javascript")
+        selectors = config.get("selectors")
+        selector = config.get("selector")
+
+        if not javascript and not selectors and not selector:
+            return TaskResult(success=False, error="Missing required config: provide 'javascript', 'selectors', or 'selector'")
 
         try:
             session = BrowserSessionManager.get_or_create(context)
@@ -1156,7 +1165,83 @@ class BrowserExtractTask(BaseTask):
                 except Exception:
                     logger.info(f"wait_for selector '{wait_for}' not found, continuing")
 
-            # Wait for the extraction selector itself
+            page_title = await page.title()
+            page_url = page.url
+
+            # ── Mode 1: JavaScript extraction ──────────────────────────────
+            if javascript:
+                try:
+                    result = await page.evaluate(javascript)
+                except Exception as js_err:
+                    return TaskResult(success=False, error=f"JS extraction failed: {str(js_err)}")
+
+                # Determine count
+                count = len(result) if isinstance(result, list) else 1
+
+                return TaskResult(
+                    success=True,
+                    output={
+                        "data": result,
+                        "count": count,
+                        "page_title": page_title,
+                        "page_url": page_url,
+                    },
+                )
+
+            # ── Mode 2: Multiple selectors extraction ──────────────────────
+            if selectors:
+                results: Dict[str, Any] = {}
+                for rule in selectors:
+                    name = rule.get("name", f"field_{len(results)}")
+                    sel = rule.get("selector", "")
+                    extract_type = rule.get("extract", "text")
+                    attr = rule.get("attribute", "")
+                    multi = rule.get("multiple", False)
+
+                    try:
+                        # Wait briefly for selector
+                        try:
+                            await page.wait_for_selector(sel, timeout=min(wait_timeout, 5000))
+                        except Exception:
+                            pass
+
+                        elements = await page.query_selector_all(sel)
+                        if not elements:
+                            results[name] = [] if multi else None
+                            continue
+
+                        targets = elements if multi else elements[:1]
+                        extracted: List[Any] = []
+                        for el in targets:
+                            if extract_type == "html":
+                                val = await el.inner_html()
+                            elif extract_type == "attribute" and attr:
+                                val = await el.get_attribute(attr)
+                            else:
+                                val = (await el.inner_text()).strip()
+                            extracted.append(val)
+
+                        results[name] = extracted if multi else extracted[0]
+                    except Exception as e:
+                        logger.warning("Selector extraction failed", name=name, error=str(e))
+                        results[name] = [] if multi else None
+
+                return TaskResult(
+                    success=True,
+                    output={
+                        "data": results,
+                        "page_title": page_title,
+                        "page_url": page_url,
+                        "selectors_matched": sum(1 for v in results.values() if v),
+                        "selectors_total": len(selectors),
+                    },
+                )
+
+            # ── Mode 3: Single selector extraction ─────────────────────────
+            extract = config.get("extract", "text")
+            attribute = config.get("attribute", "")
+            multiple = config.get("multiple", False)
+
             try:
                 await page.wait_for_selector(selector, timeout=min(wait_timeout, 10000))
             except Exception:
@@ -1170,7 +1255,7 @@ class BrowserExtractTask(BaseTask):
                 )
 
             targets = elements if multiple else elements[:1]
-            extracted = []
+            extracted_vals = []
             for el in targets:
                 if extract == "html":
                     val = await el.inner_html()
@@ -1178,13 +1263,15 @@ class BrowserExtractTask(BaseTask):
                     val = await el.get_attribute(attribute)
                 else:
                     val = (await el.inner_text()).strip()
-                extracted.append(val)
+                extracted_vals.append(val)
 
             return TaskResult(
                 success=True,
                 output={
-                    "data": extracted if multiple else extracted[0],
-                    "count": len(extracted),
+                    "data": extracted_vals if multiple else extracted_vals[0],
+                    "count": len(extracted_vals),
+                    "page_title": page_title,
+                    "page_url": page_url,
                 },
             )
 
@@ -1195,15 +1282,29 @@ class BrowserExtractTask(BaseTask):
     def get_config_schema(cls) -> Dict[str, Any]:
         return {
             "type": "object",
-            "required": ["url", "selector"],
             "properties": {
-                "url": {"type": "string"},
-                "selector": {"type": "string"},
+                "url": {"type": "string", "description": "Page URL (optional if already navigated)"},
+                "javascript": {"type": "string", "description": "JS code that returns extraction result"},
+                "selectors": {
+                    "type": "array",
+                    "description": "Multiple named selectors for multi-field extraction",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "selector": {"type": "string"},
+                            "extract": {"type": "string", "enum": ["text", "html", "attribute"]},
+                            "attribute": {"type": "string"},
+                            "multiple": {"type": "boolean"},
+                        },
+                    },
+                },
+                "selector": {"type": "string", "description": "Single CSS selector (simple mode)"},
                 "extract": {"type": "string", "enum": ["text", "html", "attribute"]},
                 "attribute": {"type": "string"},
                 "multiple": {"type": "boolean", "default": False},
                 "wait_for": {"type": "string"},
-                "wait_timeout": {"type": "integer", "default": 10000},
+                "wait_timeout": {"type": "integer", "default": 15000},
             },
         }
 
