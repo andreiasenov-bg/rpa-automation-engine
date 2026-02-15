@@ -118,7 +118,8 @@ services:
       - frontend_node_modules:/app/node_modules
     environment:
       VITE_API_URL: http://backend:8000
-    command: sh -c "npm install --no-audit --no-fund 2>/dev/null; npm run dev -- --host 0.0.0.0"
+      CHOKIDAR_USEPOLLING: "true"
+    command: sh -c "npm install --no-audit --no-fund 2>/dev/null; rm -rf /app/node_modules/.vite 2>/dev/null; npm run dev -- --host 0.0.0.0"
     depends_on:
       - backend
     restart: unless-stopped
