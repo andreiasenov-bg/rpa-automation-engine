@@ -313,13 +313,40 @@ async def trigger_workflow_execution(
             final_status = "failed" if failed else "completed"
             error_msg = f"Steps failed: {', '.join(failed)}" if failed else None
 
+            # Serialize the execution context (step outputs) for the Results Data tab
+            import json as _json
+            state_data = {}
+            try:
+                steps_dict = {}
+                for step_id, step_result in context.steps.items():
+                    sr = step_result
+                    steps_dict[step_id] = {
+                        "status": sr.status.value if hasattr(sr.status, 'value') else str(sr.status),
+                        "output": sr.output if hasattr(sr, 'output') else None,
+                        "error": sr.error if hasattr(sr, 'error') else None,
+                        "duration_ms": sr.duration_ms if hasattr(sr, 'duration_ms') else None,
+                    }
+                state_data = {
+                    "steps": steps_dict,
+                    "variables": dict(context.variables) if hasattr(context, 'variables') else {},
+                }
+            except Exception as ser_err:
+                logger.warning(f"[BG] Failed to serialize context: {ser_err}")
+                state_data = {"steps": {}, "variables": {}, "serialization_error": str(ser_err)}
+
             from sqlalchemy import text as sa_text
             async with _BGSession() as sess:
                 await sess.execute(sa_text(
                     "UPDATE executions SET status=:s, duration_ms=:d, completed_at=now(), error_message=:e WHERE id=:id"
                 ), {"s": final_status, "d": duration_ms, "e": error_msg, "id": exec_id})
+                # Save execution state data (step outputs) for the Results Data viewer
+                await sess.execute(sa_text(
+                    "INSERT INTO execution_states (id, execution_id, state_data, updated_at, created_at) "
+                    "VALUES (gen_random_uuid()::text, :exec_id, :state_data::jsonb, now(), now()) "
+                    "ON CONFLICT (execution_id) DO UPDATE SET state_data = :state_data::jsonb, updated_at = now()"
+                ), {"exec_id": exec_id, "state_data": _json.dumps(state_data)})
                 await sess.commit()
-            logger.info(f"[BG] Execution {exec_id}: {final_status} in {duration_ms}ms")
+            logger.info(f"[BG] Execution {exec_id}: {final_status} in {duration_ms}ms (state saved)")
 
         except Exception as e:
             duration_ms = int((time.time() - start) * 1000)
