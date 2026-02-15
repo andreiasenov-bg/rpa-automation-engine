@@ -18,9 +18,47 @@ import {
   ChevronRight,
   Copy,
   Eye,
+  Bot,
+  Code2,
+  MousePointerClick,
+  FileSearch,
+  Database,
+  Send,
+  ShoppingCart,
+  BarChart3,
+  Shield,
+  Workflow as WorkflowIcon,
 } from 'lucide-react';
 import type { Workflow } from '@/types';
 import { workflowApi } from '@/api/workflows';
+
+/* ─── Workflow type icon detection ─── */
+function getWorkflowIcon(wf: Workflow): { icon: React.ElementType; bg: string; color: string } {
+  const name = (wf.name + ' ' + (wf.description || '')).toLowerCase();
+  const steps = wf.definition?.steps || [];
+  const stepTypes = steps.map((s) => s.type).join(' ');
+  const combined = name + ' ' + stepTypes;
+
+  if (combined.includes('scrape') || combined.includes('extract') || combined.includes('browser'))
+    return { icon: FileSearch, bg: 'bg-purple-100', color: 'text-purple-600' };
+  if (combined.includes('api') || combined.includes('http') || combined.includes('fetch'))
+    return { icon: Code2, bg: 'bg-blue-100', color: 'text-blue-600' };
+  if (combined.includes('amazon') || combined.includes('shop') || combined.includes('price'))
+    return { icon: ShoppingCart, bg: 'bg-amber-100', color: 'text-amber-600' };
+  if (combined.includes('monitor') || combined.includes('health') || combined.includes('uptime'))
+    return { icon: BarChart3, bg: 'bg-emerald-100', color: 'text-emerald-600' };
+  if (combined.includes('form') || combined.includes('submit') || combined.includes('click'))
+    return { icon: MousePointerClick, bg: 'bg-rose-100', color: 'text-rose-600' };
+  if (combined.includes('email') || combined.includes('send') || combined.includes('notify'))
+    return { icon: Send, bg: 'bg-sky-100', color: 'text-sky-600' };
+  if (combined.includes('database') || combined.includes('sql') || combined.includes('data'))
+    return { icon: Database, bg: 'bg-cyan-100', color: 'text-cyan-600' };
+  if (combined.includes('ssl') || combined.includes('certificate') || combined.includes('security'))
+    return { icon: Shield, bg: 'bg-green-100', color: 'text-green-600' };
+  if (combined.includes('ai') || combined.includes('smart') || combined.includes('auto'))
+    return { icon: Bot, bg: 'bg-violet-100', color: 'text-violet-600' };
+  return { icon: WorkflowIcon, bg: 'bg-indigo-100', color: 'text-indigo-600' };
+}
 
 function StatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
@@ -259,15 +297,27 @@ export default function WorkflowListPage() {
               {filteredWorkflows.map((wf) => (
                 <tr key={wf.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors group">
                   <td className="px-5 py-3.5">
-                    <Link
-                      to={`/workflows/${wf.id}/edit`}
-                      className="text-sm font-medium text-slate-900 dark:text-white hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
-                    >
-                      {wf.name}
-                    </Link>
-                    {wf.description && (
-                      <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5 truncate max-w-xs">{wf.description}</p>
-                    )}
+                    <div className="flex items-center gap-3">
+                      {(() => {
+                        const { icon: WfIcon, bg, color } = getWorkflowIcon(wf);
+                        return (
+                          <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${bg}`}>
+                            <WfIcon className={`w-4 h-4 ${color}`} />
+                          </div>
+                        );
+                      })()}
+                      <div className="min-w-0">
+                        <Link
+                          to={`/workflows/${wf.id}/edit`}
+                          className="text-sm font-medium text-slate-900 dark:text-white hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+                        >
+                          {wf.name}
+                        </Link>
+                        {wf.description && (
+                          <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5 truncate max-w-xs">{wf.description}</p>
+                        )}
+                      </div>
+                    </div>
                   </td>
                   <td className="px-5 py-3.5"><StatusBadge status={wf.status} /></td>
                   <td className="px-5 py-3.5 text-sm text-slate-500 dark:text-slate-400">v{wf.version}</td>

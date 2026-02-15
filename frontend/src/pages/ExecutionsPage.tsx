@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Play,
@@ -16,21 +16,39 @@ import {
   Wifi,
   WifiOff,
   ExternalLink,
+  Globe,
+  Code2,
+  MousePointerClick,
+  FileSearch,
+  Timer,
+  Zap,
+  GitBranch,
+  Hash,
 } from 'lucide-react';
-import type { Execution, ExecutionLog } from '@/types';
+import type { Execution, ExecutionLog, Workflow } from '@/types';
 import { executionApi } from '@/api/executions';
+import { workflowApi } from '@/api/workflows';
 import { exportApi } from '@/api/export';
 import { useWebSocket, type ExecutionStatusPayload } from '@/hooks/useWebSocket';
 import { useLocale } from '@/i18n';
 import LiveLogViewer from '@/components/LiveLogViewer';
 
 /* ─── Status config ─── */
-const STATUS_CONFIG: Record<string, { icon: React.ElementType; color: string; bg: string; border: string }> = {
-  pending: { icon: Clock, color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-200' },
-  running: { icon: Activity, color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-200' },
-  completed: { icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200' },
-  failed: { icon: XCircle, color: 'text-red-600', bg: 'bg-red-50', border: 'border-red-200' },
-  cancelled: { icon: Ban, color: 'text-slate-500', bg: 'bg-slate-50', border: 'border-slate-200' },
+const STATUS_CONFIG: Record<string, { icon: React.ElementType; color: string; bg: string; border: string; label: string }> = {
+  pending:   { icon: Clock,        color: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-200',   label: 'Pending' },
+  running:   { icon: Activity,     color: 'text-blue-600',    bg: 'bg-blue-50',    border: 'border-blue-200',    label: 'Running' },
+  completed: { icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200', label: 'Completed' },
+  failed:    { icon: XCircle,      color: 'text-red-600',     bg: 'bg-red-50',     border: 'border-red-200',     label: 'Failed' },
+  cancelled: { icon: Ban,          color: 'text-slate-500',   bg: 'bg-slate-50',   border: 'border-slate-200',   label: 'Cancelled' },
+};
+
+/* ─── Trigger type icons ─── */
+const TRIGGER_ICON: Record<string, React.ElementType> = {
+  manual: MousePointerClick,
+  schedule: Timer,
+  webhook: Zap,
+  api: Code2,
+  retry: RotateCcw,
 };
 
 function StatusBadge({ status }: { status: string }) {
@@ -39,7 +57,17 @@ function StatusBadge({ status }: { status: string }) {
   return (
     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${cfg.bg} ${cfg.color} ${cfg.border}`}>
       <Icon className="w-3 h-3" />
-      {status}
+      {cfg.label}
+    </span>
+  );
+}
+
+function TriggerBadge({ type }: { type: string }) {
+  const Icon = TRIGGER_ICON[type] || Zap;
+  return (
+    <span className="inline-flex items-center gap-1 text-[11px] text-slate-400">
+      <Icon className="w-3 h-3" />
+      {type}
     </span>
   );
 }
@@ -53,78 +81,38 @@ function formatDuration(ms?: number): string {
 
 function formatTime(iso?: string): string {
   if (!iso) return '—';
-  return new Date(iso).toLocaleString();
+  const d = new Date(iso);
+  return d.toLocaleDateString() + ', ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-/* ─── Log viewer ─── */
-function LogViewer({ executionId }: { executionId: string }) {
-  const [logs, setLogs] = useState<ExecutionLog[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const fetch = async () => {
-      try {
-        const data = await executionApi.logs(executionId);
-        setLogs(Array.isArray(data) ? data : []);
-      } catch {
-        setLogs([]);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetch();
-  }, [executionId]);
-
-  const levelColor: Record<string, string> = {
-    INFO: 'text-blue-500',
-    WARNING: 'text-amber-500',
-    ERROR: 'text-red-500',
-    DEBUG: 'text-slate-400',
-  };
-
-  if (loading) {
-    return (
-      <div className="py-4 flex justify-center">
-        <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
-      </div>
-    );
-  }
-
-  if (logs.length === 0) {
-    return <p className="py-4 text-xs text-slate-400 text-center">No logs available</p>;
-  }
-
-  return (
-    <div className="bg-slate-900 rounded-lg p-3 max-h-64 overflow-y-auto font-mono text-xs space-y-0.5">
-      {logs.map((log) => (
-        <div key={log.id} className="flex gap-2">
-          <span className="text-slate-500 flex-shrink-0">
-            {new Date(log.timestamp).toLocaleTimeString()}
-          </span>
-          <span className={`flex-shrink-0 w-14 ${levelColor[log.level] || 'text-slate-400'}`}>
-            [{log.level}]
-          </span>
-          <span className="text-slate-200 break-all">{log.message}</span>
-        </div>
-      ))}
-    </div>
-  );
+function formatTimeAgo(iso?: string): string {
+  if (!iso) return '';
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
 }
 
 /* ─── Execution row ─── */
 function ExecutionRow({
   execution,
+  workflowName,
   onRetry,
   onCancel,
 }: {
   execution: Execution;
+  workflowName: string;
   onRetry: (id: string) => void;
   onCancel: (id: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const isActive = execution.status === 'running' || execution.status === 'pending';
 
   return (
-    <div className="border-b border-slate-100 last:border-0">
+    <div className={`border-b border-slate-100 last:border-0 ${isActive ? 'bg-blue-50/30' : ''}`}>
       <div
         className="px-5 py-3.5 flex items-center gap-4 cursor-pointer hover:bg-slate-50 transition-colors"
         onClick={() => setExpanded(!expanded)}
@@ -133,22 +121,51 @@ function ExecutionRow({
           {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
         </button>
 
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-slate-900 truncate">
-            {execution.id.slice(0, 8)}...
-          </p>
-          <p className="text-xs text-slate-400 mt-0.5">
-            {execution.trigger_type} &middot; {formatTime(execution.started_at)}
-          </p>
+        {/* Workflow icon based on status */}
+        <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
+          execution.status === 'completed' ? 'bg-emerald-100' :
+          execution.status === 'failed' ? 'bg-red-100' :
+          execution.status === 'running' ? 'bg-blue-100' :
+          execution.status === 'cancelled' ? 'bg-slate-100' :
+          'bg-amber-100'
+        }`}>
+          {execution.status === 'running' ? (
+            <Loader2 className="w-4 h-4 text-blue-600 animate-spin" />
+          ) : execution.status === 'completed' ? (
+            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+          ) : execution.status === 'failed' ? (
+            <XCircle className="w-4 h-4 text-red-600" />
+          ) : (
+            <GitBranch className="w-4 h-4 text-slate-500" />
+          )}
         </div>
 
-        <div className="text-xs text-slate-500 flex-shrink-0">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-slate-900 truncate">
+            {workflowName || 'Unknown Workflow'}
+          </p>
+          <div className="flex items-center gap-2 mt-0.5">
+            <span className="inline-flex items-center gap-1 text-[11px] text-slate-400 font-mono">
+              <Hash className="w-2.5 h-2.5" />
+              {execution.id.slice(0, 8)}
+            </span>
+            <span className="text-slate-300">·</span>
+            <TriggerBadge type={execution.trigger_type} />
+            <span className="text-slate-300">·</span>
+            <span className="text-[11px] text-slate-400">{formatTimeAgo(execution.started_at)}</span>
+          </div>
+        </div>
+
+        {/* Duration with icon */}
+        <div className="flex items-center gap-1.5 text-xs text-slate-500 flex-shrink-0 bg-slate-50 px-2 py-1 rounded-md">
+          <Timer className="w-3 h-3 text-slate-400" />
           {formatDuration(execution.duration_ms)}
         </div>
 
         {execution.retry_count > 0 && (
-          <span className="text-[10px] bg-amber-50 text-amber-600 border border-amber-200 px-1.5 py-0.5 rounded-full">
-            retry #{execution.retry_count}
+          <span className="inline-flex items-center gap-1 text-[10px] bg-amber-50 text-amber-600 border border-amber-200 px-1.5 py-0.5 rounded-full">
+            <RotateCcw className="w-2.5 h-2.5" />
+            #{execution.retry_count}
           </span>
         )}
 
@@ -185,9 +202,21 @@ function ExecutionRow({
 
       {expanded && (
         <div className="px-5 pb-4 pl-14 space-y-3">
+          {/* Execution meta info */}
+          <div className="flex items-center gap-4 text-xs text-slate-500">
+            <span className="inline-flex items-center gap-1">
+              <Clock className="w-3 h-3" /> Started: {formatTime(execution.started_at)}
+            </span>
+            {execution.completed_at && (
+              <span className="inline-flex items-center gap-1">
+                <CheckCircle2 className="w-3 h-3" /> Ended: {formatTime(execution.completed_at)}
+              </span>
+            )}
+          </div>
           {execution.error_message && (
-            <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg px-3 py-2">
-              {execution.error_message}
+            <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg px-3 py-2">
+              <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+              <span>{execution.error_message}</span>
             </div>
           )}
           <LiveLogViewer executionId={execution.id} isRunning={execution.status === 'running'} />
@@ -205,10 +234,23 @@ export default function ExecutionsPage() {
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [loading, setLoading] = useState(true);
+  const [workflowNames, setWorkflowNames] = useState<Record<string, string>>({});
   const perPage = 25;
 
-  // WebSocket: live execution status updates
   const { readyState, on } = useWebSocket();
+
+  // Fetch workflow names for lookup
+  useEffect(() => {
+    const fetchNames = async () => {
+      try {
+        const data = await workflowApi.list(1, 100);
+        const nameMap: Record<string, string> = {};
+        (data.workflows || []).forEach((w: Workflow) => { nameMap[w.id] = w.name; });
+        setWorkflowNames(nameMap);
+      } catch { /* ignore */ }
+    };
+    fetchNames();
+  }, []);
 
   const fetchExecutions = useCallback(async () => {
     setLoading(true);
@@ -225,11 +267,8 @@ export default function ExecutionsPage() {
     }
   }, [page, statusFilter]);
 
-  useEffect(() => {
-    fetchExecutions();
-  }, [fetchExecutions]);
+  useEffect(() => { fetchExecutions(); }, [fetchExecutions]);
 
-  // Auto-refresh every 5s if there are running executions
   const fetchRef = useRef(fetchExecutions);
   fetchRef.current = fetchExecutions;
 
@@ -240,7 +279,6 @@ export default function ExecutionsPage() {
     return () => clearInterval(interval);
   }, [executions]);
 
-  // WebSocket: update execution status in-place when event arrives
   useEffect(() => {
     const unsubscribe = on('execution.status_changed', (payload) => {
       const data = payload as ExecutionStatusPayload;
@@ -256,26 +294,29 @@ export default function ExecutionsPage() {
   }, [on]);
 
   const handleRetry = async (id: string) => {
-    try {
-      await executionApi.retry(id);
-      fetchExecutions();
-    } catch {
-      // handle error
-    }
+    try { await executionApi.retry(id); fetchExecutions(); } catch { /* */ }
   };
-
   const handleCancel = async (id: string) => {
-    try {
-      await executionApi.cancel(id);
-      fetchExecutions();
-    } catch {
-      // handle error
-    }
+    try { await executionApi.cancel(id); fetchExecutions(); } catch { /* */ }
   };
 
   const totalPages = Math.ceil(total / perPage);
 
-  const statusOptions = ['', 'pending', 'running', 'completed', 'failed', 'cancelled'];
+  // Status filter counts
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    executions.forEach((e) => { counts[e.status] = (counts[e.status] || 0) + 1; });
+    return counts;
+  }, [executions]);
+
+  const statusOptions = [
+    { key: '', label: 'All', icon: Activity },
+    { key: 'pending', label: 'Pending', icon: Clock },
+    { key: 'running', label: 'Running', icon: Loader2 },
+    { key: 'completed', label: 'Completed', icon: CheckCircle2 },
+    { key: 'failed', label: 'Failed', icon: XCircle },
+    { key: 'cancelled', label: 'Cancelled', icon: Ban },
+  ];
 
   return (
     <div>
@@ -312,20 +353,24 @@ export default function ExecutionsPage() {
         </div>
       </div>
 
-      {/* Filters */}
+      {/* Filters with icons */}
       <div className="mb-4 flex items-center gap-3">
         <div className="flex items-center gap-1.5 bg-white rounded-lg border border-slate-200 p-1">
-          {statusOptions.map((s) => (
-            <button
-              key={s}
-              onClick={() => { setStatusFilter(s); setPage(1); }}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition ${
-                statusFilter === s ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:bg-slate-50'
-              }`}
-            >
-              {s || 'All'}
-            </button>
-          ))}
+          {statusOptions.map((s) => {
+            const Icon = s.icon;
+            return (
+              <button
+                key={s.key}
+                onClick={() => { setStatusFilter(s.key); setPage(1); }}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition ${
+                  statusFilter === s.key ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:bg-slate-50'
+                }`}
+              >
+                <Icon className={`w-3 h-3 ${statusFilter === s.key && s.key === 'running' ? 'animate-spin' : ''}`} />
+                {s.label}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -351,6 +396,7 @@ export default function ExecutionsPage() {
             <ExecutionRow
               key={exec.id}
               execution={exec}
+              workflowName={workflowNames[exec.workflow_id] || ''}
               onRetry={handleRetry}
               onCancel={handleCancel}
             />
