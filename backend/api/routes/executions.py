@@ -168,11 +168,37 @@ async def get_execution_data(
         return {"execution_id": execution_id, "steps": {}, "variables": {}}
 
     data = state.state_data
-    # Extract step results with their outputs
+
+    # Extract step results with their outputs.
+    # The checkpoint system stores outputs in "step_outputs" (key -> raw output),
+    # plus metadata in "completed_steps", "failed_steps", "error_log".
     steps_out = {}
+
+    # Primary source: "step_outputs" from CheckpointManager
+    step_outputs = data.get("step_outputs", {})
+    completed = set(data.get("completed_steps", []))
+    failed = set(data.get("failed_steps", []))
+    skipped = set(data.get("skipped_steps", []))
+    error_map = {}
+    for err_entry in data.get("error_log", []):
+        if isinstance(err_entry, dict) and err_entry.get("step_id"):
+            error_map[err_entry["step_id"]] = err_entry.get("error")
+
+    # Build unified step info from all checkpoint sources
+    all_step_ids = set(step_outputs.keys()) | completed | failed | skipped
+    for step_id in all_step_ids:
+        status = "completed" if step_id in completed else "failed" if step_id in failed else "skipped" if step_id in skipped else "unknown"
+        output = step_outputs.get(step_id)
+        steps_out[step_id] = {
+            "status": status,
+            "output": output,
+            "error": error_map.get(step_id),
+        }
+
+    # Fallback: also check "steps" key (alternative engine format)
     raw_steps = data.get("steps", {})
     for step_id, step_data in raw_steps.items():
-        if isinstance(step_data, dict):
+        if isinstance(step_data, dict) and step_id not in steps_out:
             steps_out[step_id] = {
                 "status": step_data.get("status", "unknown"),
                 "output": step_data.get("output"),

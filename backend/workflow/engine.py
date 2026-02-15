@@ -458,6 +458,11 @@ class StepExecutor:
         }
 
         result = await task_instance.run(config, context_dict)
+
+        # Propagate task-level failures so execute_step marks the step as FAILED
+        if hasattr(result, "success") and not result.success:
+            raise RuntimeError(result.error or f"Task '{task_type}' returned success=False")
+
         return result.output if hasattr(result, "output") else result
 
     async def _execute_condition(
