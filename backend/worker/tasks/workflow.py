@@ -38,9 +38,9 @@ async def _update_execution_status(
     if duration_ms is not None:
         values["duration_ms"] = duration_ms
     if status == "running":
-        values["started_at"] = datetime.now(timezone.utc)
+        values["started_at"] = datetime.utcnow()
     if status in ("completed", "failed", "cancelled"):
-        values["completed_at"] = datetime.now(timezone.utc)
+        values["completed_at"] = datetime.utcnow()
 
     try:
         async with AsyncSessionLocal() as session:

@@ -249,7 +249,7 @@ async def trigger_workflow_execution(
             workflow_id=workflow_id,
             trigger_type="manual",
             status="running",
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.utcnow(),
         )
         db.add(execution)
         await db.commit()
@@ -302,7 +302,7 @@ async def trigger_workflow_execution(
                 await sess.execute(
                     sa_update(ExecModel).where(ExecModel.id == exec_id)
                     .values(status=final_status, duration_ms=duration_ms,
-                            completed_at=datetime.now(timezone.utc),
+                            completed_at=datetime.utcnow(),
                             error_message=error_msg)
                 )
                 await sess.commit()
@@ -316,7 +316,7 @@ async def trigger_workflow_execution(
                     await sess.execute(
                         sa_update(ExecModel).where(ExecModel.id == exec_id)
                         .values(status="failed", duration_ms=duration_ms,
-                                completed_at=datetime.now(timezone.utc),
+                                completed_at=datetime.utcnow(),
                                 error_message=str(e)[:500])
                     )
                     await sess.commit()

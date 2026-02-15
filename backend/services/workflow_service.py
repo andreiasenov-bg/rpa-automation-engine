@@ -180,9 +180,9 @@ class ExecutionService(BaseService[Execution]):
         if duration_ms is not None:
             data["duration_ms"] = duration_ms
         if status in ("completed", "failed", "cancelled"):
-            data["completed_at"] = datetime.now(timezone.utc)
+            data["completed_at"] = datetime.utcnow()
         if status == "running":
-            data["started_at"] = datetime.now(timezone.utc)
+            data["started_at"] = datetime.utcnow()
         return await self.update(execution_id, data)
 
 
@@ -213,9 +213,9 @@ async def _run_workflow_in_process(
         if duration_ms is not None:
             values["duration_ms"] = duration_ms
         if status == "running":
-            values["started_at"] = datetime.now(timezone.utc)
+            values["started_at"] = datetime.utcnow()
         if status in ("completed", "failed", "cancelled"):
-            values["completed_at"] = datetime.now(timezone.utc)
+            values["completed_at"] = datetime.utcnow()
         try:
             async with AsyncSessionLocal() as session:
                 await session.execute(
