@@ -53,163 +53,22 @@ import {
   Percent,
   Tag,
 } from 'lucide-react';
-/* XLSX generation — zero-dependency, produces valid .xlsx via Office Open XML */
-function generateXLSX(sheets: { name: string; data: (string | number)[][] }[]): Blob {
-  const xmlEscape = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-
-  const sheetFiles: { name: string; xml: string }[] = [];
-  const rels: string[] = [];
-
-  sheets.forEach((sheet, si) => {
-    const rows = sheet.data.map((row, ri) => {
-      const cells = row.map((cell, ci) => {
-        const ref = String.fromCharCode(65 + (ci % 26)) + (ci >= 26 ? String.fromCharCode(65 + Math.floor(ci / 26) - 1) : '') + (ri + 1);
-        if (typeof cell === 'number' && !isNaN(cell)) {
-          return `<c r="${ref}"><v>${cell}</v></c>`;
-        }
-        return `<c r="${ref}" t="inlineStr"><is><t>${xmlEscape(String(cell ?? ''))}</t></is></c>`;
-      }).join('');
-      return `<row r="${ri + 1}">${cells}</row>`;
-    }).join('');
-
-    const sheetXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-<sheetData>${rows}</sheetData>
-</worksheet>`;
-    sheetFiles.push({ name: `xl/worksheets/sheet${si + 1}.xml`, xml: sheetXml });
-    rels.push(`<Relationship Id="rId${si + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${si + 1}.xml"/>`);
-  });
-
-  const workbookXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-<sheets>${sheets.map((s, i) => `<sheet name="${xmlEscape(s.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('')}</sheets>
-</workbook>`;
-
-  const workbookRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rels.join('')}</Relationships>`;
-
-  const contentTypesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-<Default Extension="xml" ContentType="application/xml"/>
-<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
-${sheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}
-</Types>`;
-
-  const relsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
-</Relationships>`;
-
-  // Build ZIP using JSZip-like manual construction
-  // Use the simpler approach: create a data URI with base64-encoded HTML Excel
-  // Actually, let's build a proper XLSX ZIP file
-
-  const files: Record<string, string> = {
-    '[Content_Types].xml': contentTypesXml,
-    '_rels/.rels': relsXml,
-    'xl/workbook.xml': workbookXml,
-    'xl/_rels/workbook.xml.rels': workbookRelsXml,
-  };
-  sheetFiles.forEach(sf => { files[sf.name] = sf.xml; });
-
-  // Minimal ZIP builder
-  const enc = new TextEncoder();
-  const parts: Uint8Array[] = [];
-  const central: Uint8Array[] = [];
-  let offset = 0;
-
-  for (const [path, content] of Object.entries(files)) {
-    const nameBytes = enc.encode(path);
-    const dataBytes = enc.encode(content);
-
-    // Local file header
-    const local = new Uint8Array(30 + nameBytes.length + dataBytes.length);
-    const lv = new DataView(local.buffer);
-    lv.setUint32(0, 0x04034b50, true); // sig
-    lv.setUint16(4, 20, true); // version
-    lv.setUint16(6, 0, true); // flags
-    lv.setUint16(8, 0, true); // compression (store)
-    lv.setUint16(10, 0, true); // mod time
-    lv.setUint16(12, 0, true); // mod date
-    // CRC32
-    let crc = 0xFFFFFFFF;
-    for (let i = 0; i < dataBytes.length; i++) {
-      crc ^= dataBytes[i];
-      for (let j = 0; j < 8; j++) crc = (crc >>> 1) ^ (crc & 1 ? 0xEDB88320 : 0);
-    }
-    crc ^= 0xFFFFFFFF;
-    lv.setUint32(14, crc >>> 0, true);
-    lv.setUint32(18, dataBytes.length, true); // compressed
-    lv.setUint32(22, dataBytes.length, true); // uncompressed
-    lv.setUint16(26, nameBytes.length, true);
-    lv.setUint16(28, 0, true); // extra len
-    local.set(nameBytes, 30);
-    local.set(dataBytes, 30 + nameBytes.length);
-    parts.push(local);
-
-    // Central directory
-    const cd = new Uint8Array(46 + nameBytes.length);
-    const cv = new DataView(cd.buffer);
-    cv.setUint32(0, 0x02014b50, true); // sig
-    cv.setUint16(4, 20, true); // version made by
-    cv.setUint16(6, 20, true); // version needed
-    cv.setUint16(8, 0, true); // flags
-    cv.setUint16(10, 0, true); // compression
-    cv.setUint16(12, 0, true); cv.setUint16(14, 0, true);
-    cv.setUint32(16, crc >>> 0, true);
-    cv.setUint32(20, dataBytes.length, true);
-    cv.setUint32(24, dataBytes.length, true);
-    cv.setUint16(28, nameBytes.length, true);
-    cv.setUint16(30, 0, true); // extra
-    cv.setUint16(32, 0, true); // comment
-    cv.setUint16(34, 0, true); // disk start
-    cv.setUint16(36, 0, true); // internal attrs
-    cv.setUint32(38, 0, true); // external attrs
-    cv.setUint32(42, offset, true); // local header offset
-    cd.set(nameBytes, 46);
-    central.push(cd);
-
-    offset += local.length;
-  }
-
-  const centralOffset = offset;
-  let centralSize = 0;
-  central.forEach(c => { centralSize += c.length; });
-
-  // End of central directory
-  const eocd = new Uint8Array(22);
-  const ev = new DataView(eocd.buffer);
-  ev.setUint32(0, 0x06054b50, true);
-  ev.setUint16(4, 0, true); ev.setUint16(6, 0, true);
-  ev.setUint16(8, Object.keys(files).length, true);
-  ev.setUint16(10, Object.keys(files).length, true);
-  ev.setUint32(12, centralSize, true);
-  ev.setUint32(16, centralOffset, true);
-  ev.setUint16(20, 0, true);
-
-  const allParts = [...parts, ...central, eocd];
-  const totalLen = allParts.reduce((s, p) => s + p.length, 0);
-  const result = new Uint8Array(totalLen);
-  let pos = 0;
-  for (const p of allParts) { result.set(p, pos); pos += p.length; }
-
-  return new Blob([result], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-}
-
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
+import * as XLSX from 'xlsx';
 import type { Execution } from '@/types';
 import { executionApi } from '@/api/executions';
 import { useWebSocket, type ExecutionStatusPayload } from '@/hooks/useWebSocket';
 import LiveLogViewer from '@/components/LiveLogViewer';
 import { useLocale } from '@/i18n';
+
+/* XLSX generation helper */
+function generateXLSXFile(sheets: { name: string; data: (string | number)[][] }[], filename: string) {
+  const wb = XLSX.utils.book_new();
+  sheets.forEach(s => {
+    const ws = XLSX.utils.aoa_to_sheet(s.data);
+    XLSX.utils.book_append_sheet(wb, ws, s.name);
+  });
+  XLSX.writeFile(wb, filename);
+}
 
 /* ─── Status config ─── */
 const STATUS_CONFIG: Record<string, { icon: React.ElementType; color: string; bg: string; border: string; textColor: string; barColor: string }> = {
@@ -822,11 +681,10 @@ function PriceComparisonTab({ executionId }: { executionId: string }) {
       ['Execution ID', executionId],
     ];
 
-    const blob = generateXLSX([
+    generateXLSXFile([
       { name: 'Price Comparison', data: mainData },
       { name: 'Zusammenfassung', data: summaryData },
-    ]);
-    downloadBlob(blob, `price-comparison-${executionId.slice(0, 8)}.xlsx`);
+    ], `price-comparison-${executionId.slice(0, 8)}.xlsx`);
   };
 
   if (loading) {
