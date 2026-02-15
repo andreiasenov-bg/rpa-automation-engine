@@ -134,6 +134,59 @@ async def get_execution_logs(
     ]
 
 
+@router.get("/{execution_id}/data")
+async def get_execution_data(
+    execution_id: str,
+    current_user: TokenPayload = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get full execution state data including step outputs.
+
+    Returns the serialized execution context from execution_states table.
+    This contains all step results, outputs (e.g. scraped products), and variables.
+    """
+    # Verify execution belongs to user's org
+    svc = ExecutionService(db)
+    ex = await svc.get_by_id_and_org(execution_id, current_user.org_id)
+
+    if not ex:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Execution not found",
+        )
+
+    # Query execution_states for the full state_data
+    from db.models.execution_state import ExecutionStateModel
+    result = await db.execute(
+        select(ExecutionStateModel)
+        .where(ExecutionStateModel.execution_id == execution_id)
+    )
+    state = result.scalars().first()
+
+    if not state or not state.state_data:
+        return {"execution_id": execution_id, "steps": {}, "variables": {}}
+
+    data = state.state_data
+    # Extract step results with their outputs
+    steps_out = {}
+    raw_steps = data.get("steps", {})
+    for step_id, step_data in raw_steps.items():
+        if isinstance(step_data, dict):
+            steps_out[step_id] = {
+                "status": step_data.get("status", "unknown"),
+                "output": step_data.get("output"),
+                "error": step_data.get("error"),
+                "duration_ms": step_data.get("duration_ms"),
+            }
+
+    return {
+        "execution_id": execution_id,
+        "steps": steps_out,
+        "variables": data.get("variables", {}),
+    }
+
+
 @router.post("/{execution_id}/retry", response_model=ExecutionResponse, status_code=http_status.HTTP_202_ACCEPTED)
 async def retry_execution(
     execution_id: str,

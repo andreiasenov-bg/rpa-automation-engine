@@ -3,9 +3,10 @@
  *
  * Shows execution metadata, step timeline with status indicators,
  * progress bar, collapsible step cards, live log viewer, and variable context.
+ * Includes a "Results Data" tab for viewing scraped data in a table with export.
  */
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, Fragment } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -30,6 +31,17 @@ import {
   Zap,
   Code2,
   Check,
+  Download,
+  Search,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  Table2,
+  FileJson,
+  FileSpreadsheet,
+  Database,
+  Eye,
+  X,
 } from 'lucide-react';
 import type { Execution } from '@/types';
 import { executionApi } from '@/api/executions';
@@ -307,6 +319,377 @@ function StepTimeline({ steps, totalDurationMs }: { steps: StepInfo[]; totalDura
   );
 }
 
+/* ─── Data Tab: Results viewer with table, search, sort, export ─── */
+
+interface DataRow {
+  [key: string]: any;
+}
+
+interface DataSource {
+  stepId: string;
+  label: string;
+  rows: DataRow[];
+  columns: string[];
+}
+
+/** Find all arrays of objects in step outputs */
+function extractDataSources(stepsData: Record<string, any>): DataSource[] {
+  const sources: DataSource[] = [];
+
+  for (const [stepId, stepInfo] of Object.entries(stepsData)) {
+    const output = stepInfo?.output;
+    if (!output) continue;
+
+    // Check if output itself is an array of objects
+    if (Array.isArray(output) && output.length > 0 && typeof output[0] === 'object') {
+      const columns = [...new Set(output.flatMap((row: any) => Object.keys(row)))];
+      sources.push({ stepId, label: stepId, rows: output, columns });
+      continue;
+    }
+
+    // Check nested keys for arrays (e.g., output.products, output.items, output.results)
+    if (typeof output === 'object') {
+      for (const [key, val] of Object.entries(output)) {
+        if (Array.isArray(val) && val.length > 0 && typeof (val as any[])[0] === 'object') {
+          const rows = val as DataRow[];
+          const columns = [...new Set(rows.flatMap((row) => Object.keys(row)))];
+          sources.push({ stepId, label: `${stepId} / ${key}`, rows, columns });
+        }
+      }
+    }
+  }
+
+  // Sort by row count descending — largest dataset first
+  sources.sort((a, b) => b.rows.length - a.rows.length);
+  return sources;
+}
+
+/** Smart column label */
+function columnLabel(key: string): string {
+  const labels: Record<string, string> = {
+    r: 'Rank', t: 'Title', p: 'Price', rt: 'Rating',
+    a: 'ASIN', c: 'Category', u: 'URL',
+    rank: 'Rank', title: 'Title', price: 'Price', rating: 'Rating',
+    asin: 'ASIN', category: 'Category', url: 'URL', name: 'Name',
+    description: 'Description', brand: 'Brand', model: 'Model',
+  };
+  return labels[key] || key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/** Preferred column order */
+function columnOrder(key: string): number {
+  const order: Record<string, number> = {
+    r: 0, rank: 0, t: 1, title: 1, name: 1,
+    p: 2, price: 2, rt: 3, rating: 3,
+    c: 4, category: 4, a: 5, asin: 5,
+    brand: 6, model: 7, u: 99, url: 99,
+  };
+  return order[key] ?? 50;
+}
+
+/** Export to CSV */
+function exportCSV(rows: DataRow[], columns: string[], filename: string) {
+  const header = columns.map(columnLabel).join(',');
+  const body = rows.map((row) =>
+    columns.map((col) => {
+      const val = String(row[col] ?? '');
+      return val.includes(',') || val.includes('"') || val.includes('\n')
+        ? `"${val.replace(/"/g, '""')}"`
+        : val;
+    }).join(',')
+  ).join('\n');
+
+  const blob = new Blob([header + '\n' + body], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/** Export to JSON */
+function exportJSON(data: any, filename: string) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function DataTab({ executionId }: { executionId: string }) {
+  const [stepsData, setStepsData] = useState<Record<string, any> | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedSource, setSelectedSource] = useState(0);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortColumn, setSortColumn] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [expandedRow, setExpandedRow] = useState<number | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    executionApi.data(executionId)
+      .then((resp) => {
+        setStepsData(resp.steps || {});
+      })
+      .catch((err) => {
+        setError(err?.message || 'Failed to load execution data');
+      })
+      .finally(() => setLoading(false));
+  }, [executionId]);
+
+  const dataSources = useMemo(() => {
+    if (!stepsData) return [];
+    return extractDataSources(stepsData);
+  }, [stepsData]);
+
+  const currentSource = dataSources[selectedSource];
+
+  const sortedColumns = useMemo(() => {
+    if (!currentSource) return [];
+    return [...currentSource.columns].sort((a, b) => columnOrder(a) - columnOrder(b));
+  }, [currentSource]);
+
+  // Columns to show in the table (exclude URL — too long)
+  const tableColumns = useMemo(() => {
+    return sortedColumns.filter((c) => !['u', 'url', 'description'].includes(c));
+  }, [sortedColumns]);
+
+  const filteredRows = useMemo(() => {
+    if (!currentSource) return [];
+    let rows = currentSource.rows;
+
+    // Search
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      rows = rows.filter((row) =>
+        Object.values(row).some((val) => String(val).toLowerCase().includes(q))
+      );
+    }
+
+    // Sort
+    if (sortColumn) {
+      rows = [...rows].sort((a, b) => {
+        const av = a[sortColumn];
+        const bv = b[sortColumn];
+        // Try numeric sort
+        const an = parseFloat(av);
+        const bn = parseFloat(bv);
+        if (!isNaN(an) && !isNaN(bn)) {
+          return sortDir === 'asc' ? an - bn : bn - an;
+        }
+        // String sort
+        const sa = String(av || '').toLowerCase();
+        const sb = String(bv || '').toLowerCase();
+        return sortDir === 'asc' ? sa.localeCompare(sb) : sb.localeCompare(sa);
+      });
+    }
+
+    return rows;
+  }, [currentSource, searchQuery, sortColumn, sortDir]);
+
+  const handleSort = (col: string) => {
+    if (sortColumn === col) {
+      setSortDir((d) => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortColumn(col);
+      setSortDir('asc');
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-48">
+        <Loader2 className="w-5 h-5 text-indigo-500 animate-spin" />
+        <span className="ml-2 text-sm text-slate-500">Loading results data...</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center gap-2 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+        <XCircle className="w-4 h-4 text-red-500" />
+        <span className="text-sm text-red-600 dark:text-red-400">{error}</span>
+      </div>
+    );
+  }
+
+  if (dataSources.length === 0) {
+    return (
+      <div className="text-center py-12">
+        <Database className="w-10 h-10 text-slate-300 dark:text-slate-600 mx-auto mb-3" />
+        <p className="text-sm text-slate-500 dark:text-slate-400">No structured data found in step outputs</p>
+        <p className="text-xs text-slate-400 mt-1">Execute the workflow to generate results</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Toolbar: source selector, search, export */}
+      <div className="flex flex-wrap items-center gap-3">
+        {/* Source selector */}
+        {dataSources.length > 1 && (
+          <select
+            value={selectedSource}
+            onChange={(e) => { setSelectedSource(Number(e.target.value)); setSearchQuery(''); setSortColumn(null); setExpandedRow(null); }}
+            className="text-sm rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-1.5 text-slate-700 dark:text-slate-300"
+          >
+            {dataSources.map((src, i) => (
+              <option key={i} value={i}>{src.label} ({src.rows.length} rows)</option>
+            ))}
+          </select>
+        )}
+
+        {/* Search */}
+        <div className="relative flex-1 min-w-[200px] max-w-sm">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+          <input
+            type="text"
+            placeholder="Search results..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-8 pr-3 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 placeholder-slate-400"
+          />
+          {searchQuery && (
+            <button onClick={() => setSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2">
+              <X className="w-3 h-3 text-slate-400 hover:text-slate-600" />
+            </button>
+          )}
+        </div>
+
+        {/* Row count */}
+        <span className="text-xs text-slate-400">
+          {filteredRows.length} of {currentSource.rows.length} rows
+        </span>
+
+        {/* Export buttons */}
+        <div className="flex items-center gap-1 ml-auto">
+          <button
+            onClick={() => exportCSV(filteredRows, sortedColumns, `execution-${executionId.slice(0, 8)}.csv`)}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 transition text-slate-600 dark:text-slate-300"
+            title="Download CSV"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5" /> CSV
+          </button>
+          <button
+            onClick={() => exportJSON(filteredRows, `execution-${executionId.slice(0, 8)}.json`)}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 transition text-slate-600 dark:text-slate-300"
+            title="Download JSON"
+          >
+            <FileJson className="w-3.5 h-3.5" /> JSON
+          </button>
+        </div>
+      </div>
+
+      {/* Data table */}
+      <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
+                <th className="px-3 py-2.5 text-left text-[10px] font-semibold text-slate-500 uppercase tracking-wider w-8">#</th>
+                {tableColumns.map((col) => (
+                  <th
+                    key={col}
+                    onClick={() => handleSort(col)}
+                    className="px-3 py-2.5 text-left text-[10px] font-semibold text-slate-500 uppercase tracking-wider cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition select-none"
+                  >
+                    <span className="inline-flex items-center gap-1">
+                      {columnLabel(col)}
+                      {sortColumn === col ? (
+                        sortDir === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                      ) : (
+                        <ArrowUpDown className="w-2.5 h-2.5 opacity-30" />
+                      )}
+                    </span>
+                  </th>
+                ))}
+                <th className="px-3 py-2.5 w-8"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
+              {filteredRows.map((row, idx) => {
+                const isExpanded = expandedRow === idx;
+                return (
+                  <Fragment key={idx}>
+                    <tr
+                      className={`hover:bg-slate-50 dark:hover:bg-slate-800/50 transition ${isExpanded ? 'bg-indigo-50/50 dark:bg-indigo-900/10' : ''}`}
+                    >
+                      <td className="px-3 py-2 text-xs text-slate-400 font-mono">{idx + 1}</td>
+                      {tableColumns.map((col) => {
+                        const val = row[col];
+                        const isUrl = typeof val === 'string' && val.startsWith('http');
+                        const isNum = typeof val === 'number' || (!isNaN(parseFloat(val)) && isFinite(val));
+                        return (
+                          <td key={col} className={`px-3 py-2 text-slate-700 dark:text-slate-300 ${isNum ? 'font-mono tabular-nums' : ''}`}>
+                            {isUrl ? (
+                              <a href={val} target="_blank" rel="noopener noreferrer"
+                                className="text-indigo-500 hover:text-indigo-600 inline-flex items-center gap-1 text-xs">
+                                Link <ExternalLink className="w-2.5 h-2.5" />
+                              </a>
+                            ) : (
+                              <span className="block truncate max-w-[300px]" title={String(val ?? '')}>
+                                {String(val ?? '—')}
+                              </span>
+                            )}
+                          </td>
+                        );
+                      })}
+                      <td className="px-2 py-2">
+                        <button
+                          onClick={() => setExpandedRow(isExpanded ? null : idx)}
+                          className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-600 transition"
+                          title="View details"
+                        >
+                          <Eye className={`w-3.5 h-3.5 ${isExpanded ? 'text-indigo-500' : 'text-slate-400'}`} />
+                        </button>
+                      </td>
+                    </tr>
+                    {isExpanded && (
+                      <tr>
+                        <td colSpan={tableColumns.length + 2} className="px-6 py-3 bg-slate-50 dark:bg-slate-900/30">
+                          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-xs">
+                            {sortedColumns.map((col) => (
+                              <div key={col}>
+                                <span className="text-slate-400 text-[10px] uppercase">{columnLabel(col)}</span>
+                                <p className="text-slate-700 dark:text-slate-300 mt-0.5 break-all">
+                                  {typeof row[col] === 'string' && row[col]?.startsWith('http') ? (
+                                    <a href={row[col]} target="_blank" rel="noopener noreferrer" className="text-indigo-500 hover:underline">
+                                      {row[col]}
+                                    </a>
+                                  ) : (
+                                    String(row[col] ?? '—')
+                                  )}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+              {filteredRows.length === 0 && (
+                <tr>
+                  <td colSpan={tableColumns.length + 2} className="px-4 py-8 text-center text-sm text-slate-400">
+                    {searchQuery ? 'No results match your search' : 'No data available'}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ─── Main page ─── */
 export default function ExecutionDetailPage() {
   const { t } = useLocale();
@@ -315,6 +698,7 @@ export default function ExecutionDetailPage() {
   const [execution, setExecution] = useState<Execution | null>(null);
   const [steps, setSteps] = useState<StepInfo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'overview' | 'data'>('overview');
   const { on } = useWebSocket();
 
   const fetchExecution = useCallback(async () => {
@@ -440,82 +824,113 @@ export default function ExecutionDetailPage() {
         </div>
       </div>
 
-      {/* Progress bar */}
-      <div className="mb-6">
-        <ProgressBar steps={steps} />
+      {/* Tab bar */}
+      <div className="flex items-center gap-1 mb-6 border-b border-slate-200 dark:border-slate-700">
+        <button
+          onClick={() => setActiveTab('overview')}
+          className={`inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition -mb-px ${
+            activeTab === 'overview'
+              ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400'
+              : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+          }`}
+        >
+          <Activity className="w-3.5 h-3.5" /> Overview
+        </button>
+        <button
+          onClick={() => setActiveTab('data')}
+          className={`inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition -mb-px ${
+            activeTab === 'data'
+              ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400'
+              : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+          }`}
+        >
+          <Table2 className="w-3.5 h-3.5" /> Results Data
+        </button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left column: metadata + steps */}
-        <div className="lg:col-span-1 space-y-6">
-          {/* Metadata card */}
-          <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
-            <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-4">Execution Info</h3>
-            <div className="space-y-3.5">
-              <MetaItem icon={Hash} label="Execution ID" value={id || '—'} mono />
-              <MetaItem icon={GitBranch} label="Workflow" value={execution.workflow_id} mono />
-              {execution.agent_id && <MetaItem icon={Server} label="Agent" value={execution.agent_id} mono />}
-              <MetaItem icon={Play} label="Trigger Type" value={execution.trigger_type} />
-              <MetaItem icon={Calendar} label="Started" value={formatDatetime(execution.started_at)} />
-              <MetaItem icon={Calendar} label="Completed" value={formatDatetime(execution.completed_at)} />
-              <MetaItem icon={Timer} label="Duration" value={
-                isActive && execution.started_at ? 'In progress...' : formatDuration(execution.duration_ms)
-              } />
-              {execution.retry_count > 0 && (
-                <MetaItem icon={RotateCcw} label="Retries" value={String(execution.retry_count)} />
-              )}
-            </div>
-
-            {execution.workflow_id && (
-              <Link to={`/workflows/${execution.workflow_id}/edit`}
-                className="flex items-center gap-1 mt-4 text-xs text-indigo-500 hover:text-indigo-600 transition">
-                <ExternalLink className="w-3 h-3" /> View Workflow
-              </Link>
-            )}
+      {/* Tab content */}
+      {activeTab === 'overview' ? (
+        <>
+          {/* Progress bar */}
+          <div className="mb-6">
+            <ProgressBar steps={steps} />
           </div>
 
-          {/* Step timeline */}
-          <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                <Zap className="w-3 h-3" />
-                Step Progress
-              </h3>
-              {steps.length > 0 && (
-                <span className="text-[10px] font-mono text-slate-400">
-                  {steps.filter((s) => s.status === 'completed').length}/{steps.length}
-                </span>
-              )}
-            </div>
-            <StepTimeline steps={steps} totalDurationMs={totalStepDuration} />
-          </div>
-        </div>
-
-        {/* Right column: logs + error */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* Error message */}
-          {execution.error_message && (
-            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4 relative group">
-              <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition">
-                <CopyButton text={execution.error_message} />
-              </div>
-              <div className="flex items-start gap-2">
-                <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-sm font-medium text-red-700 dark:text-red-400">Execution Failed</p>
-                  <p className="text-xs text-red-600 dark:text-red-400/80 mt-1 font-mono whitespace-pre-wrap">{execution.error_message}</p>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Left column: metadata + steps */}
+            <div className="lg:col-span-1 space-y-6">
+              {/* Metadata card */}
+              <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
+                <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-4">Execution Info</h3>
+                <div className="space-y-3.5">
+                  <MetaItem icon={Hash} label="Execution ID" value={id || '—'} mono />
+                  <MetaItem icon={GitBranch} label="Workflow" value={execution.workflow_id} mono />
+                  {execution.agent_id && <MetaItem icon={Server} label="Agent" value={execution.agent_id} mono />}
+                  <MetaItem icon={Play} label="Trigger Type" value={execution.trigger_type} />
+                  <MetaItem icon={Calendar} label="Started" value={formatDatetime(execution.started_at)} />
+                  <MetaItem icon={Calendar} label="Completed" value={formatDatetime(execution.completed_at)} />
+                  <MetaItem icon={Timer} label="Duration" value={
+                    isActive && execution.started_at ? 'In progress...' : formatDuration(execution.duration_ms)
+                  } />
+                  {execution.retry_count > 0 && (
+                    <MetaItem icon={RotateCcw} label="Retries" value={String(execution.retry_count)} />
+                  )}
                 </div>
+
+                {execution.workflow_id && (
+                  <Link to={`/workflows/${execution.workflow_id}/edit`}
+                    className="flex items-center gap-1 mt-4 text-xs text-indigo-500 hover:text-indigo-600 transition">
+                    <ExternalLink className="w-3 h-3" /> View Workflow
+                  </Link>
+                )}
+              </div>
+
+              {/* Step timeline */}
+              <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <Zap className="w-3 h-3" />
+                    Step Progress
+                  </h3>
+                  {steps.length > 0 && (
+                    <span className="text-[10px] font-mono text-slate-400">
+                      {steps.filter((s) => s.status === 'completed').length}/{steps.length}
+                    </span>
+                  )}
+                </div>
+                <StepTimeline steps={steps} totalDurationMs={totalStepDuration} />
               </div>
             </div>
-          )}
 
-          {/* Live logs */}
-          <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
-            <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-4">Execution Logs</h3>
-            <LiveLogViewer executionId={id!} isRunning={execution.status === 'running'} />
+            {/* Right column: logs + error */}
+            <div className="lg:col-span-2 space-y-6">
+              {/* Error message */}
+              {execution.error_message && (
+                <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4 relative group">
+                  <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition">
+                    <CopyButton text={execution.error_message} />
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-red-700 dark:text-red-400">Execution Failed</p>
+                      <p className="text-xs text-red-600 dark:text-red-400/80 mt-1 font-mono whitespace-pre-wrap">{execution.error_message}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Live logs */}
+              <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
+                <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-4">Execution Logs</h3>
+                <LiveLogViewer executionId={id!} isRunning={execution.status === 'running'} />
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
+        </>
+      ) : (
+        <DataTab executionId={id!} />
+      )}
     </div>
   );
 }

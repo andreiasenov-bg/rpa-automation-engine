@@ -18,4 +18,9 @@ export const executionApi = {
 
   cancel: (id: string) =>
     client.post<{ message: string }>(`/executions/${id}/cancel`).then((r) => r.data),
+
+  data: (id: string) =>
+    client.get<{ execution_id: string; steps: Record<string, any>; variables: Record<string, any> }>(
+      `/executions/${id}/data`
+    ).then((r) => r.data),
 };
