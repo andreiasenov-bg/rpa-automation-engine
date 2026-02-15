@@ -18,6 +18,7 @@ import {
   Puzzle,
   FileText,
   Wand2,
+  Globe,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import { useLocale } from '@/i18n';
@@ -30,6 +31,7 @@ const navItems = [
   { to: '/create', icon: Wand2, i18nKey: 'nav.aiCreator' },
   { to: '/triggers', icon: Zap, i18nKey: 'nav.triggers' },
   { to: '/schedules', icon: CalendarClock, i18nKey: 'nav.schedules' },
+  { to: '/integrations', icon: Globe, i18nKey: 'nav.integrations' },
   { to: '/credentials', icon: Key, i18nKey: 'nav.credentials' },
   { to: '/agents', icon: Server, i18nKey: 'nav.agents' },
   { to: '/users', icon: Users, i18nKey: 'nav.users' },
