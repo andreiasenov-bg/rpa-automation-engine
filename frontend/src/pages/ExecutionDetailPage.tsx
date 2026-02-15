@@ -336,27 +336,65 @@ interface DataSource {
 function extractDataSources(stepsData: Record<string, any>): DataSource[] {
   const sources: DataSource[] = [];
 
-  for (const [stepId, stepInfo] of Object.entries(stepsData)) {
-    const output = stepInfo?.output;
-    if (!output) continue;
+  /** Recursively search an object for tabular data */
+  function searchObject(obj: any, stepId: string, pathLabel: string) {
+    if (!obj || typeof obj !== 'object') return;
 
-    // Check if output itself is an array of objects
-    if (Array.isArray(output) && output.length > 0 && typeof output[0] === 'object') {
-      const columns = [...new Set(output.flatMap((row: any) => Object.keys(row)))];
-      sources.push({ stepId, label: stepId, rows: output, columns });
-      continue;
+    // 1) Direct array of objects: [{title: "...", price: "..."}, ...]
+    if (Array.isArray(obj) && obj.length > 0 && typeof obj[0] === 'object' && !Array.isArray(obj[0])) {
+      const columns = [...new Set(obj.flatMap((row: any) => Object.keys(row)))];
+      sources.push({ stepId, label: pathLabel, rows: obj, columns });
+      return;
     }
 
-    // Check nested keys for arrays (e.g., output.products, output.items, output.results)
-    if (typeof output === 'object') {
-      for (const [key, val] of Object.entries(output)) {
-        if (Array.isArray(val) && val.length > 0 && typeof (val as any[])[0] === 'object') {
-          const rows = val as DataRow[];
-          const columns = [...new Set(rows.flatMap((row) => Object.keys(row)))];
-          sources.push({ stepId, label: `${stepId} / ${key}`, rows, columns });
+    // 2) Check nested keys
+    if (!Array.isArray(obj)) {
+      // Collect parallel arrays of primitives (e.g., deal_titles: [...], deal_prices: [...])
+      const parallelArrays: Record<string, any[]> = {};
+      let maxLen = 0;
+
+      for (const [key, val] of Object.entries(obj)) {
+        if (Array.isArray(val) && val.length > 0) {
+          if (typeof val[0] === 'object' && !Array.isArray(val[0])) {
+            // Array of objects — treat as a data source directly
+            const rows = val as DataRow[];
+            const columns = [...new Set(rows.flatMap((row) => Object.keys(row)))];
+            sources.push({ stepId, label: `${pathLabel} / ${key}`, rows, columns });
+          } else if (typeof val[0] !== 'object') {
+            // Array of primitives — candidate for parallel array zip
+            parallelArrays[key] = val;
+            maxLen = Math.max(maxLen, val.length);
+          }
+        } else if (typeof val === 'object' && val !== null && !Array.isArray(val)) {
+          // Recurse into nested objects (e.g., output.data.deals)
+          searchObject(val, stepId, `${pathLabel} / ${key}`);
+        }
+      }
+
+      // Zip parallel arrays into rows if we have 2+ arrays of similar length
+      const arrayKeys = Object.keys(parallelArrays);
+      if (arrayKeys.length >= 2 && maxLen > 0) {
+        // Only zip arrays that have at least 50% of maxLen (filter out tiny metadata arrays)
+        const zippableKeys = arrayKeys.filter(k => parallelArrays[k].length >= maxLen * 0.5);
+        if (zippableKeys.length >= 2) {
+          const rows: DataRow[] = [];
+          for (let i = 0; i < maxLen; i++) {
+            const row: DataRow = {};
+            for (const key of zippableKeys) {
+              row[key] = parallelArrays[key][i] ?? null;
+            }
+            rows.push(row);
+          }
+          sources.push({ stepId, label: pathLabel, rows, columns: zippableKeys });
         }
       }
     }
+  }
+
+  for (const [stepId, stepInfo] of Object.entries(stepsData)) {
+    const output = stepInfo?.output;
+    if (!output) continue;
+    searchObject(output, stepId, stepId);
   }
 
   // Sort by row count descending — largest dataset first
