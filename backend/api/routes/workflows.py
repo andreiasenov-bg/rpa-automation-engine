@@ -229,29 +229,35 @@ async def trigger_workflow_execution(
     from db.models.execution import Execution as ExecModel
     from sqlalchemy import update as sa_update
 
-    svc = WorkflowService(db)
-    wf = await svc.get_by_id_and_org(workflow_id, current_user.org_id)
-    if not wf or not wf.is_enabled:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Workflow not found or disabled",
+    try:
+        svc = WorkflowService(db)
+        wf = await svc.get_by_id_and_org(workflow_id, current_user.org_id)
+        if not wf or not wf.is_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Workflow not found or disabled",
+            )
+
+        execution_id = str(uuid4())
+        definition = wf.definition or {}
+        org_id = current_user.org_id
+
+        # Create execution record as "running" right away
+        execution = ExecModel(
+            id=execution_id,
+            organization_id=org_id,
+            workflow_id=workflow_id,
+            trigger_type="manual",
+            status="running",
+            started_at=datetime.now(timezone.utc),
         )
-
-    execution_id = str(uuid4())
-    definition = wf.definition or {}
-    org_id = current_user.org_id
-
-    # Create execution record as "running" right away
-    execution = ExecModel(
-        id=execution_id,
-        organization_id=org_id,
-        workflow_id=workflow_id,
-        trigger_type="manual",
-        status="running",
-        started_at=datetime.now(timezone.utc),
-    )
-    db.add(execution)
-    await db.commit()
+        db.add(execution)
+        await db.commit()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Execute setup error: {e}", exc_info=True)
+        return {"error": str(e), "traceback": tb_mod.format_exc()}
 
     def _run_engine_thread(exec_id, wf_id, org, defn):
         """Run engine in a NEW event loop on a separate thread."""
