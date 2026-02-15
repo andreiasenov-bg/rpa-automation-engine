@@ -480,17 +480,62 @@ class StepExecutor:
         result.completed_at = datetime.now(timezone.utc).isoformat()
         return result
 
+    def _resolve_items_expression(self, items_expr, context: ExecutionContext):
+        """Resolve a loop items/collection expression to an iterable.
+
+        Handles both {{ expr }} and bare dot-notation like 'steps.step_5.data'.
+        Returns a list — empty list if resolution fails or result is not iterable.
+        """
+        if isinstance(items_expr, (list, tuple)):
+            return list(items_expr)
+
+        if isinstance(items_expr, str):
+            expr = items_expr.strip()
+            # If bare expression (no {{ }}), wrap it for evaluator
+            if expr and "{{" not in expr:
+                expr = "{{ " + expr + " }}"
+            resolved = self._evaluator.evaluate(expr, context)
+            if isinstance(resolved, (list, tuple)):
+                return list(resolved)
+            # If still a string (unresolved), try JSON parse
+            if isinstance(resolved, str):
+                try:
+                    import json
+                    parsed = json.loads(resolved)
+                    if isinstance(parsed, list):
+                        return parsed
+                except (json.JSONDecodeError, ValueError):
+                    pass
+            # None or non-iterable → empty list with warning
+            if resolved is None or resolved == items_expr:
+                logger.warning("Loop items expression resolved to empty",
+                               expression=items_expr, resolved_type=type(resolved).__name__)
+                return []
+            # Single dict → wrap in list
+            if isinstance(resolved, dict):
+                return [resolved]
+            return []
+
+        if items_expr is None:
+            return []
+
+        # Already a list or other iterable
+        try:
+            return list(items_expr)
+        except (TypeError, ValueError):
+            return []
+
     async def _execute_foreach(
         self, step_def: dict, config: dict, context: ExecutionContext, result: StepResult
     ) -> StepResult:
         """Execute a for-each loop step — iterate and run body steps."""
-        collection = config.get("collection", [])
-        if isinstance(collection, str):
-            collection = self._evaluator.evaluate(collection, context)
+        collection = self._resolve_items_expression(config.get("collection", []), context)
 
-        if not isinstance(collection, (list, tuple)):
-            result.status = StepStatus.FAILED
-            result.error = f"foreach collection is not iterable: {type(collection)}"
+        if not collection:
+            logger.warning("foreach collection is empty, skipping loop",
+                           step=step_def.get("id"))
+            result.status = StepStatus.COMPLETED
+            result.output = {"collection_size": 0, "iterations_completed": 0, "results": [], "skipped": True}
             result.completed_at = datetime.now(timezone.utc).isoformat()
             return result
 
@@ -531,13 +576,12 @@ class StepExecutor:
         self, step_def: dict, config: dict, context: ExecutionContext, result: StepResult
     ) -> StepResult:
         """Execute a loop step — iterates items and runs embedded step template."""
-        items = config.get("items", [])
-        if isinstance(items, str):
-            items = self._evaluator.evaluate(items, context)
+        items = self._resolve_items_expression(config.get("items", []), context)
 
-        if not isinstance(items, (list, tuple)):
-            result.status = StepStatus.FAILED
-            result.error = f"loop items is not iterable: {type(items)}"
+        if not items:
+            logger.warning("loop items is empty, skipping loop", step=step_def.get("id"))
+            result.status = StepStatus.COMPLETED
+            result.output = {"iterations_completed": 0, "results": [], "errors": [], "skipped": True}
             result.completed_at = datetime.now(timezone.utc).isoformat()
             return result
 
