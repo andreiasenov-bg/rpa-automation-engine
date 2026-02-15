@@ -42,7 +42,18 @@ import {
   Database,
   Eye,
   X,
+  ShoppingCart,
+  TrendingDown,
+  TrendingUp,
+  Minus,
+  Star,
+  Package,
+  BarChart3,
+  DollarSign,
+  Percent,
+  Tag,
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import type { Execution } from '@/types';
 import { executionApi } from '@/api/executions';
 import { useWebSocket, type ExecutionStatusPayload } from '@/hooks/useWebSocket';
@@ -457,6 +468,520 @@ function exportJSON(data: any, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+/* ─── Price Comparison Tab ─── */
+
+interface PriceProduct {
+  rank: number;
+  title: string;
+  price: string;
+  originalPrice?: string;
+  discount?: string;
+  rating?: string;
+  asin?: string;
+  url?: string;
+  image?: string;
+  bsr?: string;
+  category?: string;
+}
+
+function parsePriceNum(s: string | number | undefined): number {
+  if (s === undefined || s === null || s === '' || s === 'N/A') return 0;
+  if (typeof s === 'number') return s;
+  return parseFloat(s.replace(/[^0-9.,]/g, '').replace(',', '.')) || 0;
+}
+
+function parseDiscountNum(s: string | number | undefined): number {
+  if (s === undefined || s === null || s === '') return 0;
+  if (typeof s === 'number') return s > 1 ? s : s * 100;
+  const n = parseFloat(s.replace(/[^0-9.,]/g, '').replace(',', '.'));
+  return n > 1 ? n : n * 100;
+}
+
+function extractProducts(stepsData: Record<string, any>): PriceProduct[] {
+  const products: PriceProduct[] = [];
+
+  for (const [, stepInfo] of Object.entries(stepsData)) {
+    const output = stepInfo?.output;
+    if (!output || typeof output !== 'object') continue;
+
+    // 1) Check for parallel arrays (deal_titles, deal_prices, etc.)
+    const keys = Object.keys(output);
+    const titleKey = keys.find(k => /title/i.test(k) && Array.isArray(output[k]));
+    const priceKey = keys.find(k => /price/i.test(k) && !(/original/i.test(k)) && Array.isArray(output[k]));
+
+    if (titleKey && priceKey) {
+      const titles = output[titleKey] as any[];
+      const prices = output[priceKey] as any[];
+      const origPriceKey = keys.find(k => /original.*price/i.test(k) && Array.isArray(output[k]));
+      const discountKey = keys.find(k => /discount/i.test(k) && Array.isArray(output[k]));
+      const ratingKey = keys.find(k => /rating/i.test(k) && Array.isArray(output[k]));
+      const asinKey = keys.find(k => /asin/i.test(k) && Array.isArray(output[k]));
+      const urlKey = keys.find(k => /url/i.test(k) && Array.isArray(output[k]));
+      const imgKey = keys.find(k => /image|img|thumbnail/i.test(k) && Array.isArray(output[k]));
+      const bsrKey = keys.find(k => /bsr|best.*seller.*rank|rank/i.test(k) && Array.isArray(output[k]));
+
+      for (let i = 0; i < titles.length; i++) {
+        products.push({
+          rank: i + 1,
+          title: String(titles[i] || ''),
+          price: String(prices[i] || ''),
+          originalPrice: origPriceKey ? String(output[origPriceKey][i] || '') : undefined,
+          discount: discountKey ? String(output[discountKey][i] || '') : undefined,
+          rating: ratingKey ? String(output[ratingKey][i] || '') : undefined,
+          asin: asinKey ? String(output[asinKey][i] || '') : undefined,
+          url: urlKey ? String(output[urlKey][i] || '') : undefined,
+          image: imgKey ? String(output[imgKey][i] || '') : undefined,
+          bsr: bsrKey ? String(output[bsrKey][i] || '') : undefined,
+        });
+      }
+    }
+
+    // 2) Check for array of objects
+    for (const [, val] of Object.entries(output)) {
+      if (Array.isArray(val) && val.length > 0 && typeof val[0] === 'object' && !Array.isArray(val[0])) {
+        const sample = val[0];
+        if (sample.title || sample.t || sample.name) {
+          for (let i = 0; i < val.length; i++) {
+            const item = val[i];
+            products.push({
+              rank: item.rank || item.r || i + 1,
+              title: item.title || item.t || item.name || '',
+              price: String(item.price || item.p || ''),
+              originalPrice: item.original_price || item.originalPrice,
+              discount: item.discount,
+              rating: item.rating || item.rt,
+              asin: item.asin || item.a,
+              url: item.url || item.u,
+              image: item.image || item.img,
+              bsr: item.bsr || item.best_seller_rank,
+              category: item.category || item.c,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  return products;
+}
+
+function PriceComparisonTab({ executionId }: { executionId: string }) {
+  const [stepsData, setStepsData] = useState<Record<string, any> | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortField, setSortField] = useState<'rank' | 'price' | 'discount' | 'title'>('rank');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+
+  useEffect(() => {
+    setLoading(true);
+    executionApi.data(executionId)
+      .then((resp) => setStepsData(resp.steps || {}))
+      .catch((err) => setError(err?.message || 'Failed to load'))
+      .finally(() => setLoading(false));
+  }, [executionId]);
+
+  const products = useMemo(() => {
+    if (!stepsData) return [];
+    return extractProducts(stepsData);
+  }, [stepsData]);
+
+  const filteredProducts = useMemo(() => {
+    let items = products;
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      items = items.filter(p =>
+        p.title.toLowerCase().includes(q) ||
+        (p.asin || '').toLowerCase().includes(q) ||
+        (p.category || '').toLowerCase().includes(q)
+      );
+    }
+
+    items = [...items].sort((a, b) => {
+      let av: number, bv: number;
+      switch (sortField) {
+        case 'price':
+          av = parsePriceNum(a.price); bv = parsePriceNum(b.price);
+          break;
+        case 'discount':
+          av = parseDiscountNum(a.discount); bv = parseDiscountNum(b.discount);
+          break;
+        case 'title':
+          return sortDir === 'asc' ? a.title.localeCompare(b.title) : b.title.localeCompare(a.title);
+        default:
+          av = a.rank; bv = b.rank;
+      }
+      return sortDir === 'asc' ? av - bv : bv - av;
+    });
+
+    return items;
+  }, [products, searchQuery, sortField, sortDir]);
+
+  const handleSort = (field: typeof sortField) => {
+    if (sortField === field) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDir(field === 'discount' ? 'desc' : 'asc');
+    }
+  };
+
+  // Stats
+  const stats = useMemo(() => {
+    if (products.length === 0) return null;
+    const prices = products.map(p => parsePriceNum(p.price)).filter(p => p > 0);
+    const discounts = products.map(p => parseDiscountNum(p.discount)).filter(d => d > 0);
+    return {
+      totalProducts: products.length,
+      avgPrice: prices.length > 0 ? prices.reduce((a, b) => a + b, 0) / prices.length : 0,
+      minPrice: prices.length > 0 ? Math.min(...prices) : 0,
+      maxPrice: prices.length > 0 ? Math.max(...prices) : 0,
+      avgDiscount: discounts.length > 0 ? discounts.reduce((a, b) => a + b, 0) / discounts.length : 0,
+      maxDiscount: discounts.length > 0 ? Math.max(...discounts) : 0,
+    };
+  }, [products]);
+
+  const handleExportXLSX = () => {
+    if (filteredProducts.length === 0) return;
+
+    const wsData = [
+      ['#', 'ASIN', 'Produkt', 'Deal Preis', 'Original Preis', 'Rabatt %', 'Bewertung', 'BSR', 'URL'],
+      ...filteredProducts.map((p, i) => [
+        i + 1,
+        p.asin || '',
+        p.title,
+        parsePriceNum(p.price) || '',
+        parsePriceNum(p.originalPrice) || '',
+        parseDiscountNum(p.discount) ? `${parseDiscountNum(p.discount).toFixed(0)}%` : '',
+        p.rating || '',
+        p.bsr || '',
+        p.url || '',
+      ]),
+    ];
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+    // Column widths
+    ws['!cols'] = [
+      { wch: 4 }, { wch: 14 }, { wch: 50 }, { wch: 12 },
+      { wch: 14 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 40 },
+    ];
+
+    XLSX.utils.book_append_sheet(wb, ws, 'Price Comparison');
+
+    // Add summary sheet
+    const summaryData = [
+      ['Zusammenfassung', ''],
+      ['Anzahl Produkte', products.length],
+      ['Durchschnittspreis', stats ? `€${stats.avgPrice.toFixed(2)}` : ''],
+      ['Min Preis', stats ? `€${stats.minPrice.toFixed(2)}` : ''],
+      ['Max Preis', stats ? `€${stats.maxPrice.toFixed(2)}` : ''],
+      ['Durchschn. Rabatt', stats ? `${stats.avgDiscount.toFixed(0)}%` : ''],
+      ['Max Rabatt', stats ? `${stats.maxDiscount.toFixed(0)}%` : ''],
+      ['Export Datum', new Date().toLocaleString('de-DE')],
+      ['Execution ID', executionId],
+    ];
+    const ws2 = XLSX.utils.aoa_to_sheet(summaryData);
+    ws2['!cols'] = [{ wch: 22 }, { wch: 30 }];
+    XLSX.utils.book_append_sheet(wb, ws2, 'Zusammenfassung');
+
+    XLSX.writeFile(wb, `price-comparison-${executionId.slice(0, 8)}.xlsx`);
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-48">
+        <Loader2 className="w-5 h-5 text-indigo-500 animate-spin" />
+        <span className="ml-2 text-sm text-slate-500">Lade Preisdaten...</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center gap-2 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+        <XCircle className="w-4 h-4 text-red-500" />
+        <span className="text-sm text-red-600 dark:text-red-400">{error}</span>
+      </div>
+    );
+  }
+
+  if (products.length === 0) {
+    return (
+      <div className="text-center py-12">
+        <ShoppingCart className="w-10 h-10 text-slate-300 dark:text-slate-600 mx-auto mb-3" />
+        <p className="text-sm text-slate-500 dark:text-slate-400">Keine Preisdaten gefunden</p>
+        <p className="text-xs text-slate-400 mt-1">Workflow ausführen um Ergebnisse zu erhalten</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Stats cards */}
+      {stats && (
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
+            <div className="flex items-center gap-2 mb-1">
+              <Package className="w-3.5 h-3.5 text-indigo-500" />
+              <span className="text-[10px] text-slate-400 uppercase tracking-wider">Produkte</span>
+            </div>
+            <p className="text-lg font-bold text-slate-900 dark:text-white">{stats.totalProducts}</p>
+          </div>
+          <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
+            <div className="flex items-center gap-2 mb-1">
+              <DollarSign className="w-3.5 h-3.5 text-emerald-500" />
+              <span className="text-[10px] text-slate-400 uppercase tracking-wider">Ø Preis</span>
+            </div>
+            <p className="text-lg font-bold text-slate-900 dark:text-white">€{stats.avgPrice.toFixed(2)}</p>
+          </div>
+          <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
+            <div className="flex items-center gap-2 mb-1">
+              <TrendingDown className="w-3.5 h-3.5 text-blue-500" />
+              <span className="text-[10px] text-slate-400 uppercase tracking-wider">Min</span>
+            </div>
+            <p className="text-lg font-bold text-emerald-600">€{stats.minPrice.toFixed(2)}</p>
+          </div>
+          <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
+            <div className="flex items-center gap-2 mb-1">
+              <TrendingUp className="w-3.5 h-3.5 text-amber-500" />
+              <span className="text-[10px] text-slate-400 uppercase tracking-wider">Max</span>
+            </div>
+            <p className="text-lg font-bold text-slate-900 dark:text-white">€{stats.maxPrice.toFixed(2)}</p>
+          </div>
+          <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
+            <div className="flex items-center gap-2 mb-1">
+              <Percent className="w-3.5 h-3.5 text-red-500" />
+              <span className="text-[10px] text-slate-400 uppercase tracking-wider">Ø Rabatt</span>
+            </div>
+            <p className="text-lg font-bold text-red-600">{stats.avgDiscount.toFixed(0)}%</p>
+          </div>
+          <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
+            <div className="flex items-center gap-2 mb-1">
+              <Tag className="w-3.5 h-3.5 text-orange-500" />
+              <span className="text-[10px] text-slate-400 uppercase tracking-wider">Max Rabatt</span>
+            </div>
+            <p className="text-lg font-bold text-orange-600">{stats.maxDiscount.toFixed(0)}%</p>
+          </div>
+        </div>
+      )}
+
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-3">
+        {/* Search */}
+        <div className="relative flex-1 min-w-[200px] max-w-sm">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+          <input
+            type="text"
+            placeholder="Produkt suchen..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-8 pr-3 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 placeholder-slate-400"
+          />
+          {searchQuery && (
+            <button onClick={() => setSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2">
+              <X className="w-3 h-3 text-slate-400 hover:text-slate-600" />
+            </button>
+          )}
+        </div>
+
+        <span className="text-xs text-slate-400">
+          {filteredProducts.length} von {products.length} Produkten
+        </span>
+
+        {/* Export XLSX button - prominent */}
+        <button
+          onClick={handleExportXLSX}
+          className="ml-auto inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition shadow-sm"
+        >
+          <FileSpreadsheet className="w-4 h-4" />
+          Export XLSX
+        </button>
+
+        {/* Also CSV/JSON */}
+        <button
+          onClick={() => exportCSV(
+            filteredProducts.map((p, i) => ({
+              '#': i + 1, ASIN: p.asin || '', Produkt: p.title,
+              'Deal Preis': p.price, 'Original Preis': p.originalPrice || '',
+              'Rabatt': p.discount || '', Bewertung: p.rating || '', BSR: p.bsr || '',
+            })),
+            ['#', 'ASIN', 'Produkt', 'Deal Preis', 'Original Preis', 'Rabatt', 'Bewertung', 'BSR'],
+            `price-comparison-${executionId.slice(0, 8)}.csv`
+          )}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 transition text-slate-600 dark:text-slate-300"
+        >
+          <Download className="w-3.5 h-3.5" /> CSV
+        </button>
+      </div>
+
+      {/* Products table */}
+      <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
+                <th className="px-3 py-2.5 text-left text-[10px] font-semibold text-slate-500 uppercase tracking-wider w-10 cursor-pointer hover:text-indigo-600"
+                    onClick={() => handleSort('rank')}>
+                  <span className="inline-flex items-center gap-1">
+                    # {sortField === 'rank' && (sortDir === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)}
+                  </span>
+                </th>
+                <th className="px-3 py-2.5 text-left text-[10px] font-semibold text-slate-500 uppercase tracking-wider w-20">
+                  Bild
+                </th>
+                <th className="px-3 py-2.5 text-left text-[10px] font-semibold text-slate-500 uppercase tracking-wider cursor-pointer hover:text-indigo-600"
+                    onClick={() => handleSort('title')}>
+                  <span className="inline-flex items-center gap-1">
+                    Produkt {sortField === 'title' && (sortDir === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)}
+                  </span>
+                </th>
+                <th className="px-3 py-2.5 text-right text-[10px] font-semibold text-slate-500 uppercase tracking-wider w-28 cursor-pointer hover:text-indigo-600"
+                    onClick={() => handleSort('price')}>
+                  <span className="inline-flex items-center gap-1 justify-end">
+                    Preis {sortField === 'price' && (sortDir === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)}
+                  </span>
+                </th>
+                <th className="px-3 py-2.5 text-right text-[10px] font-semibold text-slate-500 uppercase tracking-wider w-24 cursor-pointer hover:text-indigo-600"
+                    onClick={() => handleSort('discount')}>
+                  <span className="inline-flex items-center gap-1 justify-end">
+                    Rabatt {sortField === 'discount' && (sortDir === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)}
+                  </span>
+                </th>
+                <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-slate-500 uppercase tracking-wider w-24">
+                  Bewertung
+                </th>
+                <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-slate-500 uppercase tracking-wider w-16">
+                  ASIN
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
+              {filteredProducts.map((product, idx) => {
+                const priceNum = parsePriceNum(product.price);
+                const origPriceNum = parsePriceNum(product.originalPrice);
+                const discountNum = parseDiscountNum(product.discount);
+                const ratingNum = parseFloat(product.rating || '0');
+
+                return (
+                  <tr key={idx} className={`hover:bg-slate-50 dark:hover:bg-slate-800/50 transition ${idx % 2 === 1 ? 'bg-slate-25 dark:bg-slate-800/20' : ''}`}>
+                    {/* Rank */}
+                    <td className="px-3 py-2.5">
+                      <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-[10px] font-bold ${
+                        product.rank <= 3
+                          ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+                          : 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400'
+                      }`}>
+                        {product.rank}
+                      </span>
+                    </td>
+
+                    {/* Image */}
+                    <td className="px-3 py-2.5">
+                      {product.image ? (
+                        <img
+                          src={product.image}
+                          alt=""
+                          className="w-12 h-12 object-contain rounded border border-slate-200 dark:border-slate-600 bg-white"
+                          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                        />
+                      ) : (
+                        <div className="w-12 h-12 rounded border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 flex items-center justify-center">
+                          <Package className="w-4 h-4 text-slate-300" />
+                        </div>
+                      )}
+                    </td>
+
+                    {/* Title + ASIN subtitle */}
+                    <td className="px-3 py-2.5 max-w-[350px]">
+                      <div>
+                        {product.url ? (
+                          <a href={product.url} target="_blank" rel="noopener noreferrer"
+                            className="text-sm font-medium text-slate-900 dark:text-white hover:text-indigo-600 dark:hover:text-indigo-400 line-clamp-2 transition">
+                            {product.title}
+                          </a>
+                        ) : (
+                          <p className="text-sm font-medium text-slate-900 dark:text-white line-clamp-2">{product.title}</p>
+                        )}
+                        {product.bsr && (
+                          <span className="inline-flex items-center gap-1 mt-1 text-[10px] text-slate-400">
+                            <BarChart3 className="w-2.5 h-2.5" /> BSR #{product.bsr}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* Prices */}
+                    <td className="px-3 py-2.5 text-right">
+                      <div>
+                        <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400">
+                          {priceNum > 0 ? `€${priceNum.toFixed(2)}` : product.price}
+                        </p>
+                        {origPriceNum > 0 && origPriceNum !== priceNum && (
+                          <p className="text-[10px] text-slate-400 line-through">
+                            €{origPriceNum.toFixed(2)}
+                          </p>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* Discount badge */}
+                    <td className="px-3 py-2.5 text-right">
+                      {discountNum > 0 ? (
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold ${
+                          discountNum >= 40 ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' :
+                          discountNum >= 25 ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' :
+                          'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+                        }`}>
+                          <TrendingDown className="w-3 h-3" />
+                          -{discountNum.toFixed(0)}%
+                        </span>
+                      ) : (
+                        <span className="text-xs text-slate-300">—</span>
+                      )}
+                    </td>
+
+                    {/* Rating */}
+                    <td className="px-3 py-2.5 text-center">
+                      {ratingNum > 0 ? (
+                        <div className="inline-flex items-center gap-1">
+                          <Star className={`w-3.5 h-3.5 ${ratingNum >= 4 ? 'text-amber-400 fill-amber-400' : ratingNum >= 3 ? 'text-amber-300 fill-amber-300' : 'text-slate-300'}`} />
+                          <span className="text-xs font-medium text-slate-600 dark:text-slate-300">{ratingNum.toFixed(1)}</span>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-slate-300">—</span>
+                      )}
+                    </td>
+
+                    {/* ASIN */}
+                    <td className="px-3 py-2.5 text-center">
+                      {product.asin ? (
+                        <span className="text-[10px] font-mono text-indigo-500 bg-indigo-50 dark:bg-indigo-900/20 px-1.5 py-0.5 rounded">
+                          {product.asin}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-slate-300">—</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+              {filteredProducts.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-4 py-8 text-center text-sm text-slate-400">
+                    {searchQuery ? 'Keine Produkte gefunden' : 'Keine Daten verfügbar'}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DataTab({ executionId }: { executionId: string }) {
   const [stepsData, setStepsData] = useState<Record<string, any> | null>(null);
   const [loading, setLoading] = useState(true);
@@ -736,7 +1261,7 @@ export default function ExecutionDetailPage() {
   const [execution, setExecution] = useState<Execution | null>(null);
   const [steps, setSteps] = useState<StepInfo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'overview' | 'data'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'data' | 'comparison'>('overview');
   const { on } = useWebSocket();
 
   const fetchExecution = useCallback(async () => {
@@ -884,6 +1409,16 @@ export default function ExecutionDetailPage() {
         >
           <Table2 className="w-3.5 h-3.5" /> Results Data
         </button>
+        <button
+          onClick={() => setActiveTab('comparison')}
+          className={`inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition -mb-px ${
+            activeTab === 'comparison'
+              ? 'border-emerald-500 text-emerald-600 dark:text-emerald-400'
+              : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+          }`}
+        >
+          <ShoppingCart className="w-3.5 h-3.5" /> Price Comparison
+        </button>
       </div>
 
       {/* Tab content */}
@@ -966,6 +1501,8 @@ export default function ExecutionDetailPage() {
             </div>
           </div>
         </>
+      ) : activeTab === 'comparison' ? (
+        <PriceComparisonTab executionId={id!} />
       ) : (
         <DataTab executionId={id!} />
       )}
