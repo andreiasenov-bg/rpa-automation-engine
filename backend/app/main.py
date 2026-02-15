@@ -21,6 +21,7 @@ from core.logging_config import setup_logging
 from core.middleware import RequestTrackingMiddleware, setup_exception_handlers
 from core.metrics import MetricsMiddleware, metrics_router
 from core.rate_limit import RateLimitMiddleware
+from core.security_scanner import check_secrets_on_startup
 
 
 @asynccontextmanager
@@ -29,6 +30,16 @@ async def lifespan(app: FastAPI):
     # Startup
     settings = get_settings()
     setup_logging()
+
+    # Security scan — blocks startup in production if critical secrets found
+    try:
+        check_secrets_on_startup()
+    except RuntimeError as e:
+        print(f"[startup] FATAL: {e}")
+        raise
+    except Exception as e:
+        print(f"[startup] Security scan warning: {e}")
+
     await init_db()
 
     # Initialize Notification Manager

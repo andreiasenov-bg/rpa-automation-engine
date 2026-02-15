@@ -47,6 +47,10 @@ python-docx==1.1.2
 openpyxl==3.1.5
 PyPDF2==3.0.1
 
+# Google Sheets Integration
+google-api-python-client==2.155.0
+google-auth==2.36.0
+
 # Notifications
 slack-sdk==3.34.0
 

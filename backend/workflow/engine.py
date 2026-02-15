@@ -666,7 +666,16 @@ class WorkflowEngine:
     Executes a complete workflow DAG from start to finish,
     handling step ordering, branching, loops, error handling,
     and checkpoint persistence.
+
+    Architecture (v2 — iterative queue):
+    - Uses an asyncio.Queue instead of recursive _execute_steps calls
+    - asyncio.Semaphore controls max parallel step concurrency
+    - Prevents stack overflow on deeply nested / long workflows
+    - Supports graceful cancellation via context.metadata["cancelled"]
     """
+
+    # Default max parallel steps running at once (per execution)
+    DEFAULT_MAX_CONCURRENCY = 5
 
     def __init__(
         self,
@@ -674,12 +683,14 @@ class WorkflowEngine:
         checkpoint_manager=None,
         on_step_complete: Optional[Callable] = None,
         on_execution_complete: Optional[Callable] = None,
+        max_concurrency: int = DEFAULT_MAX_CONCURRENCY,
     ):
         self._step_executor = StepExecutor(task_registry=task_registry)
         self._checkpoint_manager = checkpoint_manager
         self._on_step_complete = on_step_complete
         self._on_execution_complete = on_execution_complete
         self._running_executions: dict[str, ExecutionContext] = {}
+        self._max_concurrency = max_concurrency
 
     async def execute(
         self,
@@ -785,24 +796,50 @@ class WorkflowEngine:
         step_index: dict[str, dict],
         context: ExecutionContext,
     ) -> None:
-        """Execute a list of steps (potentially in parallel if multiple).
+        """Execute steps using an iterative queue (no recursion).
+
+        Uses asyncio.Queue + Semaphore for controlled parallelism.
+        This prevents stack overflow on deeply nested workflows and
+        allows concurrent step execution where the DAG allows it.
 
         Args:
-            step_ids: List of step IDs to execute
+            step_ids: Initial step IDs to start with
             step_index: Dict mapping step_id -> step definition
             context: Shared execution context
         """
-        for step_id in step_ids:
-            # Skip already completed steps (when resuming)
+        queue: asyncio.Queue[str] = asyncio.Queue()
+        semaphore = asyncio.Semaphore(self._max_concurrency)
+        visited: set[str] = set()  # Prevent infinite loops
+        failed_fatally = False  # Stops the queue on unhandled errors
+
+        # Seed the queue
+        for sid in step_ids:
+            queue.put_nowait(sid)
+
+        async def _process_step(step_id: str) -> None:
+            """Process a single step from the queue (runs under semaphore)."""
+            nonlocal failed_fatally
+
+            if failed_fatally:
+                return
+
+            # Check cancellation
+            if context.metadata.get("cancelled"):
+                logger.info(f"Execution cancelled, skipping step {step_id}")
+                return
+
+            # Skip already completed (resuming) or already visited
             existing = context.steps.get(step_id)
             if existing and existing.status == StepStatus.COMPLETED:
                 logger.info(f"Skipping already completed step: {step_id}")
-                continue
+                # Still enqueue next steps so DAG continues
+                self._enqueue_next(step_id, step_index, context, queue, visited)
+                return
 
             step_def = step_index.get(step_id)
             if not step_def:
                 logger.error(f"Step not found in definition: {step_id}")
-                continue
+                return
 
             # Checkpoint before step
             if self._checkpoint_manager:
@@ -817,14 +854,20 @@ class WorkflowEngine:
                     logger.warning(f"Checkpoint save failed: {e}")
 
             # Execute the step
-            result = await self._step_executor.execute_step(step_def, context)
+            async with semaphore:
+                result = await self._step_executor.execute_step(step_def, context)
+
             context.steps[step_id] = result
 
             # Checkpoint after step
             if self._checkpoint_manager:
                 try:
                     from workflow.checkpoint import CheckpointType
-                    cp_type = CheckpointType.STEP_COMPLETED if result.status == StepStatus.COMPLETED else CheckpointType.STEP_FAILED
+                    cp_type = (
+                        CheckpointType.STEP_COMPLETED
+                        if result.status == StepStatus.COMPLETED
+                        else CheckpointType.STEP_FAILED
+                    )
                     await self._checkpoint_manager.save_checkpoint(
                         execution_id=context.execution_id,
                         checkpoint_type=cp_type,
@@ -846,67 +889,80 @@ class WorkflowEngine:
                 error_handler_id = step_def.get("on_error")
                 if error_handler_id and error_handler_id in step_index:
                     logger.info(f"Step {step_id} failed, running error handler: {error_handler_id}")
-                    await self._execute_steps([error_handler_id], step_index, context)
+                    if error_handler_id not in visited:
+                        visited.add(error_handler_id)
+                        queue.put_nowait(error_handler_id)
                 else:
                     logger.error(f"Step {step_id} failed with no error handler: {result.error}")
-                    # Stop execution on unhandled error
+                    failed_fatally = True
                     return
 
-            # Determine next steps based on step type
-            if step_def.get("type") == "condition" and result.output:
-                branch = result.output.get("branch", "false")
+            # Enqueue next steps based on step type
+            self._enqueue_next(step_id, step_index, context, queue, visited)
 
-                # Support both formats:
-                # 1. branches: {"true": ["step-x"], "false": ["step-y"]}
-                # 2. config: {on_true: "step-x", on_false: "step-y"}
-                branches = step_def.get("branches", {})
-                next_steps = branches.get(branch, [])
+        # Main loop: drain the queue iteratively
+        while not queue.empty() and not failed_fatally:
+            # Grab a batch of ready steps (up to concurrency limit)
+            batch: list[str] = []
+            while not queue.empty() and len(batch) < self._max_concurrency:
+                try:
+                    batch.append(queue.get_nowait())
+                except asyncio.QueueEmpty:
+                    break
 
-                if not next_steps and result.output:
-                    # Template format: on_true / on_false in config/output
-                    target = result.output.get(f"on_{branch}")
-                    if target:
-                        next_steps = [target] if isinstance(target, str) else target
+            if not batch:
+                break
 
-                if next_steps:
-                    await self._execute_steps(next_steps, step_index, context)
-
-            elif step_def.get("type") == "loop" and result.status == StepStatus.COMPLETED:
-                # Loop body already executed in StepExecutor._execute_loop()
-                # Just follow next/depends_on pointers
-                next_steps = step_def.get("next", [])
-                dep_next = step_def.get("depends_on_next", [])
-                if next_steps:
-                    await self._execute_steps(next_steps, step_index, context)
-                elif dep_next:
-                    await self._execute_steps(dep_next, step_index, context)
-
-            elif step_def.get("type") == "foreach" and result.status == StepStatus.COMPLETED:
-                body_steps = step_def.get("body", [])
-                collection_expr = step_def.get("config", {}).get("collection", [])
-                collection = ExpressionEvaluator.evaluate(collection_expr, context)
-
-                if isinstance(collection, (list, tuple)):
-                    for i, item in enumerate(collection):
-                        context.loop_index = i
-                        context.loop_item = item
-                        context.parent_step_id = step_id
-                        await self._execute_steps(body_steps, step_index, context)
-
-                    context.loop_index = 0
-                    context.loop_item = None
-                    context.parent_step_id = None
-
-                # Continue to next steps after loop
-                next_steps = step_def.get("next", [])
-                if next_steps:
-                    await self._execute_steps(next_steps, step_index, context)
-
+            if len(batch) == 1:
+                # Single step — run directly (common case, avoids gather overhead)
+                await _process_step(batch[0])
             else:
-                # Regular step — follow next pointers
-                next_steps = step_def.get("next", [])
-                if next_steps:
-                    await self._execute_steps(next_steps, step_index, context)
+                # Multiple steps — run in parallel with semaphore control
+                await asyncio.gather(*[_process_step(sid) for sid in batch])
+
+    def _enqueue_next(
+        self,
+        step_id: str,
+        step_index: dict[str, dict],
+        context: ExecutionContext,
+        queue: asyncio.Queue,
+        visited: set[str],
+    ) -> None:
+        """Determine and enqueue next steps based on the completed step's type."""
+        step_def = step_index.get(step_id, {})
+        result = context.steps.get(step_id)
+        step_type = step_def.get("type", "")
+
+        next_ids: list[str] = []
+
+        if step_type == "condition" and result and result.output:
+            branch = result.output.get("branch", "false")
+            # Support branches: {"true": [...], "false": [...]}
+            branches = step_def.get("branches", {})
+            next_ids = branches.get(branch, [])
+            # Also support config-style on_true / on_false
+            if not next_ids and result.output:
+                target = result.output.get(f"on_{branch}")
+                if target:
+                    next_ids = [target] if isinstance(target, str) else target
+
+        elif step_type == "foreach" and result and result.status == StepStatus.COMPLETED:
+            # foreach body is already executed inside StepExecutor._execute_foreach
+            # Enqueue next pointers after loop
+            next_ids = step_def.get("next", [])
+
+        elif step_type == "loop" and result and result.status == StepStatus.COMPLETED:
+            # Loop body already executed in StepExecutor._execute_loop
+            next_ids = step_def.get("next", []) or step_def.get("depends_on_next", [])
+
+        else:
+            # Regular step — follow next pointers
+            next_ids = step_def.get("next", [])
+
+        for nid in next_ids:
+            if nid not in visited:
+                visited.add(nid)
+                queue.put_nowait(nid)
 
     async def cancel_execution(self, execution_id: str) -> bool:
         """Cancel a running execution.
