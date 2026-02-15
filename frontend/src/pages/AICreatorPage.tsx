@@ -111,7 +111,7 @@ export default function AICreatorPage() {
       const { data } = await client.post('/ai/generate-workflow', {
         description: description.trim(),
         language: /[а-яА-Я]/.test(description) ? 'bg' : 'en',
-      });
+      }, { timeout: 120000 });
 
       if (data.success && data.workflow) {
         setGeneratedWorkflow(data.workflow);
