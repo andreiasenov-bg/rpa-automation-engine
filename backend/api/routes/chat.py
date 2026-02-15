@@ -294,8 +294,15 @@ async def send_chat_message(
     actions: list[dict] = []
 
     # Try external AI API first
-    chat_api_url = os.environ.get("CHAT_API_URL")
-    chat_api_key = os.environ.get("CHAT_API_KEY")
+    chat_api_url = os.environ.get("CHAT_API_URL") or "https://api.anthropic.com/v1/messages"
+    chat_api_key = os.environ.get("CHAT_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
+
+    if not chat_api_key:
+        try:
+            from core.system_config import get_config
+            chat_api_key = await get_config("ANTHROPIC_API_KEY")
+        except Exception:
+            pass
 
     if chat_api_url and chat_api_key:
         try:

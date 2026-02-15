@@ -112,4 +112,18 @@ export const adminApi = {
   updateRolePermissions: async (roleId: string, permissionIds: string[]): Promise<void> => {
     await client.put(`/admin/roles/${roleId}`, { permission_ids: permissionIds });
   },
+
+  // ─── System Configuration ─────────────────────────────
+  getConfig: async (): Promise<{ config: Record<string, string> }> => {
+    const { data } = await client.get('/admin/config');
+    return data;
+  },
+
+  setConfig: async (key: string, value: string): Promise<void> => {
+    await client.put('/admin/config', { key, value });
+  },
+
+  deleteConfig: async (key: string): Promise<void> => {
+    await client.delete(`/admin/config/${key}`);
+  },
 };

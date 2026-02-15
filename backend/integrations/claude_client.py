@@ -162,11 +162,27 @@ class ClaudeClient:
 
         self._reconnect_attempts: int = 0
         self._max_reconnect_attempts: int = 10
+        self._cached_api_key: str = ""
 
     @property
     def api_key(self) -> str:
-        """Get API key, checking both ANTHROPIC_API_KEY and CHAT_API_KEY."""
-        return self.settings.ANTHROPIC_API_KEY or self.settings.CHAT_API_KEY or ""
+        """Get API key from env vars or cached Redis value."""
+        return self.settings.ANTHROPIC_API_KEY or self.settings.CHAT_API_KEY or self._cached_api_key or ""
+
+    async def _resolve_api_key(self) -> str:
+        """Resolve API key from env vars or Redis system config."""
+        key = self.settings.ANTHROPIC_API_KEY or self.settings.CHAT_API_KEY
+        if key:
+            return key
+        try:
+            from core.system_config import get_config
+            key = await get_config("ANTHROPIC_API_KEY") or ""
+            if key:
+                self._cached_api_key = key
+                return key
+        except Exception as e:
+            logger.debug(f"Could not read API key from system config: {e}")
+        return ""
 
     @property
     def is_configured(self) -> bool:
@@ -181,11 +197,12 @@ class ClaudeClient:
     async def connect(self) -> bool:
         """
         Establish connection to Claude API.
-
         Creates an HTTP/2 client with connection pooling and keep-alive.
         Returns True if connection is successful.
         """
-        if not self.is_configured:
+        # Try to resolve API key from all sources including Redis
+        resolved_key = await self._resolve_api_key()
+        if not resolved_key:
             logger.warning("Claude API key not configured. AI features disabled.")
             return False
 
@@ -193,7 +210,7 @@ class ClaudeClient:
             self._client = httpx.AsyncClient(
                 base_url=self.API_BASE,
                 headers={
-                    "x-api-key": self.api_key,
+                    "x-api-key": resolved_key,
                     "anthropic-version": self.API_VERSION,
                     "content-type": "application/json",
                 },
@@ -724,9 +741,12 @@ _claude_client: Optional[ClaudeClient] = None
 
 
 async def get_claude_client() -> ClaudeClient:
-    """Get or create the singleton Claude client."""
+    """Get or create the singleton Claude client. Retries connection if not configured."""
     global _claude_client
     if _claude_client is None:
         _claude_client = ClaudeClient()
+        await _claude_client.connect()
+    elif not _claude_client.is_connected:
+        # Retry connection — API key might have been added via admin UI
         await _claude_client.connect()
     return _claude_client

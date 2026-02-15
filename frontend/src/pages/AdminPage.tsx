@@ -17,6 +17,11 @@ import {
   UserMinus,
   ChevronDown,
   Check,
+  Save,
+  Bot,
+  Eye,
+  EyeOff,
+  Wrench,
 } from 'lucide-react';
 import { adminApi, type OrgOverview, type RoleInfo, type PermissionInfo, type RoleUsersResponse } from '@/api/admin';
 import { useLocale } from '@/i18n';
@@ -297,6 +302,158 @@ function PermissionMatrix({ roles, permissions }: { roles: RoleInfo[]; permissio
   );
 }
 
+/* ─── AI Configuration Panel ─── */
+function AIConfigPanel() {
+  const [apiKey, setApiKey] = useState('');
+  const [currentKey, setCurrentKey] = useState('');
+  const [model, setModel] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [showKey, setShowKey] = useState(false);
+  const [loadingConfig, setLoadingConfig] = useState(true);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const { config } = await adminApi.getConfig();
+        setCurrentKey(config['ANTHROPIC_API_KEY'] || '');
+        setModel(config['CLAUDE_MODEL'] || 'claude-sonnet-4-20250514');
+      } catch {
+        // config endpoint might not exist yet
+      } finally {
+        setLoadingConfig(false);
+      }
+    };
+    load();
+  }, []);
+
+  const handleSave = async () => {
+    if (!apiKey.trim() && !model.trim()) return;
+    setSaving(true);
+    setSaved(false);
+    try {
+      if (apiKey.trim()) {
+        await adminApi.setConfig('ANTHROPIC_API_KEY', apiKey.trim());
+        setCurrentKey('...' + apiKey.trim().slice(-8));
+        setApiKey('');
+      }
+      if (model.trim()) {
+        await adminApi.setConfig('CLAUDE_MODEL', model.trim());
+      }
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch {
+      // handle
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loadingConfig) {
+    return <div className="flex items-center justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-indigo-500" /></div>;
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* AI Provider */}
+      <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
+        <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-4 flex items-center gap-2">
+          <Bot className="w-4 h-4 text-indigo-500" /> AI Provider (Claude by Anthropic)
+        </h3>
+
+        <div className="space-y-4">
+          {/* Current status */}
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-slate-500">Status:</span>
+            {currentKey ? (
+              <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" /> Configured ({currentKey})
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
+                <span className="w-2 h-2 rounded-full bg-amber-500" /> Not configured
+              </span>
+            )}
+          </div>
+
+          {/* API Key input */}
+          <div>
+            <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">
+              Anthropic API Key
+            </label>
+            <div className="relative">
+              <input
+                type={showKey ? 'text' : 'password'}
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder={currentKey ? 'Enter new key to update...' : 'sk-ant-api03-...'}
+                className="w-full px-3 py-2 pr-10 text-sm border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-300 font-mono"
+              />
+              <button
+                onClick={() => setShowKey(!showKey)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+              >
+                {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+            <p className="text-xs text-slate-400 mt-1">
+              Get your API key from{' '}
+              <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener" className="text-indigo-500 hover:underline">
+                console.anthropic.com
+              </a>
+            </p>
+          </div>
+
+          {/* Model selector */}
+          <div>
+            <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">
+              Claude Model
+            </label>
+            <select
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-300"
+            >
+              <option value="claude-sonnet-4-20250514">Claude Sonnet 4 (Recommended)</option>
+              <option value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5</option>
+              <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (Faster, cheaper)</option>
+              <option value="claude-opus-4-5-20251101">Claude Opus 4.5 (Most capable)</option>
+            </select>
+          </div>
+
+          {/* Save button */}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleSave}
+              disabled={saving || (!apiKey.trim() && !model.trim())}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg disabled:opacity-50 transition"
+            >
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              Save Configuration
+            </button>
+            {saved && (
+              <span className="text-sm text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                <Check className="w-4 h-4" /> Saved! Restart not required.
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* What AI can do */}
+      <div className="bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
+        <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-3">AI features enabled with API key:</h4>
+        <ul className="space-y-2 text-sm text-slate-600 dark:text-slate-300">
+          <li className="flex items-center gap-2"><Wrench className="w-3.5 h-3.5 text-indigo-500" /> AI Workflow Creator — generate workflows from natural language</li>
+          <li className="flex items-center gap-2"><Bot className="w-3.5 h-3.5 text-indigo-500" /> Chat Assistant — AI help inside the platform</li>
+          <li className="flex items-center gap-2"><Wrench className="w-3.5 h-3.5 text-indigo-500" /> AI Decision steps — smart branching in workflows</li>
+          <li className="flex items-center gap-2"><Wrench className="w-3.5 h-3.5 text-indigo-500" /> Data extraction and analysis via AI</li>
+        </ul>
+      </div>
+    </div>
+  );
+}
+
 /* ─── Main Page ─── */
 export default function AdminPage() {
   const { t } = useLocale();
@@ -307,7 +464,7 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [showCreateRole, setShowCreateRole] = useState(false);
   const [showAssignRole, setShowAssignRole] = useState(false);
-  const [activeTab, setActiveTab] = useState<'overview' | 'roles' | 'permissions' | 'users'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'roles' | 'permissions' | 'users' | 'config'>('overview');
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -364,6 +521,7 @@ export default function AdminPage() {
 
   const tabs = [
     { key: 'overview' as const, label: t('admin.overview') },
+    { key: 'config' as const, label: 'AI & Config' },
     { key: 'roles' as const, label: t('admin.roles') },
     { key: 'permissions' as const, label: t('admin.permissions') },
     { key: 'users' as const, label: t('nav.users') },
@@ -537,6 +695,9 @@ export default function AdminPage() {
           </div>
         </div>
       )}
+
+      {/* Configuration Tab */}
+      {activeTab === 'config' && <AIConfigPanel />}
 
       {showCreateRole && (
         <CreateRoleModal

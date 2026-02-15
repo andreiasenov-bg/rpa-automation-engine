@@ -282,3 +282,42 @@ async def list_permissions(
             for p in perms
         ],
     }
+
+
+# ─── System Configuration ──────────────────────────────────────────────────
+
+class ConfigSetRequest(BaseModel):
+    key: str = Field(..., min_length=1, max_length=128)
+    value: str = Field(..., min_length=0, max_length=4096)
+
+
+@router.get("/config", dependencies=[Depends(require_permission("admin.*"))])
+async def get_system_config(
+    current_user: TokenPayload = Depends(get_current_active_user),
+):
+    """Get all system configuration values."""
+    from core.system_config import get_all_config
+    config = await get_all_config()
+    return {"config": config}
+
+
+@router.put("/config", dependencies=[Depends(require_permission("admin.*"))])
+async def set_system_config(
+    body: ConfigSetRequest,
+    current_user: TokenPayload = Depends(get_current_active_user),
+):
+    """Set a system configuration value."""
+    from core.system_config import set_config
+    await set_config(body.key, body.value)
+    return {"key": body.key, "message": "Configuration updated"}
+
+
+@router.delete("/config/{key}", dependencies=[Depends(require_permission("admin.*"))])
+async def delete_system_config(
+    key: str,
+    current_user: TokenPayload = Depends(get_current_active_user),
+):
+    """Delete a system configuration value."""
+    from core.system_config import delete_config
+    await delete_config(key)
+    return {"key": key, "message": "Configuration deleted"}
