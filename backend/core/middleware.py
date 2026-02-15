@@ -48,11 +48,14 @@ class RequestTrackingMiddleware(BaseHTTPMiddleware):
                 },
                 exc_info=True,
             )
+            import traceback
             return JSONResponse(
                 status_code=500,
                 content={
                     "detail": "Internal server error",
                     "request_id": request_id,
+                    "debug_error": str(exc),
+                    "debug_traceback": traceback.format_exc()[-1500:],
                 },
                 headers={"X-Request-ID": request_id},
             )
