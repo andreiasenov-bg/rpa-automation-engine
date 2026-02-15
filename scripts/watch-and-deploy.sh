@@ -24,6 +24,8 @@ while true; do
         echo "[AUTO-DEPLOY] $(date '+%H:%M:%S') New commits detected! Deploying..."
         git pull origin main
         docker compose up -d --build
+        # Restart frontend to clear Vite cache (volume mounts don't trigger file watchers)
+        docker compose restart frontend 2>/dev/null
         LAST_SHA="$REMOTE_SHA"
         echo "[AUTO-DEPLOY] $(date '+%H:%M:%S') Deploy complete!"
         echo ""
