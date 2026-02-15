@@ -225,34 +225,46 @@ async def trigger_workflow_execution(
     """
     import asyncio
     import time
+    import traceback
     from datetime import datetime, timezone
     from uuid import uuid4
-    from db.session import AsyncSessionLocal
-    from db.models.execution import Execution as ExecModel
-    from sqlalchemy import update as sa_update
 
-    svc = WorkflowService(db)
-    wf = await svc.get_by_id_and_org(workflow_id, current_user.org_id)
-    if not wf or not wf.is_enabled:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Workflow not found or disabled",
+    try:
+        from db.session import AsyncSessionLocal
+        from db.models.execution import Execution as ExecModel
+        from sqlalchemy import update as sa_update
+    except Exception as e:
+        logger.error(f"Import error in execute: {e}", exc_info=True)
+        return {"error": f"Import failed: {e}", "traceback": traceback.format_exc()}
+
+    try:
+        svc = WorkflowService(db)
+        wf = await svc.get_by_id_and_org(workflow_id, current_user.org_id)
+        if not wf or not wf.is_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Workflow not found or disabled",
+            )
+
+        execution_id = str(uuid4())
+        definition = wf.definition or {}
+        org_id = current_user.org_id
+
+        # Create execution record as "pending"
+        execution = ExecModel(
+            id=execution_id,
+            organization_id=org_id,
+            workflow_id=workflow_id,
+            trigger_type="manual",
+            status="pending",
         )
-
-    execution_id = str(uuid4())
-    definition = wf.definition or {}
-    org_id = current_user.org_id
-
-    # Create execution record as "pending"
-    execution = ExecModel(
-        id=execution_id,
-        organization_id=org_id,
-        workflow_id=workflow_id,
-        trigger_type="manual",
-        status="pending",
-    )
-    db.add(execution)
-    await db.commit()
+        db.add(execution)
+        await db.commit()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Execute setup failed: {e}", exc_info=True)
+        return {"error": f"Setup failed: {e}", "traceback": traceback.format_exc()}
 
     # Background coroutine: runs engine and updates DB
     async def _run_in_background():
