@@ -3,7 +3,7 @@
 import copy
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, status, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, status, Depends, Query
 from sqlalchemy import select, desc, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 import logging
@@ -208,137 +208,110 @@ async def archive_workflow(
     return _workflow_to_response(wf)
 
 
-# Store background tasks to prevent garbage collection
-_background_tasks: set = set()
-
-
 @router.post("/{workflow_id}/execute", status_code=status.HTTP_202_ACCEPTED)
 async def trigger_workflow_execution(
     workflow_id: str,
+    background_tasks: BackgroundTasks,
     current_user: TokenPayload = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Trigger manual execution of a workflow.
-    Creates an execution record and runs the engine in the background.
-    Returns immediately with the execution_id so the frontend can poll.
+    Creates execution record, returns immediately, runs engine in background.
     """
-    import asyncio
     import time
-    import traceback
+    import traceback as tb_mod
     from datetime import datetime, timezone
     from uuid import uuid4
+    from db.session import AsyncSessionLocal
+    from db.models.execution import Execution as ExecModel
+    from sqlalchemy import update as sa_update
 
-    try:
-        from db.session import AsyncSessionLocal
-        from db.models.execution import Execution as ExecModel
-        from sqlalchemy import update as sa_update
-    except Exception as e:
-        logger.error(f"Import error in execute: {e}", exc_info=True)
-        return {"error": f"Import failed: {e}", "traceback": traceback.format_exc()}
-
-    try:
-        svc = WorkflowService(db)
-        wf = await svc.get_by_id_and_org(workflow_id, current_user.org_id)
-        if not wf or not wf.is_enabled:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Workflow not found or disabled",
-            )
-
-        execution_id = str(uuid4())
-        definition = wf.definition or {}
-        org_id = current_user.org_id
-
-        # Create execution record as "pending"
-        execution = ExecModel(
-            id=execution_id,
-            organization_id=org_id,
-            workflow_id=workflow_id,
-            trigger_type="manual",
-            status="pending",
+    svc = WorkflowService(db)
+    wf = await svc.get_by_id_and_org(workflow_id, current_user.org_id)
+    if not wf or not wf.is_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workflow not found or disabled",
         )
-        db.add(execution)
-        await db.commit()
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Execute setup failed: {e}", exc_info=True)
-        return {"error": f"Setup failed: {e}", "traceback": traceback.format_exc()}
 
-    # Background coroutine: runs engine and updates DB
-    async def _run_in_background():
+    execution_id = str(uuid4())
+    definition = wf.definition or {}
+    org_id = current_user.org_id
+
+    # Create execution record
+    execution = ExecModel(
+        id=execution_id,
+        organization_id=org_id,
+        workflow_id=workflow_id,
+        trigger_type="manual",
+        status="pending",
+    )
+    db.add(execution)
+    await db.commit()
+
+    async def _run_engine_bg(exec_id: str, wf_id: str, org: str, defn: dict):
+        """Background: run engine and update DB status."""
         start = time.time()
+        logger.info(f"[BG] Starting execution {exec_id}")
         try:
+            # Mark running
+            async with AsyncSessionLocal() as sess:
+                await sess.execute(
+                    sa_update(ExecModel).where(ExecModel.id == exec_id)
+                    .values(status="running", started_at=datetime.now(timezone.utc))
+                )
+                await sess.commit()
+            logger.info(f"[BG] Marked {exec_id} as running")
+
             from workflow.engine import WorkflowEngine
             from workflow.checkpoint import CheckpointManager
             from tasks.registry import get_task_registry
-
-            # Mark as running
-            async with AsyncSessionLocal() as session:
-                await session.execute(
-                    sa_update(ExecModel).where(ExecModel.id == execution_id)
-                    .values(status="running", started_at=datetime.now(timezone.utc))
-                )
-                await session.commit()
 
             engine = WorkflowEngine(
                 task_registry=get_task_registry(),
                 checkpoint_manager=CheckpointManager(),
             )
-
             context = await engine.execute(
-                execution_id=execution_id,
-                workflow_id=workflow_id,
-                organization_id=org_id,
-                definition=definition,
+                execution_id=exec_id,
+                workflow_id=wf_id,
+                organization_id=org,
+                definition=defn,
                 variables={},
             )
             duration_ms = int((time.time() - start) * 1000)
 
-            # Check for failures
-            failed_steps = [
-                sid for sid, r in context.steps.items()
-                if hasattr(r, 'status') and str(r.status) == 'failed'
-            ]
-            final_status = "failed" if failed_steps else "completed"
-            error_msg = f"Steps failed: {', '.join(failed_steps)}" if failed_steps else None
+            failed = [s for s, r in context.steps.items()
+                      if hasattr(r, 'status') and str(r.status) == 'failed']
+            final_status = "failed" if failed else "completed"
+            error_msg = f"Steps failed: {', '.join(failed)}" if failed else None
 
-            async with AsyncSessionLocal() as session:
-                await session.execute(
-                    sa_update(ExecModel).where(ExecModel.id == execution_id)
-                    .values(
-                        status=final_status,
-                        duration_ms=duration_ms,
-                        completed_at=datetime.now(timezone.utc),
-                        error_message=error_msg,
-                    )
+            async with AsyncSessionLocal() as sess:
+                await sess.execute(
+                    sa_update(ExecModel).where(ExecModel.id == exec_id)
+                    .values(status=final_status, duration_ms=duration_ms,
+                            completed_at=datetime.now(timezone.utc),
+                            error_message=error_msg)
                 )
-                await session.commit()
-            logger.info(f"Execution {execution_id} finished: {final_status} in {duration_ms}ms")
+                await sess.commit()
+            logger.info(f"[BG] Execution {exec_id}: {final_status} in {duration_ms}ms")
 
         except Exception as e:
             duration_ms = int((time.time() - start) * 1000)
-            logger.error(f"Execution {execution_id} failed: {e}", exc_info=True)
+            logger.error(f"[BG] Execution {exec_id} crashed: {e}\n{tb_mod.format_exc()}")
             try:
-                async with AsyncSessionLocal() as session:
-                    await session.execute(
-                        sa_update(ExecModel).where(ExecModel.id == execution_id)
-                        .values(
-                            status="failed",
-                            duration_ms=duration_ms,
-                            completed_at=datetime.now(timezone.utc),
-                            error_message=str(e)[:500],
-                        )
+                async with AsyncSessionLocal() as sess:
+                    await sess.execute(
+                        sa_update(ExecModel).where(ExecModel.id == exec_id)
+                        .values(status="failed", duration_ms=duration_ms,
+                                completed_at=datetime.now(timezone.utc),
+                                error_message=str(e)[:500])
                     )
-                    await session.commit()
+                    await sess.commit()
             except Exception as db_err:
-                logger.error(f"Failed to update execution status: {db_err}")
+                logger.error(f"[BG] DB update failed: {db_err}")
 
-    # Launch background task and store reference to prevent GC
-    task = asyncio.create_task(_run_in_background())
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
+    background_tasks.add_task(_run_engine_bg, execution_id, workflow_id, org_id, definition)
 
     return {
         "id": execution_id,
