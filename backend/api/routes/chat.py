@@ -390,7 +390,7 @@ Available workflow templates (you can mention these by name):
         template, score = match_template(req.message)
         if template and score >= 3:
             try:
-                from db.database import AsyncSessionLocal
+                from db.session import AsyncSessionLocal
                 from db.models.workflow import Workflow
 
                 wf_id = str(uuid.uuid4())
@@ -511,7 +511,7 @@ async def execute_action(
             if not workflow_id:
                 return ExecuteActionResponse(success=False, message="No workflow ID provided.")
             try:
-                from db.database import AsyncSessionLocal
+                from db.session import AsyncSessionLocal
                 from db.models.execution import Execution
                 from db.models.workflow import Workflow
                 from sqlalchemy import select
@@ -547,7 +547,7 @@ async def execute_action(
             if not execution_id:
                 return ExecuteActionResponse(success=False, message="No execution ID provided.")
             try:
-                from db.database import AsyncSessionLocal
+                from db.session import AsyncSessionLocal
                 from db.models.execution import Execution
                 from sqlalchemy import select
 
@@ -582,7 +582,7 @@ async def execute_action(
             if not execution_id:
                 return ExecuteActionResponse(success=False, message="No execution ID provided.")
             try:
-                from db.database import AsyncSessionLocal
+                from db.session import AsyncSessionLocal
                 from db.models.execution import Execution
                 from sqlalchemy import select
 
@@ -629,7 +629,7 @@ async def execute_action(
                 return ExecuteActionResponse(success=False, message="No template ID provided.")
             try:
                 from api.routes.template_library import BUILTIN_TEMPLATES
-                from db.database import AsyncSessionLocal
+                from db.session import AsyncSessionLocal
                 from db.models.workflow import Workflow
 
                 # Find the template

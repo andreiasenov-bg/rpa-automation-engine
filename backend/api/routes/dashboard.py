@@ -1,8 +1,8 @@
-"""Dashboard stats endpoint."""
+"""Dashboard stats and recent executions endpoint."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, desc, case, text
 
 from core.security import TokenPayload
 from app.dependencies import get_db, get_current_active_user
@@ -19,15 +19,6 @@ async def get_dashboard_stats(
 ) -> dict:
     """
     Get dashboard statistics for the current user's organization.
-
-    Returns:
-        Dashboard stats including:
-        - total_workflows: Total number of workflows in organization
-        - active_workflows: Number of enabled, published workflows
-        - total_executions: Total number of execution instances
-        - running_executions: Number of currently running executions
-        - completed_executions: Number of completed executions
-        - failed_executions: Number of failed executions
     """
     org_id = current_user.org_id
 
@@ -36,7 +27,7 @@ async def get_dashboard_stats(
         select(func.count(Workflow.id)).where(
             and_(Workflow.organization_id == org_id, Workflow.is_deleted == False)
         )
-    )
+    ) or 0
     wf_active = await db.scalar(
         select(func.count(Workflow.id)).where(
             and_(
@@ -46,7 +37,7 @@ async def get_dashboard_stats(
                 Workflow.is_enabled == True,
             )
         )
-    )
+    ) or 0
 
     # Execution counts
     exec_base = and_(Execution.organization_id == org_id, Execution.is_deleted == False)
@@ -61,12 +52,91 @@ async def get_dashboard_stats(
     failed = await db.scalar(
         select(func.count(Execution.id)).where(and_(exec_base, Execution.status == "failed"))
     ) or 0
+    pending = await db.scalar(
+        select(func.count(Execution.id)).where(and_(exec_base, Execution.status == "pending"))
+    ) or 0
+
+    # Average duration (completed only)
+    avg_dur = await db.scalar(
+        select(func.avg(Execution.duration_ms)).where(
+            and_(exec_base, Execution.status == "completed", Execution.duration_ms.isnot(None))
+        )
+    )
+
+    # Success rate
+    finished = completed + failed
+    success_rate = round((completed / finished * 100), 1) if finished > 0 else 100.0
+
+    # Active schedules count
+    schedules_active = 0
+    try:
+        from db.models.schedule import Schedule
+        schedules_active = await db.scalar(
+            select(func.count(Schedule.id)).where(
+                and_(Schedule.organization_id == org_id, Schedule.is_deleted == False, Schedule.is_enabled == True)
+            )
+        ) or 0
+    except Exception:
+        pass
 
     return {
-        "total_workflows": wf_total or 0,
-        "active_workflows": wf_active or 0,
+        "total_workflows": wf_total,
+        "active_workflows": wf_active,
         "total_executions": total_exec,
         "running_executions": running,
         "completed_executions": completed,
         "failed_executions": failed,
+        "pending_executions": pending,
+        "avg_duration_ms": int(avg_dur) if avg_dur else 0,
+        "success_rate": success_rate,
+        "agents_online": 1,  # Default single local agent
+        "agents_total": 1,
+        "schedules_active": schedules_active,
     }
+
+
+@router.get("/dashboard/recent-executions")
+async def get_recent_executions(
+    limit: int = Query(10, ge=1, le=50),
+    current_user: TokenPayload = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Get most recent executions with workflow names."""
+    org_id = current_user.org_id
+
+    query = (
+        select(
+            Execution.id,
+            Execution.workflow_id,
+            Execution.status,
+            Execution.started_at,
+            Execution.completed_at,
+            Execution.duration_ms,
+            Execution.trigger_type,
+            Execution.error_message,
+            Workflow.name.label("workflow_name"),
+        )
+        .outerjoin(Workflow, Execution.workflow_id == Workflow.id)
+        .where(and_(Execution.organization_id == org_id, Execution.is_deleted == False))
+        .order_by(desc(Execution.created_at))
+        .limit(limit)
+    )
+
+    result = await db.execute(query)
+    rows = result.all()
+
+    executions = []
+    for row in rows:
+        executions.append({
+            "id": row.id,
+            "workflow_id": row.workflow_id,
+            "workflow_name": row.workflow_name or "Unknown Workflow",
+            "status": row.status,
+            "started_at": row.started_at.isoformat() if row.started_at else None,
+            "completed_at": row.completed_at.isoformat() if row.completed_at else None,
+            "duration_ms": row.duration_ms,
+            "trigger_type": row.trigger_type or "manual",
+            "error_message": row.error_message,
+        })
+
+    return {"executions": executions}
