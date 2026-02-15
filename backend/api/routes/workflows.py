@@ -242,16 +242,19 @@ async def trigger_workflow_execution(
         definition = wf.definition or {}
         org_id = current_user.org_id
 
-        # Create execution record as "running" right away
+        # Create execution record as "running" (started_at set via SQL to avoid tz issues)
         execution = ExecModel(
             id=execution_id,
             organization_id=org_id,
             workflow_id=workflow_id,
             trigger_type="manual",
             status="running",
-            started_at=datetime.utcnow(),
         )
         db.add(execution)
+        await db.flush()
+        # Set started_at via raw SQL to avoid naive/aware datetime mixing
+        from sqlalchemy import text
+        await db.execute(text("UPDATE executions SET started_at = now() WHERE id = :id"), {"id": execution_id})
         await db.commit()
     except HTTPException:
         raise
@@ -298,13 +301,11 @@ async def trigger_workflow_execution(
             final_status = "failed" if failed else "completed"
             error_msg = f"Steps failed: {', '.join(failed)}" if failed else None
 
+            from sqlalchemy import text as sa_text
             async with AsyncSessionLocal() as sess:
-                await sess.execute(
-                    sa_update(ExecModel).where(ExecModel.id == exec_id)
-                    .values(status=final_status, duration_ms=duration_ms,
-                            completed_at=datetime.utcnow(),
-                            error_message=error_msg)
-                )
+                await sess.execute(sa_text(
+                    "UPDATE executions SET status=:s, duration_ms=:d, completed_at=now(), error_message=:e WHERE id=:id"
+                ), {"s": final_status, "d": duration_ms, "e": error_msg, "id": exec_id})
                 await sess.commit()
             logger.info(f"[BG] Execution {exec_id}: {final_status} in {duration_ms}ms")
 
@@ -312,13 +313,11 @@ async def trigger_workflow_execution(
             duration_ms = int((time.time() - start) * 1000)
             logger.error(f"[BG] Execution {exec_id} crashed: {e}\n{tb_mod.format_exc()}")
             try:
+                from sqlalchemy import text as sa_text
                 async with AsyncSessionLocal() as sess:
-                    await sess.execute(
-                        sa_update(ExecModel).where(ExecModel.id == exec_id)
-                        .values(status="failed", duration_ms=duration_ms,
-                                completed_at=datetime.utcnow(),
-                                error_message=str(e)[:500])
-                    )
+                    await sess.execute(sa_text(
+                        "UPDATE executions SET status='failed', duration_ms=:d, completed_at=now(), error_message=:e WHERE id=:id"
+                    ), {"d": duration_ms, "e": str(e)[:500], "id": exec_id})
                     await sess.commit()
             except Exception as db_err:
                 logger.error(f"[BG] DB update also failed: {db_err}")
