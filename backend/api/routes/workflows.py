@@ -341,8 +341,8 @@ async def trigger_workflow_execution(
                 ), {"s": final_status, "d": duration_ms, "e": error_msg, "id": exec_id})
                 # Save execution state data (step outputs) for the Results Data viewer
                 await sess.execute(sa_text(
-                    "INSERT INTO execution_states (id, execution_id, state_data, updated_at, created_at) "
-                    "VALUES (gen_random_uuid(), :exec_id, CAST(:state_data AS jsonb), now(), now()) "
+                    "INSERT INTO execution_states (id, execution_id, state_data, updated_at, created_at, is_deleted) "
+                    "VALUES (gen_random_uuid(), :exec_id, CAST(:state_data AS jsonb), now(), now(), false) "
                     "ON CONFLICT (execution_id) DO UPDATE SET state_data = CAST(:state_data AS jsonb), updated_at = now()"
                 ), {"exec_id": exec_id, "state_data": _json.dumps(state_data)})
                 await sess.commit()
