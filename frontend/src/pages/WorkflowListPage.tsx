@@ -28,35 +28,42 @@ import {
   BarChart3,
   Shield,
   Workflow as WorkflowIcon,
+  Zap,
 } from 'lucide-react';
 import type { Workflow } from '@/types';
 import { workflowApi } from '@/api/workflows';
 
-/* ─── Workflow type icon detection ─── */
+/* ─── Workflow type icon detection (most specific first) ─── */
 function getWorkflowIcon(wf: Workflow): { icon: React.ElementType; bg: string; color: string } {
-  const name = (wf.name + ' ' + (wf.description || '')).toLowerCase();
+  const name = (wf.name || '').toLowerCase();
+  const desc = (wf.description || '').toLowerCase();
   const steps = wf.definition?.steps || [];
   const stepTypes = steps.map((s) => s.type).join(' ');
-  const combined = name + ' ' + stepTypes;
 
-  if (combined.includes('scrape') || combined.includes('extract') || combined.includes('browser'))
-    return { icon: FileSearch, bg: 'bg-purple-100', color: 'text-purple-600' };
-  if (combined.includes('api') || combined.includes('http') || combined.includes('fetch'))
-    return { icon: Code2, bg: 'bg-blue-100', color: 'text-blue-600' };
-  if (combined.includes('amazon') || combined.includes('shop') || combined.includes('price'))
+  // Most specific keyword matches first (name takes priority)
+  if (name.includes('price') || name.includes('vergleich') || name.includes('comparison'))
     return { icon: ShoppingCart, bg: 'bg-amber-100', color: 'text-amber-600' };
-  if (combined.includes('monitor') || combined.includes('health') || combined.includes('uptime'))
+  if (name.includes('best seller') || name.includes('tracker') || name.includes('track'))
     return { icon: BarChart3, bg: 'bg-emerald-100', color: 'text-emerald-600' };
-  if (combined.includes('form') || combined.includes('submit') || combined.includes('click'))
-    return { icon: MousePointerClick, bg: 'bg-rose-100', color: 'text-rose-600' };
-  if (combined.includes('email') || combined.includes('send') || combined.includes('notify'))
-    return { icon: Send, bg: 'bg-sky-100', color: 'text-sky-600' };
-  if (combined.includes('database') || combined.includes('sql') || combined.includes('data'))
-    return { icon: Database, bg: 'bg-cyan-100', color: 'text-cyan-600' };
-  if (combined.includes('ssl') || combined.includes('certificate') || combined.includes('security'))
+  if (name.includes('monitor') || name.includes('health') || name.includes('uptime'))
     return { icon: Shield, bg: 'bg-green-100', color: 'text-green-600' };
-  if (combined.includes('ai') || combined.includes('smart') || combined.includes('auto'))
+  if (name.includes('smart') || name.includes('ai') || name.includes('auto'))
     return { icon: Bot, bg: 'bg-violet-100', color: 'text-violet-600' };
+  if (name.includes('ssl') || name.includes('certificate'))
+    return { icon: Shield, bg: 'bg-teal-100', color: 'text-teal-600' };
+  if (name.includes('form') || name.includes('submit'))
+    return { icon: MousePointerClick, bg: 'bg-rose-100', color: 'text-rose-600' };
+  if (name.includes('invoice') || name.includes('download'))
+    return { icon: Database, bg: 'bg-cyan-100', color: 'text-cyan-600' };
+  if (name.includes('email') || name.includes('send') || name.includes('notify'))
+    return { icon: Send, bg: 'bg-sky-100', color: 'text-sky-600' };
+  if (name.includes('api') || stepTypes.includes('http_request'))
+    return { icon: Code2, bg: 'bg-blue-100', color: 'text-blue-600' };
+  // Generic scraper/browser last
+  if (name.includes('scrape') || desc.includes('scrape') || stepTypes.includes('browser'))
+    return { icon: FileSearch, bg: 'bg-purple-100', color: 'text-purple-600' };
+  if (name.includes('quick'))
+    return { icon: Zap, bg: 'bg-orange-100', color: 'text-orange-600' };
   return { icon: WorkflowIcon, bg: 'bg-indigo-100', color: 'text-indigo-600' };
 }
 
