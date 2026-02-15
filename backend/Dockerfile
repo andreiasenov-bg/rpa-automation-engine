@@ -34,20 +34,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy pre-built Python packages from builder
 COPY --from=builder /install /usr/local
 
-# Install Playwright Chromium browser binary (deps already installed above)
+# Create non-root user FIRST, then install Playwright as that user
+RUN adduser --disabled-password --gecos '' appuser
+
+# Install Playwright Chromium as appuser so binary lands in /home/appuser/.cache
+ENV PLAYWRIGHT_BROWSERS_PATH=/home/appuser/.cache/ms-playwright
+RUN mkdir -p /home/appuser/.cache && chown -R appuser:appuser /home/appuser
+USER appuser
 RUN python -m playwright install chromium
+USER root
 
 # Copy application code
 COPY . .
 
-# Make entrypoint executable
-RUN chmod +x scripts/entrypoint.sh
+# Make entrypoint executable and set ownership
+RUN chmod +x scripts/entrypoint.sh \
+    && chown -R appuser:appuser /app
 
-# Create non-root user — also own playwright browser cache
-RUN adduser --disabled-password --gecos '' appuser \
-    && chown -R appuser:appuser /app \
-    && chown -R appuser:appuser /root/.cache 2>/dev/null || true
+# Also install pandas for script tasks
+RUN pip install --no-cache-dir pandas
+
 USER appuser
+ENV PLAYWRIGHT_BROWSERS_PATH=/home/appuser/.cache/ms-playwright
 
 EXPOSE 8000
 
