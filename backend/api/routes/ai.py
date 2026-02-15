@@ -205,3 +205,137 @@ async def get_usage_stats():
     """Get AI token usage statistics."""
     client = await get_claude_client()
     return client.usage.get_stats()
+
+
+# ─── AI Workflow Generator ──────────────────────────────────────────
+
+class GenerateWorkflowRequest(BaseModel):
+    description: str
+    language: str = "en"  # "en" or "bg"
+
+
+@router.post("/generate-workflow")
+async def generate_workflow(request: GenerateWorkflowRequest):
+    """
+    Use Claude AI to generate a complete workflow definition from a natural
+    language description. Returns a workflow name, description, and steps array
+    ready for creating a workflow.
+    """
+    from core.security import get_current_user
+    client = await get_claude_client()
+    if not client.is_configured:
+        raise HTTPException(status_code=503, detail="Claude AI not configured. Set ANTHROPIC_API_KEY.")
+
+    # Build the available task types list for Claude's context
+    registry = get_task_registry()
+    task_types = registry.available_types
+
+    # Get template examples for Claude's context
+    try:
+        from api.routes.template_library import BUILTIN_TEMPLATES
+        example_templates = BUILTIN_TEMPLATES[:3]
+        example_steps = []
+        for tpl in example_templates:
+            for step in tpl.get("steps", [])[:2]:
+                example_steps.append(step)
+    except Exception:
+        example_steps = []
+
+    import json
+
+    system_prompt = f"""You are an expert RPA workflow designer. Generate workflow definitions as JSON.
+
+AVAILABLE TASK TYPES (use ONLY these):
+- web_scrape: Scrape data from websites using CSS selectors
+- http_request: Make HTTP requests (GET, POST, PUT, DELETE)
+- custom_script: Execute Python code inline
+- data_transform: Transform data with Python script
+- email_send: Send emails
+- file_write: Write data to files (CSV, JSON, etc.)
+- database_query: Execute SQL queries
+- condition: If/else branching
+- loop: Iterate over collections
+- delay: Wait for specified seconds
+- ai_ask: Send prompt to Claude AI
+- ai_analyze: Analyze data with AI
+- ai_summarize: Summarize text with AI
+- form_fill: Fill web forms with Playwright
+- browser_navigate: Navigate to URLs
+- browser_click: Click elements on page
+- browser_extract: Extract data from page elements
+
+STEP FORMAT:
+Each step must have: id, name, type, config, depends_on (array of step ids)
+- id: "step-1", "step-2", etc.
+- name: Human-readable name
+- type: One of the task types above
+- config: Type-specific configuration
+- depends_on: Array of step IDs this step depends on (first step has empty array)
+
+For web_scrape config: url, selectors (array of {{name, selector, extract, multiple}})
+For http_request config: url, method, headers, body, timeout
+For custom_script config: language ("python"), script (Python code as string)
+For condition config: condition (expression), on_true (step id), on_false (step id)
+For loop config: items (expression), step (inline step definition)
+For ai_ask config: prompt (string)
+
+EXAMPLE STEPS:
+{json.dumps(example_steps[:3], indent=2, default=str)[:2000]}
+
+RESPONSE FORMAT (JSON only, no markdown):
+{{
+  "name": "Workflow name",
+  "description": "What this workflow does",
+  "steps": [
+    {{
+      "id": "step-1",
+      "name": "Step Name",
+      "type": "task_type",
+      "config": {{}},
+      "depends_on": []
+    }}
+  ]
+}}
+
+Generate realistic, production-ready workflows with proper error handling.
+Respond ONLY with valid JSON, no explanation or markdown."""
+
+    lang_hint = ""
+    if request.language == "bg":
+        lang_hint = " The user's description is in Bulgarian but generate the workflow with English step names and configs."
+
+    prompt = f"Generate a complete RPA workflow for the following requirement:{lang_hint}\n\n{request.description}"
+
+    try:
+        response = await client.ask(
+            prompt=prompt,
+            system=system_prompt,
+            temperature=0.3,
+            max_tokens=4096,
+        )
+
+        # Parse JSON from response
+        clean = response.strip()
+        if clean.startswith("```"):
+            clean = clean.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+
+        workflow_def = json.loads(clean)
+
+        return {
+            "success": True,
+            "workflow": {
+                "name": workflow_def.get("name", "AI Generated Workflow"),
+                "description": workflow_def.get("description", request.description),
+                "steps": workflow_def.get("steps", []),
+            }
+        }
+
+    except json.JSONDecodeError as e:
+        # Return what Claude gave us even if it's not perfect JSON
+        return {
+            "success": False,
+            "error": f"AI generated invalid JSON: {str(e)}",
+            "raw_response": response[:2000] if response else "",
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
