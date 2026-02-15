@@ -16,23 +16,26 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install only runtime system deps (no build-essential)
+# Install runtime system deps + Chromium browser dependencies for Playwright
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     curl \
     postgresql-client \
     redis-tools \
     tini \
+    # Playwright Chromium system dependencies
+    libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
+    libcups2 libdrm2 libdbus-1-3 libxkbcommon0 \
+    libatspi2.0-0 libxcomposite1 libxdamage1 libxfixes3 \
+    libxrandr2 libgbm1 libpango-1.0-0 libcairo2 \
+    libasound2 libxshmfence1 fonts-liberation fonts-noto-color-emoji \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy pre-built Python packages from builder
 COPY --from=builder /install /usr/local
 
-# Install Playwright browsers (chromium) + system deps
-# Need apt-get update again since lists were cleaned above
-RUN apt-get update \
-    && python -m playwright install --with-deps chromium \
-    && rm -rf /var/lib/apt/lists/*
+# Install Playwright Chromium browser binary (deps already installed above)
+RUN python -m playwright install chromium
 
 # Copy application code
 COPY . .
