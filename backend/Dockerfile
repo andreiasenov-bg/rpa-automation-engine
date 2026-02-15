@@ -28,8 +28,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy pre-built Python packages from builder
 COPY --from=builder /install /usr/local
 
-# Install Playwright browsers (chromium) + system deps for headless browser
-RUN python -m playwright install --with-deps chromium
+# Install Playwright browsers (chromium) + system deps
+# Need apt-get update again since lists were cleaned above
+RUN apt-get update \
+    && python -m playwright install --with-deps chromium \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy application code
 COPY . .
