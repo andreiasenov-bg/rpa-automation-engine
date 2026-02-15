@@ -7,6 +7,12 @@ Provides headless browser capabilities for:
 - PDF generation from web pages
 - Page interaction (click, type, navigate, wait)
 
+Features:
+- BrowserSessionManager: shares a single browser session across all steps
+  in one execution (navigate → click → extract all use the same page)
+- Stealth mode: realistic user-agent, hidden webdriver flags, proper
+  headers — bypasses basic bot detection (Amazon, Galaxus, etc.)
+
 Requires: playwright (pip install playwright && playwright install chromium)
 """
 
@@ -14,6 +20,7 @@ import asyncio
 import base64
 import json
 import os
+import random
 import tempfile
 from typing import Any, Dict, List, Optional
 
@@ -39,12 +46,164 @@ def _check_playwright() -> bool:
 
 
 async def _get_browser(headless: bool = True, **launch_kwargs):
-    """Create a Playwright browser instance."""
+    """Create a Playwright browser instance (legacy — standalone tasks)."""
     from playwright.async_api import async_playwright
 
     pw = await async_playwright().start()
     browser = await pw.chromium.launch(headless=headless, **launch_kwargs)
     return pw, browser
+
+
+# ─── Stealth & anti-detection ──────────────────────────────────────────────────
+
+_STEALTH_USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+]
+
+_STEALTH_JS = """
+// Hide webdriver flag
+Object.defineProperty(navigator, 'webdriver', { get: () => false });
+
+// Fake plugins array
+Object.defineProperty(navigator, 'plugins', {
+    get: () => [1, 2, 3, 4, 5],
+});
+
+// Fake languages
+Object.defineProperty(navigator, 'languages', {
+    get: () => ['de-DE', 'de', 'en-US', 'en'],
+});
+
+// Override permissions query
+if (navigator.permissions) {
+    const originalQuery = navigator.permissions.query;
+    navigator.permissions.query = (parameters) =>
+        parameters.name === 'notifications'
+            ? Promise.resolve({ state: Notification.permission })
+            : originalQuery(parameters);
+}
+
+// Fake chrome runtime
+window.chrome = { runtime: {} };
+"""
+
+
+# ─── Shared browser session manager ───────────────────────────────────────────
+
+class BrowserSessionManager:
+    """Manages a shared Playwright browser session across workflow steps.
+
+    Within a single execution, all browser_navigate / browser_click /
+    browser_extract steps reuse the SAME browser context and page so that
+    cookies, login state, and DOM are preserved between steps.
+
+    Usage in task context:
+        session = BrowserSessionManager.get_or_create(execution_id)
+        page = await session.get_page(url)  # navigates only if URL changed
+        ...
+        # Session is cleaned up automatically after execution completes
+    """
+
+    _sessions: Dict[str, "BrowserSessionManager"] = {}  # execution_id -> session
+
+    def __init__(self):
+        self._pw = None
+        self._browser = None
+        self._context = None
+        self._page = None
+        self._current_url: Optional[str] = None
+        self._lock = asyncio.Lock()
+
+    @classmethod
+    def get_or_create(cls, context: Optional[Dict[str, Any]] = None) -> "BrowserSessionManager":
+        """Get existing session for this execution or create a new one."""
+        exec_key = "default"
+        if context and context.get("workflow_id"):
+            exec_key = context.get("workflow_id", "default")
+        if exec_key not in cls._sessions:
+            cls._sessions[exec_key] = cls()
+        return cls._sessions[exec_key]
+
+    async def get_page(self, url: Optional[str] = None, wait_until: str = "domcontentloaded",
+                       timeout: int = 30000) -> Any:
+        """Get the shared page, navigating to URL if needed."""
+        async with self._lock:
+            if not self._pw:
+                from playwright.async_api import async_playwright
+                self._pw = await async_playwright().start()
+                self._browser = await self._pw.chromium.launch(
+                    headless=True,
+                    args=[
+                        "--no-sandbox",
+                        "--disable-blink-features=AutomationControlled",
+                        "--disable-dev-shm-usage",
+                    ],
+                )
+                ua = random.choice(_STEALTH_USER_AGENTS)
+                self._context = await self._browser.new_context(
+                    viewport={"width": 1366, "height": 768},
+                    user_agent=ua,
+                    locale="de-DE",
+                    timezone_id="Europe/Berlin",
+                    extra_http_headers={
+                        "Accept-Language": "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7",
+                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                        "DNT": "1",
+                        "Sec-CH-UA": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+                        "Sec-CH-UA-Mobile": "?0",
+                        "Sec-CH-UA-Platform": '"Windows"',
+                    },
+                )
+                self._page = await self._context.new_page()
+                # Inject stealth JS on every new document
+                await self._page.add_init_script(_STEALTH_JS)
+                logger.info("Browser session created", user_agent=ua)
+
+            if url and url != self._current_url:
+                response = await self._page.goto(url, wait_until=wait_until, timeout=timeout)
+                self._current_url = self._page.url
+                # Brief pause for dynamic content
+                await self._page.wait_for_timeout(1000)
+                return self._page, response
+
+            return self._page, None
+
+    async def close(self):
+        """Close the browser session."""
+        try:
+            if self._browser:
+                await self._browser.close()
+            if self._pw:
+                await self._pw.stop()
+        except Exception as e:
+            logger.warning(f"Error closing browser session: {e}")
+        finally:
+            self._pw = None
+            self._browser = None
+            self._context = None
+            self._page = None
+            self._current_url = None
+
+    @classmethod
+    async def cleanup(cls, context: Optional[Dict[str, Any]] = None):
+        """Close and remove session for the given execution context."""
+        exec_key = "default"
+        if context and context.get("workflow_id"):
+            exec_key = context.get("workflow_id", "default")
+        session = cls._sessions.pop(exec_key, None)
+        if session:
+            await session.close()
+
+    @classmethod
+    async def cleanup_all(cls):
+        """Close all active sessions."""
+        for key in list(cls._sessions.keys()):
+            session = cls._sessions.pop(key, None)
+            if session:
+                await session.close()
 
 
 class WebScrapeTask(BaseTask):
@@ -783,25 +942,22 @@ class PageInteractionTask(BaseTask):
 
 
 class BrowserNavigateTask(BaseTask):
-    """Navigate to a URL using a headless browser.
+    """Navigate to a URL using a shared stealth browser session.
 
-    Simple wrapper around Playwright page.goto — ideal for step types
-    generated by the AI Creator that use 'browser_navigate'.
+    Uses BrowserSessionManager to share browser state across steps.
+    Includes anti-bot detection measures for sites like Amazon.
 
     Config:
         url: Target URL (required)
         wait_for: CSS selector to wait for after navigation
-        wait_timeout: Max wait time in ms (default: 15000)
-        wait_until: Load state — domcontentloaded | load | networkidle (default: domcontentloaded)
+        wait_timeout: Max wait time in ms (default: 30000)
+        wait_until: Load state — domcontentloaded | load | networkidle (default: load)
         javascript: JS to execute after page load
-        user_agent: Custom user agent string
-        cookies: List of { "name", "value", "domain" } dicts
-        viewport: { "width": 1280, "height": 720 }
     """
 
     task_type = "browser_navigate"
     display_name = "Browser Navigate"
-    description = "Navigate to a URL in a headless browser"
+    description = "Navigate to a URL in a stealth browser session"
     icon = "🌐"
 
     async def execute(self, config: Dict[str, Any], context: Optional[Dict[str, Any]] = None) -> TaskResult:
@@ -813,30 +969,19 @@ class BrowserNavigateTask(BaseTask):
             return TaskResult(success=False, error="Missing required config: url")
 
         wait_for = config.get("wait_for")
-        wait_timeout = config.get("wait_timeout", 15000)
-        wait_until = config.get("wait_until", "domcontentloaded")
+        wait_timeout = config.get("wait_timeout", 30000)
+        wait_until = config.get("wait_until", "load")
         javascript = config.get("javascript")
-        user_agent = config.get("user_agent")
-        cookies = config.get("cookies", [])
-        viewport = config.get("viewport", {"width": 1280, "height": 720})
 
-        pw = None
-        browser = None
         try:
-            pw, browser = await _get_browser()
-            ctx_kwargs: Dict[str, Any] = {"viewport": viewport}
-            if user_agent:
-                ctx_kwargs["user_agent"] = user_agent
-
-            browser_context = await browser.new_context(**ctx_kwargs)
-            if cookies:
-                await browser_context.add_cookies(cookies)
-
-            page = await browser_context.new_page()
-            response = await page.goto(url, wait_until=wait_until, timeout=wait_timeout)
+            session = BrowserSessionManager.get_or_create(context)
+            page, response = await session.get_page(url, wait_until=wait_until, timeout=wait_timeout)
 
             if wait_for:
-                await page.wait_for_selector(wait_for, timeout=wait_timeout)
+                try:
+                    await page.wait_for_selector(wait_for, timeout=wait_timeout)
+                except Exception:
+                    logger.info(f"wait_for selector '{wait_for}' not found, continuing")
 
             if javascript:
                 await page.evaluate(javascript)
@@ -845,7 +990,6 @@ class BrowserNavigateTask(BaseTask):
             page_title = await page.title()
             final_url = page.url
 
-            # Store page HTML snippet in context for downstream steps
             body_text = await page.evaluate("document.body ? document.body.innerText.substring(0, 5000) : ''")
 
             return TaskResult(
@@ -860,11 +1004,6 @@ class BrowserNavigateTask(BaseTask):
 
         except Exception as e:
             return TaskResult(success=False, error=f"Browser navigate failed: {str(e)}")
-        finally:
-            if browser:
-                await browser.close()
-            if pw:
-                await pw.stop()
 
     @classmethod
     def get_config_schema(cls) -> Dict[str, Any]:
@@ -874,24 +1013,21 @@ class BrowserNavigateTask(BaseTask):
             "properties": {
                 "url": {"type": "string", "description": "Target URL to navigate to"},
                 "wait_for": {"type": "string", "description": "CSS selector to wait for"},
-                "wait_timeout": {"type": "integer", "default": 15000},
+                "wait_timeout": {"type": "integer", "default": 30000},
                 "wait_until": {"type": "string", "enum": ["domcontentloaded", "load", "networkidle"]},
                 "javascript": {"type": "string"},
-                "user_agent": {"type": "string"},
-                "cookies": {"type": "array"},
-                "viewport": {"type": "object"},
             },
         }
 
 
 class BrowserClickTask(BaseTask):
-    """Click an element on a web page using a headless browser.
+    """Click an element on the current page in the shared browser session.
 
-    Simple wrapper around Playwright page.click — ideal for step types
-    generated by the AI Creator that use 'browser_click'.
+    Reuses the browser session from BrowserNavigateTask — no need to
+    re-navigate if already on the right page.
 
     Config:
-        url: Page URL to navigate to first (required)
+        url: Page URL — navigates only if not already there (optional if preceded by navigate)
         selector: CSS selector of element to click (required)
         wait_for: CSS selector to wait for after click
         wait_timeout: Max wait time in ms (default: 10000)
@@ -909,27 +1045,20 @@ class BrowserClickTask(BaseTask):
         if not _check_playwright():
             return TaskResult(success=False, error="Playwright not installed. Run: pip install playwright && playwright install chromium")
 
-        url = config.get("url")
         selector = config.get("selector")
-        if not url:
-            return TaskResult(success=False, error="Missing required config: url")
         if not selector:
             return TaskResult(success=False, error="Missing required config: selector")
 
+        url = config.get("url")
         wait_for = config.get("wait_for")
         wait_timeout = config.get("wait_timeout", 10000)
         optional = config.get("optional", True)
         js_before = config.get("javascript_before")
         js_after = config.get("javascript_after")
-        viewport = config.get("viewport", {"width": 1280, "height": 720})
 
-        pw = None
-        browser = None
         try:
-            pw, browser = await _get_browser()
-            ctx = await browser.new_context(viewport=viewport)
-            page = await ctx.new_page()
-            await page.goto(url, wait_until="domcontentloaded", timeout=wait_timeout)
+            session = BrowserSessionManager.get_or_create(context)
+            page, _ = await session.get_page(url, timeout=wait_timeout)
 
             if js_before:
                 await page.evaluate(js_before)
@@ -950,9 +1079,8 @@ class BrowserClickTask(BaseTask):
                 try:
                     await page.wait_for_selector(wait_for, timeout=wait_timeout)
                 except Exception:
-                    pass  # Non-fatal
+                    pass
 
-            # Brief pause for any page transitions
             await page.wait_for_timeout(500)
 
             return TaskResult(
@@ -967,41 +1095,35 @@ class BrowserClickTask(BaseTask):
 
         except Exception as e:
             return TaskResult(success=False, error=f"Browser click failed: {str(e)}")
-        finally:
-            if browser:
-                await browser.close()
-            if pw:
-                await pw.stop()
 
     @classmethod
     def get_config_schema(cls) -> Dict[str, Any]:
         return {
             "type": "object",
-            "required": ["url", "selector"],
+            "required": ["selector"],
             "properties": {
-                "url": {"type": "string", "description": "Page URL to navigate to"},
+                "url": {"type": "string", "description": "Page URL (optional if already navigated)"},
                 "selector": {"type": "string", "description": "CSS selector of element to click"},
                 "wait_for": {"type": "string", "description": "CSS selector to wait for after click"},
                 "wait_timeout": {"type": "integer", "default": 10000},
                 "optional": {"type": "boolean", "default": True, "description": "Skip if element not found"},
                 "javascript_before": {"type": "string"},
                 "javascript_after": {"type": "string"},
-                "viewport": {"type": "object"},
             },
         }
 
 
 class BrowserExtractTask(BaseTask):
-    """Extract text/data from a web page element.
+    """Extract text/data from the current page in the shared browser session.
 
     Config:
-        url: Page URL (required)
+        url: Page URL — navigates only if needed (optional if preceded by navigate)
         selector: CSS selector to extract from (required)
         extract: What to extract — text | html | attribute (default: text)
         attribute: Attribute name when extract=attribute
         multiple: Extract all matching elements (default: false)
         wait_for: CSS selector to wait for before extraction
-        wait_timeout: Max wait time in ms (default: 10000)
+        wait_timeout: Max wait time in ms (default: 15000)
     """
 
     task_type = "browser_extract"
@@ -1013,26 +1135,32 @@ class BrowserExtractTask(BaseTask):
         if not _check_playwright():
             return TaskResult(success=False, error="Playwright not installed")
 
-        url = config.get("url")
         selector = config.get("selector")
-        if not url or not selector:
-            return TaskResult(success=False, error="Missing required config: url and selector")
+        if not selector:
+            return TaskResult(success=False, error="Missing required config: selector")
 
+        url = config.get("url")
         extract = config.get("extract", "text")
         attribute = config.get("attribute", "")
         multiple = config.get("multiple", False)
         wait_for = config.get("wait_for")
-        wait_timeout = config.get("wait_timeout", 10000)
+        wait_timeout = config.get("wait_timeout", 15000)
 
-        pw = None
-        browser = None
         try:
-            pw, browser = await _get_browser()
-            page = await browser.new_page()
-            await page.goto(url, wait_until="domcontentloaded", timeout=wait_timeout)
+            session = BrowserSessionManager.get_or_create(context)
+            page, _ = await session.get_page(url, timeout=wait_timeout)
 
             if wait_for:
-                await page.wait_for_selector(wait_for, timeout=wait_timeout)
+                try:
+                    await page.wait_for_selector(wait_for, timeout=wait_timeout)
+                except Exception:
+                    logger.info(f"wait_for selector '{wait_for}' not found, continuing")
+
+            # Wait for the extraction selector itself
+            try:
+                await page.wait_for_selector(selector, timeout=min(wait_timeout, 10000))
+            except Exception:
+                logger.info(f"Extraction selector '{selector}' not found after wait")
 
             elements = await page.query_selector_all(selector)
             if not elements:
@@ -1062,11 +1190,6 @@ class BrowserExtractTask(BaseTask):
 
         except Exception as e:
             return TaskResult(success=False, error=f"Browser extract failed: {str(e)}")
-        finally:
-            if browser:
-                await browser.close()
-            if pw:
-                await pw.stop()
 
     @classmethod
     def get_config_schema(cls) -> Dict[str, Any]:

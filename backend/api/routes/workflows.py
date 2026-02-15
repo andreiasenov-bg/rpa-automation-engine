@@ -315,20 +315,37 @@ async def trigger_workflow_execution(
 
             # Serialize the execution context (step outputs) for the Results Data tab
             import json as _json
+
+            def _safe_serialize(obj, depth=0):
+                """Recursively ensure all values are JSON-serializable."""
+                if depth > 10:
+                    return str(obj)
+                if obj is None or isinstance(obj, (bool, int, float)):
+                    return obj
+                if isinstance(obj, str):
+                    # Truncate very long strings (e.g. body_preview HTML)
+                    return obj[:10000] if len(obj) > 10000 else obj
+                if isinstance(obj, dict):
+                    return {str(k): _safe_serialize(v, depth + 1) for k, v in obj.items()}
+                if isinstance(obj, (list, tuple)):
+                    return [_safe_serialize(v, depth + 1) for v in obj]
+                return str(obj)
+
             state_data = {}
             try:
                 steps_dict = {}
                 for step_id, step_result in context.steps.items():
                     sr = step_result
+                    raw_output = sr.output if hasattr(sr, 'output') else None
                     steps_dict[step_id] = {
                         "status": sr.status.value if hasattr(sr.status, 'value') else str(sr.status),
-                        "output": sr.output if hasattr(sr, 'output') else None,
+                        "output": _safe_serialize(raw_output),
                         "error": sr.error if hasattr(sr, 'error') else None,
                         "duration_ms": sr.duration_ms if hasattr(sr, 'duration_ms') else None,
                     }
                 state_data = {
                     "steps": steps_dict,
-                    "variables": dict(context.variables) if hasattr(context, 'variables') else {},
+                    "variables": _safe_serialize(dict(context.variables) if hasattr(context, 'variables') else {}),
                 }
             except Exception as ser_err:
                 logger.warning(f"[BG] Failed to serialize context: {ser_err}")
@@ -347,6 +364,13 @@ async def trigger_workflow_execution(
                 ), {"exec_id": exec_id, "state_data": _json.dumps(state_data)})
                 await sess.commit()
             logger.info(f"[BG] Execution {exec_id}: {final_status} in {duration_ms}ms (state saved)")
+
+            # Cleanup shared browser sessions
+            try:
+                from tasks.implementations.browser_task import BrowserSessionManager
+                await BrowserSessionManager.cleanup_all()
+            except Exception:
+                pass
 
         except Exception as e:
             duration_ms = int((time.time() - start) * 1000)
