@@ -37,7 +37,9 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     # Claude AI Settings
+    # Accepts either ANTHROPIC_API_KEY or CHAT_API_KEY (for backward compat)
     ANTHROPIC_API_KEY: str = ""
+    CHAT_API_KEY: str = ""
     CLAUDE_MODEL: str = "claude-sonnet-4-5-20250929"
     CLAUDE_MAX_TOKENS: int = 4096
     CLAUDE_TEMPERATURE: float = 0.3

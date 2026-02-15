@@ -164,9 +164,14 @@ class ClaudeClient:
         self._max_reconnect_attempts: int = 10
 
     @property
+    def api_key(self) -> str:
+        """Get API key, checking both ANTHROPIC_API_KEY and CHAT_API_KEY."""
+        return self.settings.ANTHROPIC_API_KEY or self.settings.CHAT_API_KEY or ""
+
+    @property
     def is_configured(self) -> bool:
         """Check if API key is configured."""
-        return bool(self.settings.ANTHROPIC_API_KEY)
+        return bool(self.api_key)
 
     @property
     def is_connected(self) -> bool:
@@ -188,7 +193,7 @@ class ClaudeClient:
             self._client = httpx.AsyncClient(
                 base_url=self.API_BASE,
                 headers={
-                    "x-api-key": self.settings.ANTHROPIC_API_KEY,
+                    "x-api-key": self.api_key,
                     "anthropic-version": self.API_VERSION,
                     "content-type": "application/json",
                 },
