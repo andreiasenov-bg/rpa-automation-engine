@@ -226,14 +226,15 @@ class CustomScriptTask(BaseTask):
         import random
         import urllib.request
 
-        # Extract step results from context
+        # Extract step results from context and wrap in DotDict recursively
         steps_data = {}
         if "steps" in context:
             for sid, sresult in context["steps"].items():
                 if isinstance(sresult, dict):
-                    steps_data[sid] = sresult.get("output", sresult)
+                    raw = sresult.get("output", sresult)
                 else:
-                    steps_data[sid] = sresult
+                    raw = sresult
+                steps_data[sid] = _to_dotdict(raw) if isinstance(raw, dict) else raw
 
         # Create a dotdict-like access object for steps
         steps_proxy = DotDict(steps_data)
@@ -357,37 +358,45 @@ class CustomScriptTask(BaseTask):
         }
 
 
-class DotDict:
-    """Allows dict access via dot notation: steps.step_1.output_field"""
+def _to_dotdict(obj):
+    """Recursively convert dicts to DotDict."""
+    if isinstance(obj, dict) and not isinstance(obj, DotDict):
+        return DotDict({k: _to_dotdict(v) for k, v in obj.items()})
+    elif isinstance(obj, list):
+        return [_to_dotdict(item) for item in obj]
+    return obj
 
-    def __init__(self, data: dict):
-        self._data = data
+
+class DotDict(dict):
+    """Dict subclass with dot notation access: steps.step_1.output_field.
+
+    Supports len(), item assignment, iteration, and all standard dict ops.
+    """
+
+    def __init__(self, data=None):
+        super().__init__(data or {})
 
     def __getattr__(self, key):
         if key.startswith("_"):
             return super().__getattribute__(key)
-        val = self._data.get(key, self._data.get(key.replace("-", "_"), {}))
-        if isinstance(val, dict):
+        try:
+            val = self[key]
+        except KeyError:
+            # Try with underscore/dash swap
+            alt = key.replace("_", "-") if "_" in key else key.replace("-", "_")
+            try:
+                val = self[alt]
+            except KeyError:
+                return DotDict({})  # Return empty DotDict instead of raising
+        if isinstance(val, dict) and not isinstance(val, DotDict):
             return DotDict(val)
         return val
 
-    def __getitem__(self, key):
-        return self._data[key]
-
-    def __contains__(self, key):
-        return key in self._data
+    def __setattr__(self, key, value):
+        if key.startswith("_"):
+            super().__setattr__(key, value)
+        else:
+            self[key] = value
 
     def __repr__(self):
-        return f"DotDict({self._data})"
-
-    def get(self, key, default=None):
-        return self._data.get(key, default)
-
-    def items(self):
-        return self._data.items()
-
-    def keys(self):
-        return self._data.keys()
-
-    def values(self):
-        return self._data.values()
+        return f"DotDict({dict.__repr__(self)})"

@@ -278,6 +278,15 @@ async def trigger_workflow_execution(
     async def _run_engine_async(exec_id, wf_id, org, defn):
         start = time.time()
         logger.info(f"[BG] Engine starting for {exec_id}")
+
+        # Create a FRESH SQLAlchemy engine + session factory for this thread's event loop
+        # to avoid sharing connection pool with the main event loop
+        from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession as _AsyncSession
+        from app.config import get_settings
+        _settings = get_settings()
+        _bg_engine = create_async_engine(_settings.DATABASE_URL, echo=False, future=True)
+        _BGSession = async_sessionmaker(_bg_engine, class_=_AsyncSession, expire_on_commit=False)
+
         try:
             from workflow.engine import WorkflowEngine
             from workflow.checkpoint import CheckpointManager
@@ -297,12 +306,15 @@ async def trigger_workflow_execution(
             duration_ms = int((time.time() - start) * 1000)
 
             failed = [s for s, r in context.steps.items()
-                      if hasattr(r, 'status') and str(r.status) == 'failed']
+                      if hasattr(r, 'status') and (
+                          r.status.value == 'failed' if hasattr(r.status, 'value')
+                          else str(r.status) == 'failed'
+                      )]
             final_status = "failed" if failed else "completed"
             error_msg = f"Steps failed: {', '.join(failed)}" if failed else None
 
             from sqlalchemy import text as sa_text
-            async with AsyncSessionLocal() as sess:
+            async with _BGSession() as sess:
                 await sess.execute(sa_text(
                     "UPDATE executions SET status=:s, duration_ms=:d, completed_at=now(), error_message=:e WHERE id=:id"
                 ), {"s": final_status, "d": duration_ms, "e": error_msg, "id": exec_id})
@@ -314,13 +326,15 @@ async def trigger_workflow_execution(
             logger.error(f"[BG] Execution {exec_id} crashed: {e}\n{tb_mod.format_exc()}")
             try:
                 from sqlalchemy import text as sa_text
-                async with AsyncSessionLocal() as sess:
+                async with _BGSession() as sess:
                     await sess.execute(sa_text(
                         "UPDATE executions SET status='failed', duration_ms=:d, completed_at=now(), error_message=:e WHERE id=:id"
                     ), {"d": duration_ms, "e": str(e)[:500], "id": exec_id})
                     await sess.commit()
             except Exception as db_err:
                 logger.error(f"[BG] DB update also failed: {db_err}")
+        finally:
+            await _bg_engine.dispose()
 
     # Launch in a daemon thread — survives request lifecycle
     t = threading.Thread(

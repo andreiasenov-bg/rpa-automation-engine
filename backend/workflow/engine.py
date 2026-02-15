@@ -271,9 +271,11 @@ class ExpressionEvaluator:
             "min": min, "max": max, "range": range,
         }
         try:
-            return eval(expr, {"__builtins__": safe_builtins}, namespace)
+            # Strip non-ASCII characters (emojis) that break eval/compile
+            clean_expr = ''.join(c if ord(c) < 128 else ' ' for c in expr)
+            return eval(clean_expr, {"__builtins__": safe_builtins}, namespace)
         except Exception as e:
-            logger.warning(f"Expression eval failed: {expr} -> {e}")
+            logger.warning(f"Expression eval failed: {repr(expr)} -> {e}")
             return expression
 
     @staticmethod
