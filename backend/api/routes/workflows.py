@@ -211,15 +211,17 @@ async def archive_workflow(
 @router.post("/{workflow_id}/execute", status_code=status.HTTP_202_ACCEPTED)
 async def trigger_workflow_execution(
     workflow_id: str,
-    background_tasks: BackgroundTasks,
     current_user: TokenPayload = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Trigger manual execution of a workflow.
-    Creates execution record, returns immediately, runs engine in background.
+    Creates execution record as 'running', launches engine in a thread,
+    returns immediately.
     """
     import time
+    import threading
+    import asyncio
     import traceback as tb_mod
     from datetime import datetime, timezone
     from uuid import uuid4
@@ -239,31 +241,35 @@ async def trigger_workflow_execution(
     definition = wf.definition or {}
     org_id = current_user.org_id
 
-    # Create execution record
+    # Create execution record as "running" right away
     execution = ExecModel(
         id=execution_id,
         organization_id=org_id,
         workflow_id=workflow_id,
         trigger_type="manual",
-        status="pending",
+        status="running",
+        started_at=datetime.now(timezone.utc),
     )
     db.add(execution)
     await db.commit()
 
-    async def _run_engine_bg(exec_id: str, wf_id: str, org: str, defn: dict):
-        """Background: run engine and update DB status."""
-        start = time.time()
-        logger.info(f"[BG] Starting execution {exec_id}")
+    def _run_engine_thread(exec_id, wf_id, org, defn):
+        """Run engine in a NEW event loop on a separate thread."""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         try:
-            # Mark running
-            async with AsyncSessionLocal() as sess:
-                await sess.execute(
-                    sa_update(ExecModel).where(ExecModel.id == exec_id)
-                    .values(status="running", started_at=datetime.now(timezone.utc))
-                )
-                await sess.commit()
-            logger.info(f"[BG] Marked {exec_id} as running")
+            loop.run_until_complete(
+                _run_engine_async(exec_id, wf_id, org, defn)
+            )
+        except Exception as e:
+            logger.error(f"[BG-Thread] Fatal: {e}\n{tb_mod.format_exc()}")
+        finally:
+            loop.close()
 
+    async def _run_engine_async(exec_id, wf_id, org, defn):
+        start = time.time()
+        logger.info(f"[BG] Engine starting for {exec_id}")
+        try:
             from workflow.engine import WorkflowEngine
             from workflow.checkpoint import CheckpointManager
             from tasks.registry import get_task_registry
@@ -309,15 +315,21 @@ async def trigger_workflow_execution(
                     )
                     await sess.commit()
             except Exception as db_err:
-                logger.error(f"[BG] DB update failed: {db_err}")
+                logger.error(f"[BG] DB update also failed: {db_err}")
 
-    background_tasks.add_task(_run_engine_bg, execution_id, workflow_id, org_id, definition)
+    # Launch in a daemon thread — survives request lifecycle
+    t = threading.Thread(
+        target=_run_engine_thread,
+        args=(execution_id, workflow_id, org_id, definition),
+        daemon=True,
+    )
+    t.start()
 
     return {
         "id": execution_id,
         "workflow_id": workflow_id,
         "trigger_type": "manual",
-        "status": "pending",
+        "status": "running",
     }
 
 
