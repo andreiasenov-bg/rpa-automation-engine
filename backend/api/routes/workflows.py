@@ -447,6 +447,7 @@ async def test_workflow_execution(
                 "error": sr.error,
                 "duration_ms": sr.duration_ms,
                 "has_output": sr.output is not None,
+                "output": sr.output,
             }
 
         result["stages"].append({
