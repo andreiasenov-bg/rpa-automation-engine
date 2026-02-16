@@ -497,7 +497,12 @@ interface PriceProduct {
 function parsePriceNum(s: string | number | undefined): number {
   if (s === undefined || s === null || s === '' || s === 'N/A') return 0;
   if (typeof s === 'number') return s;
-  return parseFloat(s.replace(/[^0-9.,]/g, '').replace(',', '.')) || 0;
+  let cleaned = s.replace(/[^0-9.,]/g, '');
+  // European format: 1.234,56 — dots are thousands, comma is decimal
+  if (cleaned.includes(',')) {
+    cleaned = cleaned.replace(/\./g, '').replace(',', '.');
+  }
+  return parseFloat(cleaned) || 0;
 }
 
 function parseDiscountNum(s: string | number | undefined): number {
@@ -556,12 +561,12 @@ function extractProducts(stepsData: Record<string, any>): PriceProduct[] {
             products.push({
               rank: item.rank || item.r || i + 1,
               title: item.title || item.t || item.name || '',
-              price: String(item.price || item.p || ''),
-              originalPrice: item.original_price || item.originalPrice,
+              price: String(item.price || item.deal_price || item.p || ''),
+              originalPrice: item.original_price || item.originalPrice || '',
               discount: item.discount,
               rating: item.rating || item.rt,
               asin: item.asin || item.a,
-              url: item.url || item.u,
+              url: item.url || item.amazon_url || item.u,
               image: item.image || item.img,
               bsr: item.bsr || item.best_seller_rank,
               category: item.category || item.c,
