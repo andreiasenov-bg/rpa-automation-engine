@@ -239,9 +239,10 @@ async def download_latest_results(
 
     # ── Define clean column order and human-readable headers ──
     COLUMN_CONFIG = [
-        ("title",           "Product",          45),
-        ("asin",            "ASIN",             14),
         ("ean",             "EAN/GTIN",         16),
+        ("title",           "Model",            45),
+        ("quantity",        "Quantity",          12),
+        ("asin",            "ASIN",             14),
         ("deal_price",      "Amazon Price (€)", 18),
         ("amazon_price_chf","Amazon (CHF)",     14),
         ("galaxus_price",   "Galaxus (CHF)",    14),
@@ -257,13 +258,14 @@ async def download_latest_results(
         ("image",           "Image URL",        40),
     ]
 
-    # Filter to only columns that exist in data
+    # Filter columns: keep if exists in data OR is a placeholder column (quantity)
+    ALWAYS_SHOW = {"ean", "title", "quantity", "asin"}  # Core columns always present
     if all_items:
         existing_keys = set()
         for item in all_items:
             if isinstance(item, dict):
                 existing_keys.update(item.keys())
-        columns = [(k, h, w) for k, h, w in COLUMN_CONFIG if k in existing_keys]
+        columns = [(k, h, w) for k, h, w in COLUMN_CONFIG if k in existing_keys or k in ALWAYS_SHOW]
         # Add any extra keys not in config at the end
         configured_keys = {k for k, _, _ in COLUMN_CONFIG}
         for key in sorted(existing_keys - configured_keys):
