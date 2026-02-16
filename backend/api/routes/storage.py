@@ -147,18 +147,37 @@ async def get_latest_results(
     current_user: TokenPayload = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get the latest execution results for a workflow (replaces old results)."""
+    """Get the latest execution results for a workflow from DB."""
+    import json as _json
+    from sqlalchemy import text as sa_text
+
     svc = WorkflowService(db)
     wf = await svc.get_by_id_and_org(workflow_id, current_user.org_id)
     if not wf:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
-    storage = get_storage_service()
-    results = storage.get_latest_results(workflow_id)
-    if not results:
+    # Fetch from DB execution_states (authoritative source)
+    row = (await db.execute(sa_text(
+        "SELECT e.id, e.status, e.started_at, e.completed_at, e.duration_ms, "
+        "       es.state_data "
+        "FROM executions e "
+        "LEFT JOIN execution_states es ON es.execution_id = e.id "
+        "WHERE e.workflow_id = :wid "
+        "ORDER BY e.created_at DESC LIMIT 1"
+    ), {"wid": workflow_id})).fetchone()
+
+    if not row or not row[5]:
         raise HTTPException(status_code=404, detail="No results available yet. Run the workflow first.")
 
-    return results
+    state_data = row[5] if isinstance(row[5], dict) else _json.loads(row[5])
+
+    return {
+        "execution_id": str(row[0]),
+        "status": row[1],
+        "started_at": row[2].isoformat() if row[2] else None,
+        "completed_at": row[3].isoformat() if row[3] else None,
+        "data": state_data,
+    }
 
 
 @router.get("/workflows/{workflow_id}/latest-results/download")
@@ -167,21 +186,82 @@ async def download_latest_results(
     current_user: TokenPayload = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Download the latest results file directly."""
+    """
+    Download the latest execution results as a clean JSON file.
+    Fetches full state_data from execution_states DB table,
+    extracts actual product/output data from step outputs.
+    """
+    import json as _json
+    import tempfile
+    from datetime import datetime
+    from sqlalchemy import text as sa_text
+
     svc = WorkflowService(db)
     wf = await svc.get_by_id_and_org(workflow_id, current_user.org_id)
     if not wf:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
-    storage = get_storage_service()
-    filepath = storage.get_latest_results_path(workflow_id)
-    if not filepath:
-        raise HTTPException(status_code=404, detail="No results available yet")
+    # Get latest execution + its full state_data from DB
+    row = (await db.execute(sa_text(
+        "SELECT e.id, e.status, e.started_at, e.completed_at, e.duration_ms, "
+        "       es.state_data "
+        "FROM executions e "
+        "LEFT JOIN execution_states es ON es.execution_id = e.id "
+        "WHERE e.workflow_id = :wid "
+        "ORDER BY e.created_at DESC LIMIT 1"
+    ), {"wid": workflow_id})).fetchone()
 
+    if not row or not row[5]:
+        raise HTTPException(status_code=404, detail="No results available yet. Run the workflow first.")
+
+    exec_id = str(row[0])
+    exec_status = row[1]
+    started_at = row[2].isoformat() if row[2] else None
+    completed_at = row[3].isoformat() if row[3] else None
+    duration_ms = row[4]
+    state_data = row[5] if isinstance(row[5], dict) else _json.loads(row[5])
+
+    # Extract actual output data from steps
+    all_items = []
+    steps_info = state_data.get("steps", {})
+    for step_id, step_info in steps_info.items():
+        if not isinstance(step_info, dict):
+            continue
+        output = step_info.get("output")
+        if isinstance(output, list):
+            all_items.extend(output)
+        elif isinstance(output, dict):
+            # Check for nested data array
+            if "data" in output and isinstance(output["data"], list):
+                all_items.extend(output["data"])
+            elif output:  # Single dict output
+                all_items.append(output)
+
+    # Build a clean download file
+    download_data = {
+        "workflow": wf.name,
+        "execution_id": exec_id,
+        "status": exec_status,
+        "started_at": started_at,
+        "completed_at": completed_at,
+        "duration_ms": duration_ms,
+        "total_records": len(all_items),
+        "exported_at": datetime.now().isoformat(),
+        "results": all_items,
+    }
+
+    # Write to temp file and serve
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", delete=False, encoding="utf-8"
+    )
+    _json.dump(download_data, tmp, ensure_ascii=False, indent=2, default=str)
+    tmp.close()
+
+    safe_name = wf.name.replace(" ", "_")
     return FileResponse(
-        path=str(filepath),
+        path=tmp.name,
         media_type="application/json",
-        filename=f"{wf.name.replace(' ', '_')}_results.json",
+        filename=f"{safe_name}_results.json",
     )
 
 
@@ -241,17 +321,18 @@ async def get_workflow_detail(
         "next_run_at": r[5].isoformat() if r[5] else None,
     } for r in schedule_rows]
 
-    # Latest results summary
-    storage = get_storage_service()
-    results_data = storage.get_latest_results(workflow_id)
+    # Latest results summary — from DB execution_states (authoritative)
     results_summary = None
-    if results_data:
-        total_items = 0
+    if row:  # row from latest execution query above
+        state_row = (await db.execute(sa_text(
+            "SELECT state_data FROM execution_states WHERE execution_id = :eid LIMIT 1"
+        ), {"eid": str(row[0])})).fetchone()
 
-        # New format: { "data": { "steps": { ... } } }
-        data = results_data.get("data", {})
-        if isinstance(data, dict):
-            steps = data.get("steps", {})
+        if state_row and state_row[0]:
+            import json as _json
+            sd = state_row[0] if isinstance(state_row[0], dict) else _json.loads(state_row[0])
+            total_items = 0
+            steps = sd.get("steps", {})
             if isinstance(steps, dict):
                 for step_id, step_info in steps.items():
                     if not isinstance(step_info, dict):
@@ -262,17 +343,12 @@ async def get_workflow_detail(
                     elif isinstance(output, dict) and "data" in output and isinstance(output["data"], list):
                         total_items += len(output["data"])
 
-        # Old summary format fallback: { "products": 15 }
-        if total_items == 0 and "products" in results_data:
-            total_items = results_data.get("products", 0)
-
-        results_path = storage.get_latest_results_path(workflow_id)
-        results_summary = {
-            "saved_at": results_data.get("saved_at"),
-            "execution_id": results_data.get("execution_id"),
-            "total_items": total_items,
-            "file_size": results_path.stat().st_size if results_path else 0,
-        }
+            results_summary = {
+                "saved_at": row[4].isoformat() if row[4] else (row[3].isoformat() if row[3] else None),
+                "execution_id": str(row[0]),
+                "total_items": total_items,
+                "file_size": 0,  # Size will be calculated on download
+            }
 
     return {
         "workflow": {
