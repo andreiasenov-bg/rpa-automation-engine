@@ -340,15 +340,13 @@ export default function WorkflowFilesPage() {
                                 {formatDate(file.modified)}
                               </td>
                               <td className="px-5 py-2.5 text-right">
-                                <a
-                                  href={storageApi.getFileUrl(file.path)}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-1 px-2 py-1 text-xs text-indigo-600 hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-900/20 rounded transition"
+                                <button
+                                  onClick={() => storageApi.downloadFile(file.path, file.name)}
+                                  className="inline-flex items-center gap-1 px-2 py-1 text-xs text-indigo-600 hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-900/20 rounded transition cursor-pointer"
                                 >
                                   <Download className="w-3.5 h-3.5" />
                                   Свали
-                                </a>
+                                </button>
                               </td>
                             </tr>
                           );
