@@ -246,22 +246,32 @@ async def get_workflow_detail(
     results_data = storage.get_latest_results(workflow_id)
     results_summary = None
     if results_data:
-        # Count items in step outputs
-        data = results_data.get("data", {})
-        steps = data.get("steps", {})
         total_items = 0
-        for step_id, step_info in steps.items():
-            output = step_info.get("output")
-            if isinstance(output, list):
-                total_items += len(output)
-            elif isinstance(output, dict) and "data" in output and isinstance(output["data"], list):
-                total_items += len(output["data"])
 
+        # New format: { "data": { "steps": { ... } } }
+        data = results_data.get("data", {})
+        if isinstance(data, dict):
+            steps = data.get("steps", {})
+            if isinstance(steps, dict):
+                for step_id, step_info in steps.items():
+                    if not isinstance(step_info, dict):
+                        continue
+                    output = step_info.get("output")
+                    if isinstance(output, list):
+                        total_items += len(output)
+                    elif isinstance(output, dict) and "data" in output and isinstance(output["data"], list):
+                        total_items += len(output["data"])
+
+        # Old summary format fallback: { "products": 15 }
+        if total_items == 0 and "products" in results_data:
+            total_items = results_data.get("products", 0)
+
+        results_path = storage.get_latest_results_path(workflow_id)
         results_summary = {
             "saved_at": results_data.get("saved_at"),
             "execution_id": results_data.get("execution_id"),
             "total_items": total_items,
-            "file_size": storage.get_latest_results_path(workflow_id).stat().st_size if storage.get_latest_results_path(workflow_id) else 0,
+            "file_size": results_path.stat().st_size if results_path else 0,
         }
 
     return {

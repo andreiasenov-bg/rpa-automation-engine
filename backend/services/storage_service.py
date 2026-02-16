@@ -181,13 +181,26 @@ class WorkflowStorageService:
         logger.info(f"Saved latest execution result: {filepath} (replaced old files)")
         return filepath
 
+    def _find_latest_result_file(self, wf_dir: Path) -> Optional[Path]:
+        """Find the latest results file — prefers latest_results.json, falls back to newest .json."""
+        results_dir = wf_dir / "results"
+        if not results_dir.exists():
+            return None
+        # Prefer canonical name
+        canonical = results_dir / "latest_results.json"
+        if canonical.exists():
+            return canonical
+        # Fallback: find newest JSON file in results/
+        json_files = sorted(results_dir.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True)
+        return json_files[0] if json_files else None
+
     def get_latest_results(self, workflow_id: str) -> Optional[dict]:
         """Read the latest results JSON for a workflow. Returns parsed dict or None."""
         wf_dir = self.find_workflow_dir(workflow_id)
         if not wf_dir:
             return None
-        filepath = wf_dir / "results" / "latest_results.json"
-        if not filepath.exists():
+        filepath = self._find_latest_result_file(wf_dir)
+        if not filepath:
             return None
         try:
             return json.loads(filepath.read_text(encoding="utf-8"))
@@ -200,7 +213,7 @@ class WorkflowStorageService:
         wf_dir = self.find_workflow_dir(workflow_id)
         if not wf_dir:
             return None
-        filepath = wf_dir / "results" / "latest_results.json"
+        filepath = self._find_latest_result_file(wf_dir)
         return filepath if filepath.exists() else None
 
     def save_execution_log(self, workflow_id: str, execution_id: str, log_text: str) -> Optional[Path]:
