@@ -1152,6 +1152,11 @@ class BrowserExtractTask(BaseTask):
         selectors = config.get("selectors")
         selector = config.get("selector")
 
+        # ── Mode 0: Loop extraction (navigate to multiple pages) ──────
+        loop_config = config.get("loop")
+        if loop_config:
+            return await self._execute_loop(loop_config, config, context)
+
         if not javascript and not selectors and not selector:
             return TaskResult(success=False, error="Missing required config: provide 'javascript', 'selectors', or 'selector'")
 
@@ -1286,6 +1291,128 @@ class BrowserExtractTask(BaseTask):
 
         except Exception as e:
             return TaskResult(success=False, error=f"Browser extract failed: {str(e)}")
+
+    async def _execute_loop(self, loop_config: Dict[str, Any], config: Dict[str, Any],
+                            context: Optional[Dict[str, Any]] = None) -> TaskResult:
+        """Loop over items from a previous step, navigating to a URL per item and extracting data.
+
+        loop config:
+            source_step: Step ID to get items from (e.g. "step-3")
+            url_template: URL with {field} placeholders (e.g. "https://galaxus.ch/en/search?q={title}")
+            wait_for: CSS selector to wait for on each page
+            wait_timeout: Max wait per page in ms (default: 15000)
+            extract_js: JavaScript to run on each page; receives window.__currentItem
+            delay_ms: Delay between navigations in ms (default: 1500)
+            max_items: Max items to process (default: 20)
+        """
+        import urllib.parse as _urlparse
+
+        source_step = loop_config.get("source_step", "")
+        url_template = loop_config.get("url_template", "")
+        lp_wait_for = loop_config.get("wait_for", "")
+        lp_wait_timeout = loop_config.get("wait_timeout", 15000)
+        extract_js = loop_config.get("extract_js", "")
+        delay_ms = loop_config.get("delay_ms", 1500)
+        max_items = loop_config.get("max_items", 20)
+
+        if not source_step or not url_template or not extract_js:
+            return TaskResult(success=False, error="Loop config requires: source_step, url_template, extract_js")
+
+        # Get items from previous step
+        items = []
+        if context and "steps" in context:
+            step_data = context["steps"].get(source_step) or context["steps"].get(source_step.replace("-", "_"))
+            if step_data:
+                output = step_data.get("output", step_data) if isinstance(step_data, dict) else {}
+                if isinstance(output, dict):
+                    items = output.get("data", [])
+                elif isinstance(output, list):
+                    items = output
+        if isinstance(items, list):
+            items = items[:max_items]
+        else:
+            items = []
+
+        logger.info(f"Loop extract: {len(items)} items from {source_step}")
+
+        try:
+            session = BrowserSessionManager.get_or_create(context)
+            results = []
+            errors = []
+
+            for idx, item in enumerate(items):
+                if not isinstance(item, dict):
+                    results.append(item)
+                    continue
+
+                # Build URL from template — replace {field} with URL-encoded item values
+                try:
+                    nav_url = url_template
+                    for key, val in item.items():
+                        placeholder = "{" + key + "}"
+                        if placeholder in nav_url:
+                            nav_url = nav_url.replace(placeholder, _urlparse.quote(str(val)))
+                except Exception as tmpl_err:
+                    errors.append({"idx": idx, "error": f"URL template error: {tmpl_err}"})
+                    results.append(item)
+                    continue
+
+                try:
+                    # Get the shared page (don't pass URL — we'll navigate manually to force it)
+                    page, _ = await session.get_page(timeout=lp_wait_timeout)
+                    # Always navigate for loop items (each has different query params)
+                    await page.goto(nav_url, wait_until="domcontentloaded", timeout=lp_wait_timeout)
+
+                    # Wait for content to render
+                    if lp_wait_for:
+                        try:
+                            await page.wait_for_selector(lp_wait_for, timeout=lp_wait_timeout)
+                        except Exception:
+                            pass
+                    # Extra wait for client-side rendering (SPA pages)
+                    await page.wait_for_timeout(2000)
+
+                    # Inject current item data
+                    import json as _json
+                    item_json = _json.dumps(item, default=str)
+                    await page.evaluate(f"window.__currentItem = {item_json};")
+
+                    # Execute extraction JS
+                    extracted = await page.evaluate(extract_js)
+
+                    # Merge extracted data into item
+                    merged = dict(item)
+                    if isinstance(extracted, dict):
+                        merged.update(extracted)
+                    elif extracted is not None:
+                        merged["_extracted"] = extracted
+                    results.append(merged)
+
+                    logger.info(f"Loop extract [{idx+1}/{len(items)}]: OK",
+                                title=str(item.get("title", ""))[:50])
+
+                except Exception as nav_err:
+                    logger.warning(f"Loop extract [{idx+1}/{len(items)}] failed: {nav_err}")
+                    errors.append({"idx": idx, "error": str(nav_err)})
+                    results.append(item)
+
+                # Delay between requests
+                if idx < len(items) - 1 and delay_ms > 0:
+                    await asyncio.sleep(delay_ms / 1000)
+
+            return TaskResult(
+                success=True,
+                output={
+                    "data": results,
+                    "count": len(results),
+                    "processed": len(results),
+                    "errors": errors,
+                    "error_count": len(errors),
+                },
+            )
+
+        except Exception as e:
+            return TaskResult(success=False, error=f"Loop extract failed: {str(e)}")
 
     @classmethod
     def get_config_schema(cls) -> Dict[str, Any]:
