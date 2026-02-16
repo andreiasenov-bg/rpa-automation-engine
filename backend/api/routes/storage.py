@@ -221,27 +221,61 @@ async def download_latest_results(
     completed_at = row[3]
     state_data = row[5] if isinstance(row[5], dict) else _json.loads(row[5])
 
-    # Extract actual output data from steps
+    # ── Extract only the richest data set (last step with a data array) ──
     all_items = []
     steps_info = state_data.get("steps", {})
-    for step_id, step_info in steps_info.items():
+    sorted_steps = sorted(steps_info.keys())  # step-1, step-2, ...
+    for step_id in reversed(sorted_steps):
+        step_info = steps_info[step_id]
         if not isinstance(step_info, dict):
             continue
         output = step_info.get("output")
-        if isinstance(output, list):
-            all_items.extend(output)
-        elif isinstance(output, dict):
-            if "data" in output and isinstance(output["data"], list):
-                all_items.extend(output["data"])
-            elif output:
-                all_items.append(output)
+        if isinstance(output, dict) and "data" in output and isinstance(output["data"], list) and output["data"]:
+            all_items = output["data"]
+            break
+        elif isinstance(output, list) and output and isinstance(output[0], dict):
+            all_items = output
+            break
+
+    # ── Define clean column order and human-readable headers ──
+    COLUMN_CONFIG = [
+        ("title",           "Product",          45),
+        ("asin",            "ASIN",             14),
+        ("ean",             "EAN/GTIN",         16),
+        ("deal_price",      "Amazon Price (€)", 18),
+        ("amazon_price_chf","Amazon (CHF)",     14),
+        ("galaxus_price",   "Galaxus (CHF)",    14),
+        ("price_diff",      "Difference (%)",   15),
+        ("cheaper_at",      "Cheaper At",       14),
+        ("galaxus_found",   "Galaxus Match",    14),
+        ("rating",          "Rating",           10),
+        ("bsr",             "BSR",              10),
+        ("amazon_url",      "Amazon URL",       38),
+        ("galaxus_url",     "Galaxus URL",      38),
+        ("galaxus_title",   "Galaxus Title",    35),
+        ("search_query",    "Search Query",     25),
+        ("image",           "Image URL",        40),
+    ]
+
+    # Filter to only columns that exist in data
+    if all_items:
+        existing_keys = set()
+        for item in all_items:
+            if isinstance(item, dict):
+                existing_keys.update(item.keys())
+        columns = [(k, h, w) for k, h, w in COLUMN_CONFIG if k in existing_keys]
+        # Add any extra keys not in config at the end
+        configured_keys = {k for k, _, _ in COLUMN_CONFIG}
+        for key in sorted(existing_keys - configured_keys):
+            columns.append((key, key.replace("_", " ").title(), 20))
+    else:
+        columns = []
 
     # ── Build Excel workbook ──
     wb = Workbook()
     ws = wb.active
     ws.title = "Results"
 
-    # Styles
     header_font = Font(name="Arial", bold=True, color="FFFFFF", size=11)
     header_fill = PatternFill("solid", fgColor="1B5E20")
     header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
@@ -253,72 +287,89 @@ async def download_latest_results(
     )
     alt_fill = PatternFill("solid", fgColor="F5F5F5")
     data_font = Font(name="Arial", size=10)
+    number_fmt_pct = '0.0"%"'
+    number_fmt_chf = '#,##0.00'
+    green_font = Font(name="Arial", size=10, color="1B7A2B")
+    red_font = Font(name="Arial", size=10, color="CC0000")
+    link_font = Font(name="Arial", size=10, color="0563C1", underline="single")
+    bool_true_fill = PatternFill("solid", fgColor="E8F5E9")
+    bool_false_fill = PatternFill("solid", fgColor="FFEBEE")
 
-    if all_items:
-        # Collect all unique keys across items as column headers
-        all_keys = []
-        seen = set()
-        for item in all_items:
-            if isinstance(item, dict):
-                for k in item.keys():
-                    if k not in seen:
-                        all_keys.append(k)
-                        seen.add(k)
-
+    if columns and all_items:
         # Write header row
-        for col_idx, key in enumerate(all_keys, 1):
-            cell = ws.cell(row=1, column=col_idx, value=key.replace("_", " ").title())
+        for col_idx, (key, header, width) in enumerate(columns, 1):
+            cell = ws.cell(row=1, column=col_idx, value=header)
             cell.font = header_font
             cell.fill = header_fill
             cell.alignment = header_align
             cell.border = thin_border
+            ws.column_dimensions[cell.column_letter].width = width
 
         # Write data rows
         for row_idx, item in enumerate(all_items, 2):
-            for col_idx, key in enumerate(all_keys, 1):
-                val = item.get(key, "") if isinstance(item, dict) else str(item)
-                # Convert nested dicts/lists to string
+            if not isinstance(item, dict):
+                continue
+            for col_idx, (key, header, _w) in enumerate(columns, 1):
+                val = item.get(key, "")
                 if isinstance(val, (dict, list)):
                     val = _json.dumps(val, ensure_ascii=False, default=str)
-                cell = ws.cell(row=row_idx, column=col_idx, value=val)
-                cell.font = data_font
+
+                cell = ws.cell(row=row_idx, column=col_idx)
                 cell.border = thin_border
+
+                # Alternating row fill
                 if row_idx % 2 == 0:
                     cell.fill = alt_fill
 
-        # Auto-fit column widths (approximate)
-        for col_idx, key in enumerate(all_keys, 1):
-            max_len = len(key) + 2
-            for row_idx in range(2, min(len(all_items) + 2, 50)):
-                cell_val = str(ws.cell(row=row_idx, column=col_idx).value or "")
-                max_len = max(max_len, min(len(cell_val), 50))
-            ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = max_len + 2
+                # ── Column-specific formatting ──
+                if key == "price_diff" and isinstance(val, (int, float)):
+                    cell.value = val
+                    cell.number_format = '0.0"%"'
+                    cell.font = green_font if val >= 0 else red_font
+                elif key in ("amazon_price_chf", "galaxus_price") and isinstance(val, (int, float)):
+                    cell.value = val
+                    cell.number_format = '#,##0.00'
+                    cell.font = data_font
+                elif key == "galaxus_found":
+                    cell.value = "Yes" if val else "No"
+                    cell.font = data_font
+                    if val:
+                        cell.fill = bool_true_fill
+                    else:
+                        cell.fill = bool_false_fill
+                elif key in ("amazon_url", "galaxus_url", "image") and val:
+                    cell.value = val
+                    cell.font = link_font
+                    cell.hyperlink = str(val)
+                elif key == "cheaper_at":
+                    cell.value = val
+                    cell.font = green_font if val == "Amazon" else red_font if val == "Galaxus" else data_font
+                else:
+                    cell.value = val
+                    cell.font = data_font
 
-        # Freeze header row
+        # Freeze header row + auto-filter
         ws.freeze_panes = "A2"
+        last_col = ws.cell(row=1, column=len(columns)).column_letter
+        ws.auto_filter.ref = f"A1:{last_col}{len(all_items) + 1}"
 
-        # Auto-filter
-        ws.auto_filter.ref = f"A1:{ws.cell(row=1, column=len(all_keys)).column_letter}{len(all_items) + 1}"
-
-    # ── Info sheet with metadata ──
+    # ── Info sheet ──
     info_ws = wb.create_sheet("Info")
-    meta_font = Font(name="Arial", size=10)
-    meta_bold = Font(name="Arial", size=10, bold=True)
+    meta_bold = Font(name="Arial", size=11, bold=True)
+    meta_font = Font(name="Arial", size=11)
     meta = [
         ("Workflow", wf.name),
         ("Execution ID", exec_id),
         ("Started", started_at.strftime("%d/%m/%Y %H:%M") if started_at else "—"),
         ("Completed", completed_at.strftime("%d/%m/%Y %H:%M") if completed_at else "—"),
         ("Total Records", len(all_items)),
-        ("Exported", datetime.now().strftime("%d/%m/%Y %H:%M")),
+        ("Exported At", datetime.now().strftime("%d/%m/%Y %H:%M")),
     ]
     for r, (label, value) in enumerate(meta, 1):
-        lc = info_ws.cell(row=r, column=1, value=label)
-        lc.font = meta_bold
-        vc = info_ws.cell(row=r, column=2, value=value)
-        vc.font = meta_font
+        info_ws.cell(row=r, column=1, value=label).font = meta_bold
+        info_ws.cell(row=r, column=2, value=value).font = meta_font
     info_ws.column_dimensions["A"].width = 18
-    info_ws.column_dimensions["B"].width = 50
+    info_ws.column_dimensions["B"].width = 55
 
     # Save to temp file
     tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
@@ -400,16 +451,20 @@ async def get_workflow_detail(
             import json as _json
             sd = state_row[0] if isinstance(state_row[0], dict) else _json.loads(state_row[0])
             total_items = 0
+            # Use the richest step (last step with data array)
             steps = sd.get("steps", {})
             if isinstance(steps, dict):
-                for step_id, step_info in steps.items():
-                    if not isinstance(step_info, dict):
+                for sid in sorted(steps.keys(), reverse=True):
+                    si = steps[sid]
+                    if not isinstance(si, dict):
                         continue
-                    output = step_info.get("output")
-                    if isinstance(output, list):
-                        total_items += len(output)
-                    elif isinstance(output, dict) and "data" in output and isinstance(output["data"], list):
-                        total_items += len(output["data"])
+                    out = si.get("output")
+                    if isinstance(out, dict) and "data" in out and isinstance(out["data"], list) and out["data"]:
+                        total_items = len(out["data"])
+                        break
+                    elif isinstance(out, list) and out and isinstance(out[0], dict):
+                        total_items = len(out)
+                        break
 
             results_summary = {
                 "saved_at": row[4].isoformat() if row[4] else (row[3].isoformat() if row[3] else None),
