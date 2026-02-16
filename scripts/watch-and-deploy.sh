@@ -1,10 +1,19 @@
 #!/bin/bash
 # Watch for new commits on main and auto-deploy
-# Run this once: nohup bash scripts/watch-and-deploy.sh &
-# It checks every 30 seconds for new commits and rebuilds if needed.
+# Usage: nohup ~/rpa-automation-engine/scripts/watch-and-deploy.sh &
+# Works from ANY directory. Checks every 30 seconds.
 
-REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$REPO_DIR"
+# Find repo dir — works even if invoked from outside the repo
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)"
+if [ -d "$SCRIPT_DIR/../.git" ]; then
+    REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+elif [ -d "$HOME/rpa-automation-engine/.git" ]; then
+    REPO_DIR="$HOME/rpa-automation-engine"
+else
+    echo "[AUTO-DEPLOY] ERROR: Cannot find repo. Clone it to ~/rpa-automation-engine"
+    exit 1
+fi
+cd "$REPO_DIR" || exit 1
 
 LAST_SHA=""
 
