@@ -27,6 +27,8 @@ import {
   Workflow as WorkflowIcon,
   Zap,
   AlertCircle,
+  AlertTriangle,
+  Bug,
 } from 'lucide-react';
 import type { Workflow, Execution } from '@/types';
 import { workflowApi } from '@/api/workflows';
@@ -264,6 +266,13 @@ export default function WorkflowListPage() {
                 <div key={wf.id}
                   className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 hover:border-indigo-300 dark:hover:border-indigo-600 hover:shadow-lg hover:shadow-indigo-500/5 transition-all cursor-pointer group relative"
                   onClick={() => navigate(`/workflows/${wf.id}/files`)}>
+
+                  {/* Bug detected badge */}
+                  {lastExec?.status === 'failed' && (
+                    <div className="absolute top-3 left-3 z-10 flex items-center gap-1 px-2 py-1 bg-red-500 text-white text-[10px] font-bold rounded-full shadow-lg animate-pulse">
+                      <Bug className="w-3 h-3" /> Bug
+                    </div>
+                  )}
 
                   {/* ··· menu */}
                   <div className="absolute top-3 right-3" onClick={(e) => e.stopPropagation()}>

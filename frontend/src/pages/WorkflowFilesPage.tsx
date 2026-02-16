@@ -30,6 +30,13 @@ import {
   PowerOff,
   Trash2,
   Plus,
+  Bug,
+  Wrench,
+  Copy,
+  ChevronDown,
+  ChevronUp,
+  AlertTriangle,
+  ClipboardCheck,
 } from 'lucide-react';
 import { storageApi } from '@/api/storage';
 import { workflowApi } from '@/api/workflows';
@@ -186,6 +193,13 @@ export default function WorkflowDetailPage() {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [showCreateSchedule, setShowCreateSchedule] = useState(false);
 
+  // Bug Report
+  const [showBugReport, setShowBugReport] = useState(false);
+  const [bugLogs, setBugLogs] = useState<any[]>([]);
+  const [bugExecData, setBugExecData] = useState<any>(null);
+  const [loadingBug, setLoadingBug] = useState(false);
+  const [copied, setCopied] = useState(false);
+
   const loadDetail = useCallback(async () => {
     if (!id) return;
     setLoading(true); setError('');
@@ -240,6 +254,85 @@ export default function WorkflowDetailPage() {
     if (!confirm('Delete this schedule?')) return;
     try { await deleteSchedule(schedId); loadSchedules(); } catch { /* */ }
   };
+
+  const loadBugReport = useCallback(async (execId: string) => {
+    setLoadingBug(true);
+    try {
+      const [logsData, execData] = await Promise.all([
+        executionApi.logs(execId),
+        executionApi.data(execId).catch(() => null),
+      ]);
+      setBugLogs(Array.isArray(logsData) ? logsData.filter((l: any) => l.level === 'error' || l.level === 'critical') : []);
+      setBugExecData(execData);
+    } catch { /* silent */ }
+    finally { setLoadingBug(false); }
+  }, []);
+
+  const handleOpenBugReport = useCallback(async () => {
+    if (showBugReport) { setShowBugReport(false); return; }
+    setShowBugReport(true);
+    if (latestExec?.id) await loadBugReport(latestExec.id);
+  }, [showBugReport, latestExec, loadBugReport]);
+
+  const handleRepairWithAI = useCallback(async () => {
+    const failedSteps = bugExecData?.steps
+      ? Object.entries(bugExecData.steps)
+          .filter(([, v]: [string, any]) => v.status === 'failed' || v.error)
+          .map(([k, v]: [string, any]) => `  Step "${k}": ${v.error || 'failed'}`)
+          .join('\n')
+      : 'N/A';
+
+    const errorLogText = bugLogs.length > 0
+      ? bugLogs.slice(0, 10).map((l: any) => `  [${l.level}] ${l.message}`).join('\n')
+      : 'No error logs available';
+
+    const prompt = `🔧 RPA ROBOT BUG REPORT — Repair Request
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🤖 Robot: ${wf.name}
+📋 ID: ${wf.id}
+📝 Description: ${wf.description || 'N/A'}
+🔢 Version: v${wf.version}
+📊 Status: ${wf.status}
+📁 Steps: ${wf.step_count || wf.definition?.steps?.length || 0}
+
+❌ FAILED EXECUTION
+  ID: ${latestExec?.id || 'N/A'}
+  Error: ${latestExec?.error_message || 'Unknown error'}
+  Started: ${latestExec?.started_at || 'N/A'}
+  Duration: ${formatDuration(latestExec?.duration_ms)}
+  Trigger: ${latestExec?.trigger_type || 'N/A'}
+  Retries: ${latestExec?.retry_count || 0}
+
+🚫 FAILED STEPS:
+${failedSteps || '  None detected'}
+
+📋 ERROR LOGS:
+${errorLogText}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Please analyze the error above, find the root cause in the robot's code,
+fix the bug, and deploy the updated version. The robot is in the RPA Engine
+at: /workflows/${wf.id}/edit
+
+After fixing, run the robot to verify the fix works.`;
+
+    try {
+      await navigator.clipboard.writeText(prompt);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 3000);
+    } catch {
+      // Fallback: select text
+      const ta = document.createElement('textarea');
+      ta.value = prompt;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 3000);
+    }
+  }, [wf, latestExec, bugLogs, bugExecData]);
 
   if (loading) return <div className="flex items-center justify-center h-96"><Loader2 className="w-8 h-8 animate-spin text-indigo-500" /></div>;
 
@@ -296,12 +389,126 @@ export default function WorkflowDetailPage() {
               <span>{detail.total_executions} executions</span>
             </div>
           </div>
-          <button onClick={handleRun}
-            className="flex-shrink-0 inline-flex items-center gap-2 px-5 py-2.5 bg-white/20 hover:bg-white/30 backdrop-blur rounded-xl font-semibold transition text-sm">
-            <Play className="w-4 h-4" /> Run
-          </button>
+          <div className="flex-shrink-0 flex gap-2">
+            {latestExec?.status === 'failed' && (
+              <button onClick={handleOpenBugReport}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-red-500/80 hover:bg-red-500 backdrop-blur rounded-xl font-semibold transition text-sm animate-pulse hover:animate-none">
+                <Bug className="w-4 h-4" /> Bug Report
+              </button>
+            )}
+            <button onClick={handleRun}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-white/20 hover:bg-white/30 backdrop-blur rounded-xl font-semibold transition text-sm">
+              <Play className="w-4 h-4" /> Run
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* ═══ Failed Execution Alert + Bug Report Panel ═══ */}
+      {latestExec?.status === 'failed' && (
+        <div className="mb-6 space-y-3">
+          {/* Alert banner */}
+          <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl px-5 py-3 flex items-center gap-3 cursor-pointer"
+            onClick={handleOpenBugReport}>
+            <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-red-700 dark:text-red-400">Last execution failed</p>
+              <p className="text-xs text-red-600/80 dark:text-red-400/70 truncate mt-0.5">
+                {latestExec.error_message || 'Unknown error'} — {timeAgo(latestExec.started_at)}
+              </p>
+            </div>
+            {showBugReport ? <ChevronUp className="w-4 h-4 text-red-400" /> : <ChevronDown className="w-4 h-4 text-red-400" />}
+          </div>
+
+          {/* Expandable bug report */}
+          {showBugReport && (
+            <div className="bg-white dark:bg-slate-800 border border-red-200 dark:border-red-800 rounded-xl overflow-hidden">
+              <div className="px-5 py-4 bg-red-50/50 dark:bg-red-900/10 border-b border-red-100 dark:border-red-900/30">
+                <h3 className="flex items-center gap-2 text-sm font-bold text-red-700 dark:text-red-400">
+                  <Bug className="w-4 h-4" /> Bug Report — {wf.name}
+                </h3>
+              </div>
+
+              {loadingBug ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-5 h-5 text-red-400 animate-spin" />
+                </div>
+              ) : (
+                <div className="p-5 space-y-5">
+                  {/* Error Summary */}
+                  <div>
+                    <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Error Summary</h4>
+                    <div className="bg-red-50 dark:bg-red-900/20 rounded-lg p-3">
+                      <p className="text-sm text-red-700 dark:text-red-300 font-mono">{latestExec.error_message || 'Unknown error'}</p>
+                      <div className="flex gap-4 mt-2 text-xs text-red-500/70">
+                        <span>Execution: {latestExec.id?.substring(0, 8)}...</span>
+                        <span>Duration: {formatDuration(latestExec.duration_ms)}</span>
+                        <span>Trigger: {latestExec.trigger_type}</span>
+                        <span>Retries: {latestExec.retry_count || 0}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Failed Steps */}
+                  {bugExecData?.steps && Object.entries(bugExecData.steps).some(([, v]: [string, any]) => v.status === 'failed' || v.error) && (
+                    <div>
+                      <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Failed Steps</h4>
+                      <div className="space-y-2">
+                        {Object.entries(bugExecData.steps)
+                          .filter(([, v]: [string, any]) => v.status === 'failed' || v.error)
+                          .map(([stepId, v]: [string, any]) => (
+                            <div key={stepId} className="flex items-start gap-2 bg-amber-50 dark:bg-amber-900/20 rounded-lg p-3">
+                              <XCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+                              <div>
+                                <p className="text-sm font-medium text-slate-700 dark:text-slate-300">{stepId}</p>
+                                <p className="text-xs text-red-600 font-mono mt-0.5">{v.error || 'Failed'}</p>
+                              </div>
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Error Logs */}
+                  {bugLogs.length > 0 && (
+                    <div>
+                      <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Error Logs ({bugLogs.length})</h4>
+                      <div className="bg-slate-900 rounded-lg p-3 max-h-48 overflow-y-auto">
+                        {bugLogs.slice(0, 15).map((log: any, i: number) => (
+                          <div key={i} className="text-xs font-mono py-1 border-b border-slate-800 last:border-0">
+                            <span className="text-red-400">[{log.level?.toUpperCase()}]</span>{' '}
+                            <span className="text-slate-400">{new Date(log.timestamp).toLocaleTimeString()}</span>{' '}
+                            <span className="text-slate-200">{log.message}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Repair with AI Button */}
+                  <div className="pt-2 border-t border-slate-100 dark:border-slate-700">
+                    <button onClick={handleRepairWithAI}
+                      className={`w-full inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-sm font-bold transition shadow-lg ${
+                        copied
+                          ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-500/25'
+                          : 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white shadow-indigo-500/25'
+                      }`}>
+                      {copied ? (
+                        <><ClipboardCheck className="w-5 h-5" /> Copied! Paste in Claude to repair</>
+                      ) : (
+                        <><Wrench className="w-5 h-5" /> Repair with AI — Copy Context</>
+                      )}
+                    </button>
+                    <p className="text-xs text-center text-slate-400 mt-2">
+                      Copies full bug context to clipboard. Paste it in Claude / Cowork to auto-repair the robot.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="border-b border-slate-200 dark:border-slate-700 mb-6">
