@@ -1348,6 +1348,9 @@ class BrowserExtractTask(BaseTask):
                 # Build URL from template — replace {field} with URL-encoded item values
                 try:
                     nav_url = url_template
+                    # Fallback: if template uses {search_query} but item lacks it, use title
+                    if "{search_query}" in nav_url and "search_query" not in item and "title" in item:
+                        item["search_query"] = str(item["title"])[:60]
                     for key, val in item.items():
                         placeholder = "{" + key + "}"
                         if placeholder in nav_url:
@@ -1370,7 +1373,7 @@ class BrowserExtractTask(BaseTask):
                         except Exception:
                             pass
                     # Extra wait for client-side rendering (SPA pages)
-                    await page.wait_for_timeout(2000)
+                    await page.wait_for_timeout(4000)
 
                     # Inject current item data
                     import json as _json

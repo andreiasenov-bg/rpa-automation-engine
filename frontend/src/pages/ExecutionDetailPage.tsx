@@ -581,7 +581,7 @@ function extractProducts(stepsData: Record<string, any>): PriceProduct[] {
               galaxus_price: item.galaxus_price,
               galaxus_url: item.galaxus_url,
               galaxus_title: item.galaxus_title,
-              price_diff_pct: item.price_diff_pct,
+              price_diff_pct: item.price_diff_pct || item.price_diff,
               cheaper_at: item.cheaper_at,
               amazon_price_chf: item.amazon_price_chf,
             });
@@ -601,7 +601,7 @@ function extractProducts(stepsData: Record<string, any>): PriceProduct[] {
         byAsin.set(p.asin, p);
       } else {
         // Keep the one with more data (BSR, rating, etc.)
-        const richness = (x: PriceProduct) => (x.bsr ? 1 : 0) + (x.rating ? 1 : 0) + (x.image ? 1 : 0);
+        const richness = (x: PriceProduct) => (x.bsr ? 1 : 0) + (x.rating ? 1 : 0) + (x.image ? 1 : 0) + (x.galaxus_price ? 2 : 0) + (x.cheaper_at ? 1 : 0);
         if (richness(p) > richness(existing)) {
           byAsin.set(p.asin, p);
         }
@@ -1037,13 +1037,13 @@ function PriceComparisonTab({ executionId }: { executionId: string }) {
                           {product.galaxus_url ? (
                             <a href={product.galaxus_url} target="_blank" rel="noopener noreferrer"
                               className="text-sm font-bold text-purple-600 dark:text-purple-400 hover:underline">
-                              {product.galaxus_price}
+                              CHF {typeof product.galaxus_price === 'number' ? product.galaxus_price.toFixed(2) : product.galaxus_price}
                             </a>
                           ) : (
-                            <p className="text-sm font-bold text-purple-600 dark:text-purple-400">{product.galaxus_price}</p>
+                            <p className="text-sm font-bold text-purple-600 dark:text-purple-400">CHF {typeof product.galaxus_price === 'number' ? product.galaxus_price.toFixed(2) : product.galaxus_price}</p>
                           )}
                           {product.amazon_price_chf && (
-                            <p className="text-[10px] text-slate-400">Amazon: {product.amazon_price_chf}</p>
+                            <p className="text-[10px] text-slate-400">Amazon: CHF {typeof product.amazon_price_chf === 'number' ? Number(product.amazon_price_chf).toFixed(2) : product.amazon_price_chf}</p>
                           )}
                         </div>
                       ) : (
