@@ -577,7 +577,29 @@ function extractProducts(stepsData: Record<string, any>): PriceProduct[] {
     }
   }
 
-  return products;
+  // Deduplicate by ASIN — prefer the richer record (with BSR/rating)
+  const byAsin = new Map<string, PriceProduct>();
+  const noAsin: PriceProduct[] = [];
+  for (const p of products) {
+    if (p.asin) {
+      const existing = byAsin.get(p.asin);
+      if (!existing) {
+        byAsin.set(p.asin, p);
+      } else {
+        // Keep the one with more data (BSR, rating, etc.)
+        const richness = (x: PriceProduct) => (x.bsr ? 1 : 0) + (x.rating ? 1 : 0) + (x.image ? 1 : 0);
+        if (richness(p) > richness(existing)) {
+          byAsin.set(p.asin, p);
+        }
+      }
+    } else {
+      noAsin.push(p);
+    }
+  }
+  const deduped = [...byAsin.values(), ...noAsin];
+  // Re-rank after dedup
+  deduped.forEach((p, i) => { p.rank = i + 1; });
+  return deduped;
 }
 
 function PriceComparisonTab({ executionId }: { executionId: string }) {
