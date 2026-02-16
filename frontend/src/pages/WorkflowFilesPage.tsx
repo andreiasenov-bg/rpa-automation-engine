@@ -70,7 +70,7 @@ function getWorkflowColor(name: string): string {
 function formatDate(iso: string | null): string {
   if (!iso) return '—';
   const d = new Date(iso);
-  return d.toLocaleDateString('bg-BG', {
+  return d.toLocaleDateString('en-GB', {
     day: '2-digit', month: '2-digit', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
   });
@@ -78,10 +78,10 @@ function formatDate(iso: string | null): string {
 
 function formatDuration(ms: number | null): string {
   if (!ms) return '—';
-  if (ms < 60000) return `${Math.round(ms / 1000)} сек.`;
+  if (ms < 60000) return `${Math.round(ms / 1000)}s`;
   const min = Math.floor(ms / 60000);
   const sec = Math.round((ms % 60000) / 1000);
-  return `${min} мин. ${sec} сек.`;
+  return `${min}m ${sec}s`;
 }
 
 function formatBytes(bytes: number): string {
@@ -92,11 +92,11 @@ function formatBytes(bytes: number): string {
 
 function statusBadge(s: string) {
   const map: Record<string, { bg: string; text: string; label: string }> = {
-    completed: { bg: 'bg-emerald-50 dark:bg-emerald-900/20', text: 'text-emerald-700 dark:text-emerald-300', label: 'Завършено' },
-    running: { bg: 'bg-blue-50 dark:bg-blue-900/20', text: 'text-blue-700 dark:text-blue-300', label: 'Изпълнява се' },
-    failed: { bg: 'bg-red-50 dark:bg-red-900/20', text: 'text-red-700 dark:text-red-300', label: 'Грешка' },
-    pending: { bg: 'bg-amber-50 dark:bg-amber-900/20', text: 'text-amber-700 dark:text-amber-300', label: 'Чакащо' },
-    cancelled: { bg: 'bg-slate-50 dark:bg-slate-900/20', text: 'text-slate-600 dark:text-slate-400', label: 'Отменено' },
+    completed: { bg: 'bg-emerald-50 dark:bg-emerald-900/20', text: 'text-emerald-700 dark:text-emerald-300', label: 'Completed' },
+    running: { bg: 'bg-blue-50 dark:bg-blue-900/20', text: 'text-blue-700 dark:text-blue-300', label: 'Running' },
+    failed: { bg: 'bg-red-50 dark:bg-red-900/20', text: 'text-red-700 dark:text-red-300', label: 'Failed' },
+    pending: { bg: 'bg-amber-50 dark:bg-amber-900/20', text: 'text-amber-700 dark:text-amber-300', label: 'Pending' },
+    cancelled: { bg: 'bg-slate-50 dark:bg-slate-900/20', text: 'text-slate-600 dark:text-slate-400', label: 'Cancelled' },
   };
   const cfg = map[s] || map.pending;
   return (
@@ -127,7 +127,7 @@ export default function WorkflowDetailPage() {
       const resp = await storageApi.getWorkflowDetail(id);
       setDetail(resp.data);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Грешка при зареждане');
+      setError(err.response?.data?.detail || 'Failed to load workflow');
     } finally {
       setLoading(false);
     }
@@ -141,7 +141,7 @@ export default function WorkflowDetailPage() {
     try {
       await storageApi.downloadLatestResults(id, detail.workflow.name);
     } catch {
-      alert('Няма налични резултати за сваляне.');
+      alert('No results available to download.');
     } finally {
       setDownloading(false);
     }
@@ -153,7 +153,7 @@ export default function WorkflowDetailPage() {
       await workflowApi.execute(id);
       setTimeout(loadDetail, 2000);
     } catch (err: any) {
-      alert(err.response?.data?.detail || 'Грешка при стартиране');
+      alert(err.response?.data?.detail || 'Failed to start execution');
     }
   };
 
@@ -170,9 +170,9 @@ export default function WorkflowDetailPage() {
       <div className="max-w-3xl mx-auto mt-12 p-6">
         <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-6 text-center">
           <AlertCircle className="w-10 h-10 text-red-500 mx-auto mb-3" />
-          <p className="text-red-700 dark:text-red-300 font-medium">{error || 'Не е намерен workflow'}</p>
+          <p className="text-red-700 dark:text-red-300 font-medium">{error || 'Workflow not found'}</p>
           <button onClick={() => navigate('/workflows')} className="mt-4 text-sm text-indigo-600 hover:underline">
-            ← Обратно към списъка
+            ← Back to Workflows
           </button>
         </div>
       </div>
@@ -191,14 +191,14 @@ export default function WorkflowDetailPage() {
       {/* ── Back + Refresh ── */}
       <div className="flex items-center justify-between mb-6">
         <button onClick={() => navigate('/workflows')} className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 transition">
-          <ArrowLeft className="w-4 h-4" /> Обратно
+          <ArrowLeft className="w-4 h-4" /> Back
         </button>
         <div className="flex items-center gap-2">
-          <button onClick={loadDetail} className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition" title="Обнови">
+          <button onClick={loadDetail} className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition" title="Refresh">
             <RefreshCw className="w-4 h-4 text-slate-400" />
           </button>
           <Link to={`/workflows/${id}/edit`} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition">
-            <Edit3 className="w-3.5 h-3.5" /> Редактор
+            <Edit3 className="w-3.5 h-3.5" /> Editor
           </Link>
         </div>
       </div>
@@ -215,42 +215,42 @@ export default function WorkflowDetailPage() {
             <div className="flex items-center gap-4 mt-3 text-sm text-white/70">
               <span>v{wf.version}</span>
               <span>•</span>
-              <span>{wf.step_count} стъпки</span>
+              <span>{wf.step_count} steps</span>
               <span>•</span>
-              <span>{detail.total_executions} изпълнения</span>
+              <span>{detail.total_executions} executions</span>
             </div>
           </div>
           <button
             onClick={handleRun}
             className="flex-shrink-0 inline-flex items-center gap-2 px-5 py-2.5 bg-white/20 hover:bg-white/30 backdrop-blur rounded-xl font-semibold transition text-sm"
           >
-            <Play className="w-4 h-4" /> Пусни
+            <Play className="w-4 h-4" /> Run
           </button>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {/* ── Последно изпълнение ── */}
+        {/* ── Latest Execution ── */}
         <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
           <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-200 mb-4">
-            <Timer className="w-4 h-4 text-indigo-500" /> Последно изпълнение
+            <Timer className="w-4 h-4 text-indigo-500" /> Latest Execution
           </h2>
           {exec ? (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-xs text-slate-500">Статус</span>
+                <span className="text-xs text-slate-500">Status</span>
                 {statusBadge(exec.status)}
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-xs text-slate-500">Стартирано</span>
+                <span className="text-xs text-slate-500">Started</span>
                 <span className="text-sm text-slate-700 dark:text-slate-300">{formatDate(exec.started_at)}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-xs text-slate-500">Завършено</span>
+                <span className="text-xs text-slate-500">Completed</span>
                 <span className="text-sm text-slate-700 dark:text-slate-300">{formatDate(exec.completed_at)}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-xs text-slate-500">Продължителност</span>
+                <span className="text-xs text-slate-500">Duration</span>
                 <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{formatDuration(exec.duration_ms)}</span>
               </div>
               {exec.error_message && (
@@ -262,31 +262,31 @@ export default function WorkflowDetailPage() {
                 to={`/executions/${exec.id}`}
                 className="inline-flex items-center gap-1 text-xs text-indigo-600 dark:text-indigo-400 hover:underline mt-1"
               >
-                Виж детайли →
+                View details →
               </Link>
             </div>
           ) : (
-            <p className="text-sm text-slate-400 italic">Няма изпълнения все още</p>
+            <p className="text-sm text-slate-400 italic">No executions yet</p>
           )}
         </div>
 
-        {/* ── Резултати ── */}
+        {/* ── Results ── */}
         <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
           <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-200 mb-4">
-            <BarChart3 className="w-4 h-4 text-emerald-500" /> Резултати
+            <BarChart3 className="w-4 h-4 text-emerald-500" /> Results
           </h2>
           {results ? (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-xs text-slate-500">Записи</span>
+                <span className="text-xs text-slate-500">Records</span>
                 <span className="text-lg font-bold text-emerald-600 dark:text-emerald-400">{results.total_items}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-xs text-slate-500">Обновено</span>
+                <span className="text-xs text-slate-500">Updated</span>
                 <span className="text-sm text-slate-700 dark:text-slate-300">{formatDate(results.saved_at)}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-xs text-slate-500">Размер</span>
+                <span className="text-xs text-slate-500">Size</span>
                 <span className="text-sm text-slate-700 dark:text-slate-300">{formatBytes(results.file_size)}</span>
               </div>
 
@@ -294,7 +294,7 @@ export default function WorkflowDetailPage() {
               {exec && (
                 <div className="mt-2 p-3 bg-emerald-50 dark:bg-emerald-900/10 rounded-lg">
                   <p className="text-xs text-emerald-700 dark:text-emerald-400 font-medium">
-                    Данни от {formatDate(exec.started_at)}
+                    Data from {formatDate(exec.started_at)}
                   </p>
                 </div>
               )}
@@ -307,23 +307,23 @@ export default function WorkflowDetailPage() {
                   className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white rounded-xl text-sm font-semibold transition shadow-sm"
                 >
                   {downloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                  Свали резултати
+                  Download Results
                 </button>
               </div>
             </div>
           ) : (
             <div className="text-center py-4">
               <FileJson className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-              <p className="text-sm text-slate-400 italic">Няма резултати</p>
-              <p className="text-xs text-slate-400 mt-1">Пуснете РПА-то, за да генерирате данни</p>
+              <p className="text-sm text-slate-400 italic">No results yet</p>
+              <p className="text-xs text-slate-400 mt-1">Run the RPA to generate data</p>
             </div>
           )}
         </div>
 
-        {/* ── График (Schedule) ── */}
+        {/* ── Schedule ── */}
         <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
           <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-200 mb-4">
-            <Calendar className="w-4 h-4 text-violet-500" /> График
+            <Calendar className="w-4 h-4 text-violet-500" /> Schedule
           </h2>
           {schedules.length > 0 ? (
             <div className="space-y-3">
@@ -334,7 +334,7 @@ export default function WorkflowDetailPage() {
                     <p className="text-xs text-slate-500 mt-0.5 font-mono">{s.cron_expression} ({s.timezone})</p>
                     {s.next_run_at && (
                       <p className="text-xs text-violet-600 dark:text-violet-400 mt-1">
-                        Следващо: {formatDate(s.next_run_at)}
+                        Next run: {formatDate(s.next_run_at)}
                       </p>
                     )}
                   </div>
@@ -343,27 +343,27 @@ export default function WorkflowDetailPage() {
                       ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
                       : 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400'
                   }`}>
-                    {s.is_enabled ? 'Активен' : 'Спрян'}
+                    {s.is_enabled ? 'Active' : 'Paused'}
                   </span>
                 </div>
               ))}
               <Link to="/schedules" className="inline-flex items-center gap-1 text-xs text-indigo-600 dark:text-indigo-400 hover:underline">
-                Управление на графици →
+                Manage schedules →
               </Link>
             </div>
           ) : (
             <div className="text-center py-4">
               <Clock className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-              <p className="text-sm text-slate-400 italic">Няма зададен график</p>
-              <p className="text-xs text-slate-400 mt-1">Публикувайте workflow-а за автоматичен график 3× дневно</p>
+              <p className="text-sm text-slate-400 italic">No schedule set</p>
+              <p className="text-xs text-slate-400 mt-1">Publish the workflow for automatic 3× daily schedule</p>
             </div>
           )}
         </div>
 
-        {/* ── Настройки / Quick Links ── */}
+        {/* ── Quick Actions ── */}
         <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
           <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-200 mb-4">
-            <Settings className="w-4 h-4 text-slate-500" /> Бързи действия
+            <Settings className="w-4 h-4 text-slate-500" /> Quick Actions
           </h2>
           <div className="space-y-2">
             <Link
@@ -374,8 +374,8 @@ export default function WorkflowDetailPage() {
                 <Edit3 className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
               </div>
               <div>
-                <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Редактирай стъпките</p>
-                <p className="text-xs text-slate-400">Отвори визуалния редактор</p>
+                <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Edit Steps</p>
+                <p className="text-xs text-slate-400">Open the visual editor</p>
               </div>
             </Link>
             <Link
@@ -386,8 +386,8 @@ export default function WorkflowDetailPage() {
                 <Activity className="w-4 h-4 text-blue-600 dark:text-blue-400" />
               </div>
               <div>
-                <p className="text-sm font-medium text-slate-700 dark:text-slate-300">История на изпълненията</p>
-                <p className="text-xs text-slate-400">Всички {detail.total_executions} изпълнения</p>
+                <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Execution History</p>
+                <p className="text-xs text-slate-400">All {detail.total_executions} executions</p>
               </div>
             </Link>
             <Link
@@ -398,8 +398,8 @@ export default function WorkflowDetailPage() {
                 <Calendar className="w-4 h-4 text-violet-600 dark:text-violet-400" />
               </div>
               <div>
-                <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Управление на графици</p>
-                <p className="text-xs text-slate-400">Настрой автоматично изпълнение</p>
+                <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Manage Schedules</p>
+                <p className="text-xs text-slate-400">Set up automatic execution</p>
               </div>
             </Link>
           </div>

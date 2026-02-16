@@ -220,7 +220,7 @@ async def publish_workflow(
             new_sched = ScheduleModel(
                 organization_id=current_user.org_id,
                 workflow_id=wf.id,
-                name=f"{wf.name} — 3× дневно",
+                name=f"{wf.name} — 3× daily",
                 cron_expression=cron_expr,
                 timezone=tz,
                 is_enabled=True,
