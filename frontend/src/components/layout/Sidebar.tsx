@@ -1,8 +1,6 @@
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard,
-  GitBranch,
-  Play,
   Zap,
   CalendarClock,
   Key,
@@ -44,9 +42,8 @@ const navGroups: NavGroup[] = [
   {
     label: 'AUTOMATION',
     items: [
-      { to: '/workflows', icon: GitBranch, i18nKey: 'nav.workflows' },
+      { to: '/workflows', icon: Bot, i18nKey: 'nav.rpaList' },
       { to: '/create', icon: Wand2, i18nKey: 'nav.aiCreator' },
-      { to: '/executions', icon: Play, i18nKey: 'nav.executions' },
       { to: '/templates', icon: BookOpen, i18nKey: 'nav.templates' },
     ],
   },

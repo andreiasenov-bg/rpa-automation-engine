@@ -45,6 +45,7 @@ const translations: Record<Locale, TranslationMap> = {
     // Navigation
     'nav.dashboard': 'Dashboard',
     'nav.workflows': 'Workflows',
+    'nav.rpaList': 'RPA List',
     'nav.executions': 'Executions',
     'nav.templates': 'Templates',
     'nav.aiCreator': 'AI Creator',
@@ -194,6 +195,7 @@ const translations: Record<Locale, TranslationMap> = {
     // Навигация
     'nav.dashboard': 'Табло',
     'nav.workflows': 'Процеси',
+    'nav.rpaList': 'RPA Роботи',
     'nav.executions': 'Изпълнения',
     'nav.templates': 'Шаблони',
     'nav.aiCreator': 'AI Създател',

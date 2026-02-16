@@ -5,7 +5,7 @@ import { workflowApi } from '@/api/workflows';
 
 const ROUTE_LABELS: Record<string, string> = {
   '': 'Dashboard',
-  workflows: 'Workflows',
+  workflows: 'RPA List',
   executions: 'Executions',
   triggers: 'Triggers',
   schedules: 'Schedules',
@@ -22,7 +22,7 @@ const ROUTE_LABELS: Record<string, string> = {
   integrations: 'Integrations',
   'api-docs': 'API Docs',
   edit: 'Editor',
-  files: 'Dashboard',
+  files: 'Robot',
 };
 
 export default function Breadcrumb() {
