@@ -1093,7 +1093,7 @@ function PriceComparisonTab({ executionId }: { executionId: string }) {
                           {product.ean}
                         </span>
                       ) : (
-                        <span className="text-[10px] text-slate-300">{product.asin || '—'}</span>
+                        <span className="text-[10px] text-slate-300">—</span>
                       )}
                     </td>
                   </tr>

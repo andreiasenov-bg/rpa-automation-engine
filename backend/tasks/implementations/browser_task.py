@@ -1326,6 +1326,9 @@ class BrowserExtractTask(BaseTask):
                 output = step_data.get("output", step_data) if isinstance(step_data, dict) else {}
                 if isinstance(output, dict):
                     items = output.get("data", [])
+                    # Handle double-nesting: output.data might be {data: [...]} instead of [...]
+                    if isinstance(items, dict) and "data" in items and isinstance(items["data"], list):
+                        items = items["data"]
                 elif isinstance(output, list):
                     items = output
         if isinstance(items, list):
