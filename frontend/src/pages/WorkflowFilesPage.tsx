@@ -255,85 +255,6 @@ export default function WorkflowDetailPage() {
     try { await deleteSchedule(schedId); loadSchedules(); } catch { /* */ }
   };
 
-  const loadBugReport = useCallback(async (execId: string) => {
-    setLoadingBug(true);
-    try {
-      const [logsData, execData] = await Promise.all([
-        executionApi.logs(execId),
-        executionApi.data(execId).catch(() => null),
-      ]);
-      setBugLogs(Array.isArray(logsData) ? logsData.filter((l: any) => l.level === 'error' || l.level === 'critical') : []);
-      setBugExecData(execData);
-    } catch { /* silent */ }
-    finally { setLoadingBug(false); }
-  }, []);
-
-  const handleOpenBugReport = useCallback(async () => {
-    if (showBugReport) { setShowBugReport(false); return; }
-    setShowBugReport(true);
-    if (latestExec?.id) await loadBugReport(latestExec.id);
-  }, [showBugReport, latestExec, loadBugReport]);
-
-  const handleRepairWithAI = useCallback(async () => {
-    const failedSteps = bugExecData?.steps
-      ? Object.entries(bugExecData.steps)
-          .filter(([, v]: [string, any]) => v.status === 'failed' || v.error)
-          .map(([k, v]: [string, any]) => `  Step "${k}": ${v.error || 'failed'}`)
-          .join('\n')
-      : 'N/A';
-
-    const errorLogText = bugLogs.length > 0
-      ? bugLogs.slice(0, 10).map((l: any) => `  [${l.level}] ${l.message}`).join('\n')
-      : 'No error logs available';
-
-    const prompt = `🔧 RPA ROBOT BUG REPORT — Repair Request
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-🤖 Robot: ${wf.name}
-📋 ID: ${wf.id}
-📝 Description: ${wf.description || 'N/A'}
-🔢 Version: v${wf.version}
-📊 Status: ${wf.status}
-📁 Steps: ${wf.step_count || wf.definition?.steps?.length || 0}
-
-❌ FAILED EXECUTION
-  ID: ${latestExec?.id || 'N/A'}
-  Error: ${latestExec?.error_message || 'Unknown error'}
-  Started: ${latestExec?.started_at || 'N/A'}
-  Duration: ${formatDuration(latestExec?.duration_ms)}
-  Trigger: ${latestExec?.trigger_type || 'N/A'}
-  Retries: ${latestExec?.retry_count || 0}
-
-🚫 FAILED STEPS:
-${failedSteps || '  None detected'}
-
-📋 ERROR LOGS:
-${errorLogText}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Please analyze the error above, find the root cause in the robot's code,
-fix the bug, and deploy the updated version. The robot is in the RPA Engine
-at: /workflows/${wf.id}/edit
-
-After fixing, run the robot to verify the fix works.`;
-
-    try {
-      await navigator.clipboard.writeText(prompt);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 3000);
-    } catch {
-      // Fallback: select text
-      const ta = document.createElement('textarea');
-      ta.value = prompt;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 3000);
-    }
-  }, [wf, latestExec, bugLogs, bugExecData]);
-
   if (loading) return <div className="flex items-center justify-center h-96"><Loader2 className="w-8 h-8 animate-spin text-indigo-500" /></div>;
 
   if (error || !detail) {
@@ -353,6 +274,73 @@ After fixing, run the robot to verify the fix works.`;
   const latestExec = detail.latest_execution;
   const Icon = getWorkflowIcon(wf.name);
   const gradient = getWorkflowColor(wf.name);
+
+  /* ─── Bug Report handlers (must be after latestExec/wf are defined) ─── */
+  const loadBugReport = async (execId: string) => {
+    setLoadingBug(true);
+    try {
+      const [logsData, execData] = await Promise.all([
+        executionApi.logs(execId),
+        executionApi.data(execId).catch(() => null),
+      ]);
+      setBugLogs(Array.isArray(logsData) ? logsData.filter((l: any) => l.level === 'error' || l.level === 'critical') : []);
+      setBugExecData(execData);
+    } catch { /* silent */ }
+    finally { setLoadingBug(false); }
+  };
+
+  const handleOpenBugReport = async () => {
+    if (showBugReport) { setShowBugReport(false); return; }
+    setShowBugReport(true);
+    if (latestExec?.id) await loadBugReport(latestExec.id);
+  };
+
+  const handleRepairWithAI = async () => {
+    const failedSteps = bugExecData?.steps
+      ? Object.entries(bugExecData.steps)
+          .filter(([, v]: [string, any]) => v.status === 'failed' || v.error)
+          .map(([k, v]: [string, any]) => `  Step "${k}": ${v.error || 'failed'}`)
+          .join('\n')
+      : 'N/A';
+
+    const errorLogText = bugLogs.length > 0
+      ? bugLogs.slice(0, 10).map((l: any) => `  [${l.level}] ${l.message}`).join('\n')
+      : 'No error logs available';
+
+    const prompt = `RPA ROBOT BUG REPORT - Repair Request\n` +
+      `Robot: ${wf.name}\n` +
+      `ID: ${wf.id}\n` +
+      `Description: ${wf.description || 'N/A'}\n` +
+      `Version: v${wf.version} | Status: ${wf.status} | Steps: ${wf.step_count || wf.definition?.steps?.length || 0}\n\n` +
+      `FAILED EXECUTION\n` +
+      `  ID: ${latestExec?.id || 'N/A'}\n` +
+      `  Error: ${latestExec?.error_message || 'Unknown error'}\n` +
+      `  Started: ${latestExec?.started_at || 'N/A'}\n` +
+      `  Duration: ${formatDuration(latestExec?.duration_ms)}\n` +
+      `  Trigger: ${latestExec?.trigger_type || 'N/A'}\n` +
+      `  Retries: ${latestExec?.retry_count || 0}\n\n` +
+      `FAILED STEPS:\n${failedSteps || '  None detected'}\n\n` +
+      `ERROR LOGS:\n${errorLogText}\n\n` +
+      `Please analyze the error above, find the root cause in the robot code, ` +
+      `fix the bug, and deploy the updated version. ` +
+      `The robot editor is at: /workflows/${wf.id}/edit\n` +
+      `After fixing, run the robot to verify the fix works.`;
+
+    try {
+      await navigator.clipboard.writeText(prompt);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 3000);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = prompt;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 3000);
+    }
+  };
 
   const tabs: { key: TabKey; label: string; icon: any }[] = [
     { key: 'results', label: 'Results', icon: BarChart3 },
