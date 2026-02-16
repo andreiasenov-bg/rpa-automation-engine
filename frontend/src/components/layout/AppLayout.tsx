@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
+import Breadcrumb from './Breadcrumb';
 import GlobalSearch from '@/components/GlobalSearch';
 import ChatAssistant from '@/components/chat/ChatAssistant';
 import OnboardingTour from '@/components/help/OnboardingTour';
@@ -39,6 +40,7 @@ export default function AppLayout() {
         <TopBar onSearchOpen={() => setSearchOpen(true)} />
         <main className="flex-1 overflow-auto">
           <div className="p-6 max-w-7xl mx-auto">
+            <Breadcrumb />
             <Outlet />
           </div>
         </main>
