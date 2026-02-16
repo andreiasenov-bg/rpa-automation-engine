@@ -16,16 +16,18 @@ export const storageApi = {
   getLatestResults: (workflowId: string) =>
     client.get(`/storage/workflows/${workflowId}/latest-results`),
 
-  /** Download latest results as JSON file */
+  /** Download latest results as Excel file */
   downloadLatestResults: async (workflowId: string, workflowName: string) => {
     const response = await client.get(
       `/storage/workflows/${workflowId}/latest-results/download`,
       { responseType: 'blob' },
     );
-    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const url = window.URL.createObjectURL(new Blob([response.data], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    }));
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `${workflowName.replace(/\s+/g, '_')}_results.json`);
+    link.setAttribute('download', `${workflowName.replace(/\s+/g, '_')}_results.xlsx`);
     document.body.appendChild(link);
     link.click();
     link.remove();

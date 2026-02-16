@@ -187,7 +187,7 @@ async def download_latest_results(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Download the latest execution results as a clean JSON file.
+    Download the latest execution results as an Excel (.xlsx) file.
     Fetches full state_data from execution_states DB table,
     extracts actual product/output data from step outputs.
     """
@@ -195,6 +195,8 @@ async def download_latest_results(
     import tempfile
     from datetime import datetime
     from sqlalchemy import text as sa_text
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
     svc = WorkflowService(db)
     wf = await svc.get_by_id_and_org(workflow_id, current_user.org_id)
@@ -215,10 +217,8 @@ async def download_latest_results(
         raise HTTPException(status_code=404, detail="No results available yet. Run the workflow first.")
 
     exec_id = str(row[0])
-    exec_status = row[1]
-    started_at = row[2].isoformat() if row[2] else None
-    completed_at = row[3].isoformat() if row[3] else None
-    duration_ms = row[4]
+    started_at = row[2]
+    completed_at = row[3]
     state_data = row[5] if isinstance(row[5], dict) else _json.loads(row[5])
 
     # Extract actual output data from steps
@@ -231,37 +231,105 @@ async def download_latest_results(
         if isinstance(output, list):
             all_items.extend(output)
         elif isinstance(output, dict):
-            # Check for nested data array
             if "data" in output and isinstance(output["data"], list):
                 all_items.extend(output["data"])
-            elif output:  # Single dict output
+            elif output:
                 all_items.append(output)
 
-    # Build a clean download file
-    download_data = {
-        "workflow": wf.name,
-        "execution_id": exec_id,
-        "status": exec_status,
-        "started_at": started_at,
-        "completed_at": completed_at,
-        "duration_ms": duration_ms,
-        "total_records": len(all_items),
-        "exported_at": datetime.now().isoformat(),
-        "results": all_items,
-    }
+    # ── Build Excel workbook ──
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Results"
 
-    # Write to temp file and serve
-    tmp = tempfile.NamedTemporaryFile(
-        mode="w", suffix=".json", delete=False, encoding="utf-8"
+    # Styles
+    header_font = Font(name="Arial", bold=True, color="FFFFFF", size=11)
+    header_fill = PatternFill("solid", fgColor="1B5E20")
+    header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    thin_border = Border(
+        left=Side(style="thin", color="D0D0D0"),
+        right=Side(style="thin", color="D0D0D0"),
+        top=Side(style="thin", color="D0D0D0"),
+        bottom=Side(style="thin", color="D0D0D0"),
     )
-    _json.dump(download_data, tmp, ensure_ascii=False, indent=2, default=str)
+    alt_fill = PatternFill("solid", fgColor="F5F5F5")
+    data_font = Font(name="Arial", size=10)
+
+    if all_items:
+        # Collect all unique keys across items as column headers
+        all_keys = []
+        seen = set()
+        for item in all_items:
+            if isinstance(item, dict):
+                for k in item.keys():
+                    if k not in seen:
+                        all_keys.append(k)
+                        seen.add(k)
+
+        # Write header row
+        for col_idx, key in enumerate(all_keys, 1):
+            cell = ws.cell(row=1, column=col_idx, value=key.replace("_", " ").title())
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_align
+            cell.border = thin_border
+
+        # Write data rows
+        for row_idx, item in enumerate(all_items, 2):
+            for col_idx, key in enumerate(all_keys, 1):
+                val = item.get(key, "") if isinstance(item, dict) else str(item)
+                # Convert nested dicts/lists to string
+                if isinstance(val, (dict, list)):
+                    val = _json.dumps(val, ensure_ascii=False, default=str)
+                cell = ws.cell(row=row_idx, column=col_idx, value=val)
+                cell.font = data_font
+                cell.border = thin_border
+                if row_idx % 2 == 0:
+                    cell.fill = alt_fill
+
+        # Auto-fit column widths (approximate)
+        for col_idx, key in enumerate(all_keys, 1):
+            max_len = len(key) + 2
+            for row_idx in range(2, min(len(all_items) + 2, 50)):
+                cell_val = str(ws.cell(row=row_idx, column=col_idx).value or "")
+                max_len = max(max_len, min(len(cell_val), 50))
+            ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = max_len + 2
+
+        # Freeze header row
+        ws.freeze_panes = "A2"
+
+        # Auto-filter
+        ws.auto_filter.ref = f"A1:{ws.cell(row=1, column=len(all_keys)).column_letter}{len(all_items) + 1}"
+
+    # ── Info sheet with metadata ──
+    info_ws = wb.create_sheet("Info")
+    meta_font = Font(name="Arial", size=10)
+    meta_bold = Font(name="Arial", size=10, bold=True)
+    meta = [
+        ("Workflow", wf.name),
+        ("Execution ID", exec_id),
+        ("Started", started_at.strftime("%d/%m/%Y %H:%M") if started_at else "—"),
+        ("Completed", completed_at.strftime("%d/%m/%Y %H:%M") if completed_at else "—"),
+        ("Total Records", len(all_items)),
+        ("Exported", datetime.now().strftime("%d/%m/%Y %H:%M")),
+    ]
+    for r, (label, value) in enumerate(meta, 1):
+        lc = info_ws.cell(row=r, column=1, value=label)
+        lc.font = meta_bold
+        vc = info_ws.cell(row=r, column=2, value=value)
+        vc.font = meta_font
+    info_ws.column_dimensions["A"].width = 18
+    info_ws.column_dimensions["B"].width = 50
+
+    # Save to temp file
+    tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
     tmp.close()
+    wb.save(tmp.name)
 
     safe_name = wf.name.replace(" ", "_")
     return FileResponse(
         path=tmp.name,
-        media_type="application/json",
-        filename=f"{safe_name}_results.json",
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=f"{safe_name}_results.xlsx",
     )
 
 
