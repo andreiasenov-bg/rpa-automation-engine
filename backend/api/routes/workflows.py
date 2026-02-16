@@ -193,6 +193,45 @@ async def publish_workflow(
             detail="Workflow not found",
         )
 
+    # ── Auto-create 3× daily schedule (08:00, 14:00, 20:00 Sofia) if none exist ──
+    try:
+        from sqlalchemy import text as _sa_txt
+        existing = (await db.execute(_sa_txt(
+            "SELECT COUNT(*) FROM schedules WHERE workflow_id = :wid AND is_deleted = false"
+        ), {"wid": workflow_id})).scalar()
+
+        if existing == 0:
+            from db.models.schedule import Schedule as ScheduleModel
+            cron_expr = "0 8,14,20 * * *"
+            tz = "Europe/Sofia"
+            # Compute next_run_at
+            next_run = None
+            try:
+                from croniter import croniter
+                import pytz
+                local_tz = pytz.timezone(tz)
+                from datetime import datetime as _dt
+                now_local = _dt.now(local_tz)
+                cron = croniter(cron_expr, now_local)
+                next_run = cron.get_next(_dt).astimezone(pytz.utc).replace(tzinfo=None)
+            except Exception:
+                pass
+
+            new_sched = ScheduleModel(
+                organization_id=current_user.org_id,
+                workflow_id=wf.id,
+                name=f"{wf.name} — 3× дневно",
+                cron_expression=cron_expr,
+                timezone=tz,
+                is_enabled=True,
+                next_run_at=next_run,
+            )
+            db.add(new_sched)
+            await db.commit()
+            logger.info(f"Auto-created 3× daily schedule for workflow {wf.name} ({cron_expr} {tz})")
+    except Exception as sched_err:
+        logger.warning(f"Failed to auto-create schedule on publish: {sched_err}")
+
     return _workflow_to_response(wf)
 
 

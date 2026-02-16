@@ -147,7 +147,10 @@ class WorkflowStorageService:
         data: dict,
         format: str = "json",
     ) -> Optional[Path]:
-        """Save execution results to the workflow's results/ folder."""
+        """
+        Save execution results to the workflow's results/ folder.
+        REPLACE mode: clears old results and saves only the latest as latest_results.json.
+        """
         wf_dir = self.find_workflow_dir(workflow_id)
         if not wf_dir:
             return None
@@ -155,32 +158,50 @@ class WorkflowStorageService:
         results_dir = wf_dir / "results"
         results_dir.mkdir(exist_ok=True)
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        short_exec = execution_id[:8]
+        # ── Replace mode: delete all old result files ──
+        for old_file in results_dir.iterdir():
+            if old_file.is_file():
+                old_file.unlink()
+                logger.debug(f"Deleted old result: {old_file.name}")
 
-        if format == "json":
-            filename = f"execution_{short_exec}_{timestamp}.json"
-            filepath = results_dir / filename
-            filepath.write_text(json.dumps(data, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
-        elif format == "csv":
-            filename = f"execution_{short_exec}_{timestamp}.csv"
-            filepath = results_dir / filename
-            # Simple CSV from flat data
-            if isinstance(data.get("data"), list) and data["data"]:
-                import csv
-                import io
-                output = io.StringIO()
-                writer = csv.DictWriter(output, fieldnames=data["data"][0].keys())
-                writer.writeheader()
-                writer.writerows(data["data"])
-                filepath.write_text(output.getvalue(), encoding="utf-8")
-            else:
-                filepath.write_text(json.dumps(data, default=str), encoding="utf-8")
-        else:
+        # ── Save as fixed name for easy access ──
+        filepath = results_dir / "latest_results.json"
+
+        # Build a clean result envelope with metadata
+        result_envelope = {
+            "execution_id": execution_id,
+            "saved_at": datetime.now().isoformat(),
+            "data": data,
+        }
+
+        filepath.write_text(
+            json.dumps(result_envelope, ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8",
+        )
+        logger.info(f"Saved latest execution result: {filepath} (replaced old files)")
+        return filepath
+
+    def get_latest_results(self, workflow_id: str) -> Optional[dict]:
+        """Read the latest results JSON for a workflow. Returns parsed dict or None."""
+        wf_dir = self.find_workflow_dir(workflow_id)
+        if not wf_dir:
+            return None
+        filepath = wf_dir / "results" / "latest_results.json"
+        if not filepath.exists():
+            return None
+        try:
+            return json.loads(filepath.read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.warning(f"Failed to read latest results: {e}")
             return None
 
-        logger.info(f"Saved execution result: {filepath}")
-        return filepath
+    def get_latest_results_path(self, workflow_id: str) -> Optional[Path]:
+        """Get the path to the latest results file for direct download."""
+        wf_dir = self.find_workflow_dir(workflow_id)
+        if not wf_dir:
+            return None
+        filepath = wf_dir / "results" / "latest_results.json"
+        return filepath if filepath.exists() else None
 
     def save_execution_log(self, workflow_id: str, execution_id: str, log_text: str) -> Optional[Path]:
         """Save execution logs to the workflow's logs/ folder."""
