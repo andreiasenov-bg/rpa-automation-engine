@@ -573,6 +573,14 @@ export default function WorkflowEditorPage() {
             Variables
           </button>
           <button
+            onClick={() => navigate(`/workflows/${id}/files`)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition"
+            title="Workflow Files"
+          >
+            <FolderOpen className="w-3.5 h-3.5" />
+            Files
+          </button>
+          <button
             onClick={handleDeleteSelected}
             className="p-2 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors"
             title="Delete selected (Del)"

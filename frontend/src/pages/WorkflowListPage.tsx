@@ -29,6 +29,7 @@ import {
   Shield,
   Workflow as WorkflowIcon,
   Zap,
+  FolderOpen,
 } from 'lucide-react';
 import type { Workflow } from '@/types';
 import { workflowApi } from '@/api/workflows';
@@ -380,6 +381,12 @@ export default function WorkflowListPage() {
                               className="flex items-center gap-2.5 px-3 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700"
                             >
                               <Edit3 className="w-3.5 h-3.5" /> Edit
+                            </Link>
+                            <Link
+                              to={`/workflows/${wf.id}/files`}
+                              className="flex items-center gap-2.5 px-3 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700"
+                            >
+                              <FolderOpen className="w-3.5 h-3.5" /> Files
                             </Link>
                             {wf.status !== 'archived' && (
                               <button

@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     ALLOW_METHODS: list = ["*"]
     ALLOW_HEADERS: list = ["*"]
 
+    # Storage Settings
+    STORAGE_PATH: str = "./storage"  # Base path for workflow files (results, icons, docs)
+
     # Logging
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "json"  # json or text

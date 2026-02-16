@@ -32,6 +32,7 @@ const ApiDocsPage = lazy(() => import('@/pages/ApiDocsPage'));
 const ExecutionDetailPage = lazy(() => import('@/pages/ExecutionDetailPage'));
 const AICreatorPage = lazy(() => import('@/pages/AICreatorPage'));
 const IntegrationsPage = lazy(() => import('@/pages/IntegrationsPage'));
+const WorkflowFilesPage = lazy(() => import('@/pages/WorkflowFilesPage'));
 
 import ErrorBoundary from '@/components/ErrorBoundary';
 import ToastContainer from '@/components/ToastContainer';
@@ -81,6 +82,7 @@ function AppRoutes() {
         <Route index element={<DashboardPage />} />
         <Route path="workflows" element={<Suspense fallback={<PageLoader />}><WorkflowListPage /></Suspense>} />
         <Route path="workflows/:id/edit" element={<Suspense fallback={<PageLoader />}><WorkflowEditorPage /></Suspense>} />
+        <Route path="workflows/:id/files" element={<Suspense fallback={<PageLoader />}><WorkflowFilesPage /></Suspense>} />
         <Route path="executions" element={<Suspense fallback={<PageLoader />}><ExecutionsPage /></Suspense>} />
         <Route path="executions/:id" element={<Suspense fallback={<PageLoader />}><ExecutionDetailPage /></Suspense>} />
         <Route path="triggers" element={<Suspense fallback={<PageLoader />}><TriggersPage /></Suspense>} />

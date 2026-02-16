@@ -2,6 +2,8 @@
 
 All v1 endpoints are registered here and mounted under /api/v1 in main.py.
 This makes it trivial to add /api/v2 later without touching existing routes.
+
+Includes: Storage routes for workflow file management (results, icons, docs).
 """
 
 from fastapi import APIRouter
@@ -30,6 +32,7 @@ from api.routes import activity
 from api.routes import user_roles
 from api.routes import workflow_variables
 from api.routes import chat
+from api.routes import storage
 from api.routes import integrations as integrations_routes
 from api.routes import triggers
 from api.routes import notifications
@@ -213,4 +216,11 @@ api_v1_router.include_router(
     chat.router,
     prefix="/chat",
     tags=["Chat Assistant"],
+)
+
+# Workflow Storage (files, results, icons)
+api_v1_router.include_router(
+    storage.router,
+    prefix="/storage",
+    tags=["Workflow Storage"],
 )

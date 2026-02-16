@@ -86,6 +86,15 @@ async def create_workflow(
         definition=request.definition,
         created_by_id=current_user.sub,
     )
+
+    # Auto-create workflow folder structure
+    try:
+        from services.storage_service import get_storage_service
+        storage = get_storage_service()
+        storage.init_workflow_folder(wf.id, wf.name, wf.description or "")
+    except Exception as e:
+        logger.warning(f"Failed to create workflow folder: {e}")
+
     return _workflow_to_response(wf)
 
 
@@ -364,6 +373,14 @@ async def trigger_workflow_execution(
                 ), {"exec_id": exec_id, "state_data": _json.dumps(state_data)})
                 await sess.commit()
             logger.info(f"[BG] Execution {exec_id}: {final_status} in {duration_ms}ms (state saved)")
+
+            # Auto-save execution results to workflow folder
+            try:
+                from services.storage_service import get_storage_service
+                _storage = get_storage_service()
+                _storage.save_execution_result(wf_id, exec_id, state_data, format="json")
+            except Exception as store_err:
+                logger.warning(f"[BG] Failed to save results to folder: {store_err}")
 
             # Cleanup shared browser sessions
             try:
