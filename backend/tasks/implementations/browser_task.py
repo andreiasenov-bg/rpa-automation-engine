@@ -1170,6 +1170,15 @@ class BrowserExtractTask(BaseTask):
 
             # ── Mode 1: JavaScript extraction ──────────────────────────────
             if javascript:
+                # Inject previous step results into browser context for cross-step data sharing
+                if context and "steps" in context:
+                    try:
+                        import json as _json
+                        steps_json = _json.dumps(context["steps"], default=str)
+                        await page.evaluate(f"window.__rpaSteps = {steps_json};")
+                    except Exception as inj_err:
+                        logger.warning(f"Failed to inject step data into browser: {inj_err}")
+
                 try:
                     result = await page.evaluate(javascript)
                 except Exception as js_err:
