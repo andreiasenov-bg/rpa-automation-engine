@@ -488,10 +488,17 @@ interface PriceProduct {
   discount?: string;
   rating?: string;
   asin?: string;
+  ean?: string;
   url?: string;
   image?: string;
   bsr?: string;
   category?: string;
+  galaxus_price?: string;
+  galaxus_url?: string;
+  galaxus_title?: string;
+  price_diff_pct?: string;
+  cheaper_at?: string;
+  amazon_price_chf?: string;
 }
 
 function parsePriceNum(s: string | number | undefined): number {
@@ -570,6 +577,13 @@ function extractProducts(stepsData: Record<string, any>): PriceProduct[] {
               image: item.image || item.img,
               bsr: item.bsr || item.best_seller_rank,
               category: item.category || item.c,
+              ean: item.ean || item.gtin,
+              galaxus_price: item.galaxus_price,
+              galaxus_url: item.galaxus_url,
+              galaxus_title: item.galaxus_title,
+              price_diff_pct: item.price_diff_pct,
+              cheaper_at: item.cheaper_at,
+              amazon_price_chf: item.amazon_price_chf,
             });
           }
         }
@@ -668,6 +682,10 @@ function PriceComparisonTab({ executionId }: { executionId: string }) {
     if (products.length === 0) return null;
     const prices = products.map(p => parsePriceNum(p.price)).filter(p => p > 0);
     const discounts = products.map(p => parseDiscountNum(p.discount)).filter(d => d > 0);
+    const withGalaxus = products.filter(p => p.galaxus_price);
+    const cheaperOnAmazon = products.filter(p => p.cheaper_at === 'Amazon').length;
+    const cheaperOnGalaxus = products.filter(p => p.cheaper_at === 'Galaxus').length;
+    const withEAN = products.filter(p => p.ean).length;
     return {
       totalProducts: products.length,
       avgPrice: prices.length > 0 ? prices.reduce((a, b) => a + b, 0) / prices.length : 0,
@@ -675,6 +693,10 @@ function PriceComparisonTab({ executionId }: { executionId: string }) {
       maxPrice: prices.length > 0 ? Math.max(...prices) : 0,
       avgDiscount: discounts.length > 0 ? discounts.reduce((a, b) => a + b, 0) / discounts.length : 0,
       maxDiscount: discounts.length > 0 ? Math.max(...discounts) : 0,
+      galaxusMatches: withGalaxus.length,
+      cheaperOnAmazon,
+      cheaperOnGalaxus,
+      withEAN,
     };
   }, [products]);
 
@@ -682,36 +704,45 @@ function PriceComparisonTab({ executionId }: { executionId: string }) {
     if (filteredProducts.length === 0) return;
 
     const mainData: (string | number)[][] = [
-      ['#', 'ASIN', 'Produkt', 'Deal Preis (€)', 'Original Preis (€)', 'Rabatt %', 'Bewertung', 'BSR', 'URL'],
+      ['#', 'EAN', 'ASIN', 'Produkt', 'Amazon Preis (€)', 'Original (€)', 'Rabatt %', 'Galaxus Preis (CHF)', 'Amazon in CHF', 'Günstiger bei', 'Diff %', 'BSR', 'Bewertung', 'Amazon URL', 'Galaxus URL'],
       ...filteredProducts.map((p, i) => [
         i + 1,
+        p.ean || '',
         p.asin || '',
         p.title,
         parsePriceNum(p.price) || 0,
         parsePriceNum(p.originalPrice) || 0,
         parseDiscountNum(p.discount) ? parseDiscountNum(p.discount) : 0,
-        p.rating || '',
+        p.galaxus_price ? parsePriceNum(p.galaxus_price) : '',
+        p.amazon_price_chf ? parsePriceNum(p.amazon_price_chf) : '',
+        p.cheaper_at || 'N/A',
+        p.price_diff_pct ? parseFloat(p.price_diff_pct) : '',
         p.bsr || '',
+        p.rating || '',
         p.url || '',
+        p.galaxus_url || '',
       ]),
     ];
 
     const summaryData: (string | number)[][] = [
-      ['Zusammenfassung', ''],
+      ['Amazon vs Galaxus Vergleich', ''],
       ['Anzahl Produkte', products.length],
-      ['Durchschnittspreis', stats ? stats.avgPrice : 0],
-      ['Min Preis', stats ? stats.minPrice : 0],
-      ['Max Preis', stats ? stats.maxPrice : 0],
-      ['Durchschn. Rabatt %', stats ? stats.avgDiscount : 0],
-      ['Max Rabatt %', stats ? stats.maxDiscount : 0],
+      ['Mit EAN gefunden', stats ? stats.withEAN : 0],
+      ['Galaxus Treffer', stats ? stats.galaxusMatches : 0],
+      ['Günstiger bei Amazon', stats ? stats.cheaperOnAmazon : 0],
+      ['Günstiger bei Galaxus', stats ? stats.cheaperOnGalaxus : 0],
+      ['Ø Amazon Preis (€)', stats ? stats.avgPrice : 0],
+      ['Min Amazon Preis (€)', stats ? stats.minPrice : 0],
+      ['Max Amazon Preis (€)', stats ? stats.maxPrice : 0],
+      ['Ø Rabatt %', stats ? stats.avgDiscount : 0],
       ['Export Datum', new Date().toLocaleString('de-DE')],
       ['Execution ID', executionId],
     ];
 
     generateXLSXFile([
-      { name: 'Price Comparison', data: mainData },
+      { name: 'Amazon vs Galaxus', data: mainData },
       { name: 'Zusammenfassung', data: summaryData },
-    ], `price-comparison-${executionId.slice(0, 8)}.xlsx`);
+    ], `amazon-vs-galaxus-${executionId.slice(0, 8)}.xlsx`);
   };
 
   if (loading) {
@@ -746,7 +777,7 @@ function PriceComparisonTab({ executionId }: { executionId: string }) {
     <div className="space-y-4">
       {/* Stats cards */}
       {stats && (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
           <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
             <div className="flex items-center gap-2 mb-1">
               <Package className="w-3.5 h-3.5 text-indigo-500" />
@@ -756,24 +787,17 @@ function PriceComparisonTab({ executionId }: { executionId: string }) {
           </div>
           <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
             <div className="flex items-center gap-2 mb-1">
+              <BarChart3 className="w-3.5 h-3.5 text-cyan-500" />
+              <span className="text-[10px] text-slate-400 uppercase tracking-wider">EAN</span>
+            </div>
+            <p className="text-lg font-bold text-slate-900 dark:text-white">{stats.withEAN}</p>
+          </div>
+          <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
+            <div className="flex items-center gap-2 mb-1">
               <DollarSign className="w-3.5 h-3.5 text-emerald-500" />
-              <span className="text-[10px] text-slate-400 uppercase tracking-wider">Ø Preis</span>
+              <span className="text-[10px] text-slate-400 uppercase tracking-wider">Ø Amazon</span>
             </div>
             <p className="text-lg font-bold text-slate-900 dark:text-white">€{stats.avgPrice.toFixed(2)}</p>
-          </div>
-          <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
-            <div className="flex items-center gap-2 mb-1">
-              <TrendingDown className="w-3.5 h-3.5 text-blue-500" />
-              <span className="text-[10px] text-slate-400 uppercase tracking-wider">Min</span>
-            </div>
-            <p className="text-lg font-bold text-emerald-600">€{stats.minPrice.toFixed(2)}</p>
-          </div>
-          <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
-            <div className="flex items-center gap-2 mb-1">
-              <TrendingUp className="w-3.5 h-3.5 text-amber-500" />
-              <span className="text-[10px] text-slate-400 uppercase tracking-wider">Max</span>
-            </div>
-            <p className="text-lg font-bold text-slate-900 dark:text-white">€{stats.maxPrice.toFixed(2)}</p>
           </div>
           <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
             <div className="flex items-center gap-2 mb-1">
@@ -781,6 +805,27 @@ function PriceComparisonTab({ executionId }: { executionId: string }) {
               <span className="text-[10px] text-slate-400 uppercase tracking-wider">Ø Rabatt</span>
             </div>
             <p className="text-lg font-bold text-red-600">{stats.avgDiscount.toFixed(0)}%</p>
+          </div>
+          <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
+            <div className="flex items-center gap-2 mb-1">
+              <ShoppingCart className="w-3.5 h-3.5 text-purple-500" />
+              <span className="text-[10px] text-slate-400 uppercase tracking-wider">Galaxus</span>
+            </div>
+            <p className="text-lg font-bold text-purple-600">{stats.galaxusMatches}</p>
+          </div>
+          <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-3 border-l-2 border-l-orange-400">
+            <div className="flex items-center gap-2 mb-1">
+              <TrendingDown className="w-3.5 h-3.5 text-orange-500" />
+              <span className="text-[10px] text-slate-400 uppercase tracking-wider">Amazon ♥</span>
+            </div>
+            <p className="text-lg font-bold text-orange-600">{stats.cheaperOnAmazon}</p>
+          </div>
+          <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-3 border-l-2 border-l-blue-400">
+            <div className="flex items-center gap-2 mb-1">
+              <TrendingUp className="w-3.5 h-3.5 text-blue-500" />
+              <span className="text-[10px] text-slate-400 uppercase tracking-wider">Galaxus ♥</span>
+            </div>
+            <p className="text-lg font-bold text-blue-600">{stats.cheaperOnGalaxus}</p>
           </div>
           <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
             <div className="flex items-center gap-2 mb-1">
@@ -874,11 +919,17 @@ function PriceComparisonTab({ executionId }: { executionId: string }) {
                     Rabatt {sortField === 'discount' && (sortDir === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)}
                   </span>
                 </th>
-                <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-slate-500 uppercase tracking-wider w-24">
-                  Bewertung
+                <th className="px-3 py-2.5 text-right text-[10px] font-semibold text-purple-600 uppercase tracking-wider w-28 bg-purple-50/50 dark:bg-purple-900/10">
+                  Galaxus CHF
                 </th>
-                <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-slate-500 uppercase tracking-wider w-16">
-                  ASIN
+                <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-slate-500 uppercase tracking-wider w-24">
+                  Vergleich
+                </th>
+                <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-slate-500 uppercase tracking-wider w-24">
+                  BSR
+                </th>
+                <th className="px-3 py-2.5 text-center text-[10px] font-semibold text-slate-500 uppercase tracking-wider w-28">
+                  EAN
                 </th>
               </tr>
             </thead>
@@ -929,9 +980,9 @@ function PriceComparisonTab({ executionId }: { executionId: string }) {
                         ) : (
                           <p className="text-sm font-medium text-slate-900 dark:text-white line-clamp-2">{product.title}</p>
                         )}
-                        {product.bsr && (
+                        {product.ean && (
                           <span className="inline-flex items-center gap-1 mt-1 text-[10px] text-slate-400">
-                            <BarChart3 className="w-2.5 h-2.5" /> BSR #{product.bsr}
+                            EAN: {product.ean}
                           </span>
                         )}
                       </div>
@@ -979,14 +1030,70 @@ function PriceComparisonTab({ executionId }: { executionId: string }) {
                       )}
                     </td>
 
-                    {/* ASIN */}
+                    {/* Galaxus Price */}
+                    <td className="px-3 py-2.5 text-right bg-purple-50/30 dark:bg-purple-900/5">
+                      {product.galaxus_price ? (
+                        <div>
+                          {product.galaxus_url ? (
+                            <a href={product.galaxus_url} target="_blank" rel="noopener noreferrer"
+                              className="text-sm font-bold text-purple-600 dark:text-purple-400 hover:underline">
+                              {product.galaxus_price}
+                            </a>
+                          ) : (
+                            <p className="text-sm font-bold text-purple-600 dark:text-purple-400">{product.galaxus_price}</p>
+                          )}
+                          {product.amazon_price_chf && (
+                            <p className="text-[10px] text-slate-400">Amazon: {product.amazon_price_chf}</p>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-[10px] text-slate-300">nicht gefunden</span>
+                      )}
+                    </td>
+
+                    {/* Price comparison badge */}
                     <td className="px-3 py-2.5 text-center">
-                      {product.asin ? (
-                        <span className="text-[10px] font-mono text-indigo-500 bg-indigo-50 dark:bg-indigo-900/20 px-1.5 py-0.5 rounded">
-                          {product.asin}
+                      {product.cheaper_at ? (
+                        <div>
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            product.cheaper_at === 'Amazon'
+                              ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
+                              : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+                          }`}>
+                            {product.cheaper_at === 'Amazon' ? '🛒 Amazon' : '🏔️ Galaxus'}
+                          </span>
+                          {product.price_diff_pct && (
+                            <p className={`text-[10px] mt-0.5 font-bold ${
+                              parseFloat(product.price_diff_pct) > 0 ? 'text-orange-500' : 'text-blue-500'
+                            }`}>
+                              {parseFloat(product.price_diff_pct) > 0 ? '+' : ''}{product.price_diff_pct}%
+                            </p>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-slate-300">—</span>
+                      )}
+                    </td>
+
+                    {/* BSR */}
+                    <td className="px-3 py-2.5 text-center">
+                      {product.bsr ? (
+                        <span className="text-[10px] font-mono text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 px-1.5 py-0.5 rounded">
+                          #{product.bsr}
                         </span>
                       ) : (
                         <span className="text-xs text-slate-300">—</span>
+                      )}
+                    </td>
+
+                    {/* EAN */}
+                    <td className="px-3 py-2.5 text-center">
+                      {product.ean ? (
+                        <span className="text-[10px] font-mono text-cyan-600 bg-cyan-50 dark:bg-cyan-900/20 px-1.5 py-0.5 rounded">
+                          {product.ean}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-slate-300">{product.asin || '—'}</span>
                       )}
                     </td>
                   </tr>
@@ -994,7 +1101,7 @@ function PriceComparisonTab({ executionId }: { executionId: string }) {
               })}
               {filteredProducts.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-sm text-slate-400">
+                  <td colSpan={10} className="px-4 py-8 text-center text-sm text-slate-400">
                     {searchQuery ? 'Keine Produkte gefunden' : 'Keine Daten verfügbar'}
                   </td>
                 </tr>
