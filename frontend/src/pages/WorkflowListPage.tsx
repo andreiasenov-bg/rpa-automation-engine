@@ -1,4 +1,3 @@
-/* UX refresh v2 */
 import { useEffect, useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
@@ -16,8 +15,6 @@ import {
   CheckCircle2,
   XCircle,
   Clock,
-  ChevronRight,
-  Copy,
   Eye,
   Bot,
   Code2,
@@ -30,7 +27,6 @@ import {
   Shield,
   Workflow as WorkflowIcon,
   Zap,
-  FolderOpen,
 } from 'lucide-react';
 import type { Workflow } from '@/types';
 import { workflowApi } from '@/api/workflows';
