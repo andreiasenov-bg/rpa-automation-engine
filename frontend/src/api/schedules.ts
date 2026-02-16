@@ -46,7 +46,7 @@ export async function listSchedules(params?: {
   workflow_id?: string;
   is_enabled?: boolean;
 }): Promise<ScheduleListResponse> {
-  const { data } = await client.get<ScheduleListResponse>('/schedules', { params });
+  const { data } = await client.get<ScheduleListResponse>('/schedules/', { params });
   return data;
 }
 
@@ -56,7 +56,7 @@ export async function getSchedule(id: string): Promise<Schedule> {
 }
 
 export async function createSchedule(body: ScheduleCreate): Promise<Schedule> {
-  const { data } = await client.post<Schedule>('/schedules', body);
+  const { data } = await client.post<Schedule>('/schedules/', body);
   return data;
 }
 
