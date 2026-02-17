@@ -2,12 +2,14 @@
 """
 Lightweight HTTP deployer — runs inside Docker, triggers git pull.
 
-Listens on port 9000. POST /deploy runs `git pull`, waits for
-uvicorn reload, then runs system health checks automatically.
+Listens on port 9000. All POST/PUT endpoints require DEPLOY_TOKEN auth.
 
-POST /deploy  → git pull + health check
-GET  /status  → git log + branch info
-GET  /health  → deployer alive check
+POST /deploy        → git pull + health check
+POST /commit        → git add + commit + push (body: {"message": "...", "files": [...]})
+GET  /status        → git log + branch info
+GET  /file?path=... → read file contents
+PUT  /file?path=... → write file contents (body = file content)
+GET  /ls?path=...   → list directory
 """
 
 import http.server
@@ -17,6 +19,7 @@ import os
 import time
 import urllib.request
 import urllib.error
+import urllib.parse
 
 PORT = 9000
 REPO_DIR = "/repo"
@@ -188,11 +191,59 @@ class DeployHandler(http.server.BaseHTTPRequestHandler):
                 "celery_restart": celery_results,
             })
 
+        elif path == "/commit":
+            # Git add + commit + push
+            body = self._read_body()
+            data = json.loads(body) if body else {}
+            message = data.get("message", "update")
+            files = data.get("files", ["."])
+
+            results = {}
+            for f in files:
+                results[f"add_{f}"] = _run(["git", "add", f])
+            results["commit"] = _run(["git", "commit", "-m", message])
+            if results["commit"]["ok"]:
+                results["push"] = _run(["git", "push", "origin", "main"])
+            self._json_response(200, results)
+
+        else:
+            self._json_response(404, {"error": f"Unknown path: {path}"})
+
+    def do_PUT(self):
+        """Write files — requires auth."""
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path.rstrip("/")
+        params = urllib.parse.parse_qs(parsed.query)
+
+        if not self._verify_token():
+            self._json_response(401, {"error": "Unauthorized"})
+            return
+
+        if path == "/file":
+            file_path = params.get("path", [None])[0]
+            if not file_path:
+                self._json_response(400, {"error": "Missing ?path= parameter"})
+                return
+            full_path = os.path.join(REPO_DIR, file_path)
+            # Security: prevent path traversal
+            if not os.path.realpath(full_path).startswith(os.path.realpath(REPO_DIR)):
+                self._json_response(403, {"error": "Path traversal blocked"})
+                return
+            try:
+                os.makedirs(os.path.dirname(full_path), exist_ok=True)
+                content = self._read_body()
+                with open(full_path, "w") as f:
+                    f.write(content)
+                self._json_response(200, {"ok": True, "path": file_path, "size": len(content)})
+            except Exception as e:
+                self._json_response(500, {"error": str(e)})
         else:
             self._json_response(404, {"error": f"Unknown path: {path}"})
 
     def do_GET(self):
-        path = self.path.rstrip("/")
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path.rstrip("/")
+        params = urllib.parse.parse_qs(parsed.query)
 
         if path in ("", "/health", "/status"):
             status = _run(["git", "status", "--short"])
@@ -204,8 +255,66 @@ class DeployHandler(http.server.BaseHTTPRequestHandler):
                 "recent_commits": log.get("stdout", ""),
                 "dirty_files": status.get("stdout", ""),
             })
+
+        elif path == "/file":
+            # Read file — requires auth
+            if not self._verify_token():
+                self._json_response(401, {"error": "Unauthorized"})
+                return
+            file_path = params.get("path", [None])[0]
+            if not file_path:
+                self._json_response(400, {"error": "Missing ?path= parameter"})
+                return
+            full_path = os.path.join(REPO_DIR, file_path)
+            if not os.path.realpath(full_path).startswith(os.path.realpath(REPO_DIR)):
+                self._json_response(403, {"error": "Path traversal blocked"})
+                return
+            try:
+                with open(full_path, "r") as f:
+                    content = f.read()
+                self._json_response(200, {"ok": True, "path": file_path, "content": content})
+            except FileNotFoundError:
+                self._json_response(404, {"error": f"File not found: {file_path}"})
+            except Exception as e:
+                self._json_response(500, {"error": str(e)})
+
+        elif path == "/ls":
+            # List directory — requires auth
+            if not self._verify_token():
+                self._json_response(401, {"error": "Unauthorized"})
+                return
+            dir_path = params.get("path", [""])[0]
+            full_path = os.path.join(REPO_DIR, dir_path)
+            if not os.path.realpath(full_path).startswith(os.path.realpath(REPO_DIR)):
+                self._json_response(403, {"error": "Path traversal blocked"})
+                return
+            try:
+                entries = []
+                for name in sorted(os.listdir(full_path)):
+                    fp = os.path.join(full_path, name)
+                    entries.append({
+                        "name": name,
+                        "type": "dir" if os.path.isdir(fp) else "file",
+                        "size": os.path.getsize(fp) if os.path.isfile(fp) else None,
+                    })
+                self._json_response(200, {"ok": True, "path": dir_path, "entries": entries})
+            except Exception as e:
+                self._json_response(500, {"error": str(e)})
+
         else:
             self._json_response(404, {"error": f"Unknown path: {path}"})
+
+    def do_OPTIONS(self):
+        """CORS preflight."""
+        self.send_response(200)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+        self.end_headers()
+
+    def _read_body(self) -> str:
+        length = int(self.headers.get("Content-Length", 0))
+        return self.rfile.read(length).decode("utf-8") if length else ""
 
     def _json_response(self, code: int, data: dict):
         body = json.dumps(data, indent=2).encode()
@@ -219,7 +328,18 @@ class DeployHandler(http.server.BaseHTTPRequestHandler):
         print(f"[deployer] {args[0]}")
 
 
-if __name__ == "__main__":
+def _setup_git():
+    """Install git if missing (Debian/Ubuntu) and configure credentials."""
+    # Ensure git is available
+    try:
+        subprocess.run(["git", "--version"], capture_output=True, check=True)
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        print("[deployer] git not found, installing...")
+        subprocess.run(["apt-get", "update", "-qq"], capture_output=True)
+        subprocess.run(["apt-get", "install", "-y", "-qq", "git", "curl"],
+                       capture_output=True)
+        print("[deployer] git installed")
+
     subprocess.run(["git", "config", "--global", "safe.directory", REPO_DIR],
                     capture_output=True)
 
@@ -231,6 +351,10 @@ if __name__ == "__main__":
             capture_output=True,
         )
         print("[deployer] GitHub token configured")
+
+
+if __name__ == "__main__":
+    _setup_git()
 
     server = http.server.HTTPServer(("0.0.0.0", PORT), DeployHandler)
     print(f"[deployer] Listening on port {PORT}")
