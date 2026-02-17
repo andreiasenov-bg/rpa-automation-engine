@@ -98,6 +98,24 @@ def _wait_for_reload(max_wait: int = 15) -> bool:
     return False
 
 
+def _restart_celery() -> dict:
+    """Restart celery-beat and celery-worker via docker compose.
+
+    Unlike the API (which uses --reload), Celery workers don't auto-detect
+    code changes.  We need to restart them explicitly after a deploy.
+    """
+    results = {}
+    for service in ("celery-beat", "celery-worker"):
+        print(f"[deployer] Restarting {service}...")
+        r = _run(["docker", "compose", "restart", service], cwd=REPO_DIR)
+        results[service] = r
+        if r["ok"]:
+            print(f"[deployer] {service} restarted OK")
+        else:
+            print(f"[deployer] {service} restart FAILED: {r.get('stderr', r.get('error', '?'))}")
+    return results
+
+
 class DeployHandler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         path = self.path.rstrip("/")
@@ -112,12 +130,15 @@ class DeployHandler(http.server.BaseHTTPRequestHandler):
                 })
                 return
 
-            # Step 2: Wait for uvicorn to reload
+            # Step 2: Restart Celery workers (they don't auto-reload)
+            celery_results = _restart_celery()
+
+            # Step 3: Wait for uvicorn to reload
             print("[deployer] Waiting for uvicorn reload...")
             time.sleep(2)  # Give uvicorn time to detect changes
             backend_up = _wait_for_reload()
 
-            # Step 3: Run health check
+            # Step 4: Run health check
             health = {}
             if backend_up:
                 print("[deployer] Running post-deploy health check...")
@@ -127,6 +148,7 @@ class DeployHandler(http.server.BaseHTTPRequestHandler):
 
             self._json_response(200, {
                 "deploy": pull_result,
+                "celery_restart": celery_results,
                 "backend_reloaded": backend_up,
                 "health_check": health,
             })
@@ -137,8 +159,11 @@ class DeployHandler(http.server.BaseHTTPRequestHandler):
             self._json_response(200, health)
 
         elif path == "/restart-workers":
-            result = {"ok": True, "message": "API auto-reloads via --reload. Celery workers need manual container restart."}
-            self._json_response(200, result)
+            celery_results = _restart_celery()
+            self._json_response(200, {
+                "ok": True,
+                "celery_restart": celery_results,
+            })
 
         else:
             self._json_response(404, {"error": f"Unknown path: {path}"})
