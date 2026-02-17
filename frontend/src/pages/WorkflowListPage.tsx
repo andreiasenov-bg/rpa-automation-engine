@@ -211,16 +211,16 @@ export default function WorkflowListPage() {
       )}
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">RPA Robots</h1>
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white">RPA Robots</h1>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">{total} robot{total !== 1 ? 's' : ''} total</p>
         </div>
         <div className="flex gap-2">
-          <Link to="/create" className="inline-flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 hover:border-indigo-300 text-slate-700 dark:text-slate-200 text-sm font-medium rounded-lg transition">
+          <Link to="/create" className="inline-flex items-center gap-2 px-3 sm:px-4 py-2 sm:py-2.5 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 hover:border-indigo-300 text-slate-700 dark:text-slate-200 text-sm font-medium rounded-lg transition">
             <Wand2 className="w-4 h-4 text-indigo-500" /> AI Create
           </Link>
-          <button onClick={handleCreate} className="inline-flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition">
+          <button onClick={handleCreate} className="inline-flex items-center gap-2 px-3 sm:px-4 py-2 sm:py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition">
             <Plus className="w-4 h-4" /> New Robot
           </button>
         </div>

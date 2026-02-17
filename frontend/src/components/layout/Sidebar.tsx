@@ -17,6 +17,7 @@ import {
   FileText,
   Wand2,
   Globe,
+  X,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import { useLocale } from '@/i18n';
@@ -76,16 +77,34 @@ const navGroups: NavGroup[] = [
   },
 ];
 
-export default function Sidebar() {
+interface SidebarProps {
+  open: boolean;
+  onClose: () => void;
+}
+
+export default function Sidebar({ open, onClose }: SidebarProps) {
   const { user, logout } = useAuthStore();
   const { t } = useLocale();
 
   return (
-    <aside className="w-60 min-h-screen bg-slate-900 text-slate-300 flex flex-col">
-      {/* Logo */}
+    <aside
+      className={`
+        fixed inset-y-0 left-0 z-50 w-60 bg-slate-900 text-slate-300 flex flex-col
+        transform transition-transform duration-200 ease-in-out
+        lg:relative lg:translate-x-0 lg:z-auto
+        ${open ? 'translate-x-0' : '-translate-x-full'}
+      `}
+    >
+      {/* Logo + mobile close */}
       <div className="px-5 py-5 flex items-center gap-2 border-b border-slate-700/50">
         <Bot className="w-7 h-7 text-indigo-400" />
-        <span className="text-lg font-bold text-white tracking-tight">RPA Engine</span>
+        <span className="text-lg font-bold text-white tracking-tight flex-1">RPA Engine</span>
+        <button
+          onClick={onClose}
+          className="p-1.5 rounded-lg hover:bg-slate-800 lg:hidden"
+        >
+          <X className="w-5 h-5 text-slate-400" />
+        </button>
       </div>
 
       {/* Navigation */}

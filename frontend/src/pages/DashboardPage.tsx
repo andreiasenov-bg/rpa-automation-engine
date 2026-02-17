@@ -421,9 +421,9 @@ export default function DashboardPage() {
   return (
     <div>
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
             {t('dashboard.title')}
             <ContextualHelp
               id="dashboard-overview"
@@ -564,7 +564,7 @@ export default function DashboardPage() {
                 <Link
                   key={exec.id}
                   to={`/executions/${exec.id}`}
-                  className="px-5 py-3.5 flex items-center gap-4 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors group"
+                  className="px-3 sm:px-5 py-3 sm:py-3.5 flex items-center gap-3 sm:gap-4 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors group"
                 >
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-slate-900 dark:text-white truncate">
@@ -575,9 +575,9 @@ export default function DashboardPage() {
                       {formatTime(exec.started_at)}
                     </p>
                   </div>
-                  <div className="text-xs text-slate-500">{formatDuration(exec.duration_ms)}</div>
+                  <div className="text-xs text-slate-500 hidden sm:block">{formatDuration(exec.duration_ms)}</div>
                   <StatusBadge status={exec.status} />
-                  <ChevronRight className="w-4 h-4 text-slate-300 dark:text-slate-600 group-hover:text-indigo-500 transition-colors" />
+                  <ChevronRight className="w-4 h-4 text-slate-300 dark:text-slate-600 group-hover:text-indigo-500 transition-colors hidden sm:block" />
                 </Link>
               ))}
             </div>

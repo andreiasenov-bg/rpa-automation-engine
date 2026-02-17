@@ -361,31 +361,33 @@ export default function WorkflowDetailPage() {
       </div>
 
       {/* Header Card */}
-      <div className={`relative bg-gradient-to-br ${gradient} rounded-2xl p-6 text-white mb-6 shadow-lg`}>
-        <div className="flex items-start gap-5">
-          <div className="flex-shrink-0 w-16 h-16 bg-white/20 backdrop-blur rounded-xl flex items-center justify-center">
-            <Icon className="w-8 h-8" />
+      <div className={`relative bg-gradient-to-br ${gradient} rounded-2xl p-4 sm:p-6 text-white mb-6 shadow-lg`}>
+        <div className="flex flex-col sm:flex-row sm:items-start gap-4 sm:gap-5">
+          <div className="flex items-center gap-4 sm:block">
+            <div className="flex-shrink-0 w-12 h-12 sm:w-16 sm:h-16 bg-white/20 backdrop-blur rounded-xl flex items-center justify-center">
+              <Icon className="w-6 h-6 sm:w-8 sm:h-8" />
+            </div>
           </div>
           <div className="flex-1 min-w-0">
-            <h1 className="text-2xl font-bold truncate">{wf.name}</h1>
+            <h1 className="text-xl sm:text-2xl font-bold truncate">{wf.name}</h1>
             {wf.description && <p className="text-white/80 mt-1 text-sm line-clamp-2">{wf.description}</p>}
-            <div className="flex items-center gap-4 mt-3 text-sm text-white/70">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-4 mt-3 text-xs sm:text-sm text-white/70">
               <span>v{wf.version}</span>
-              <span>•</span>
+              <span className="hidden sm:inline">•</span>
               <span>{wf.step_count || wf.definition?.steps?.length || 0} steps</span>
-              <span>•</span>
+              <span className="hidden sm:inline">•</span>
               <span>{detail.total_executions} executions</span>
             </div>
           </div>
-          <div className="flex-shrink-0 flex gap-2">
+          <div className="flex gap-2 flex-shrink-0">
             {latestExec?.status === 'failed' && (
               <button onClick={handleOpenBugReport}
-                className="inline-flex items-center gap-2 px-4 py-2.5 bg-red-500/80 hover:bg-red-500 backdrop-blur rounded-xl font-semibold transition text-sm animate-pulse hover:animate-none">
-                <Bug className="w-4 h-4" /> Bug Report
+                className="inline-flex items-center gap-2 px-3 sm:px-4 py-2 sm:py-2.5 bg-red-500/80 hover:bg-red-500 backdrop-blur rounded-xl font-semibold transition text-sm animate-pulse hover:animate-none">
+                <Bug className="w-4 h-4" /> <span className="hidden xs:inline">Bug Report</span><span className="xs:hidden">Bug</span>
               </button>
             )}
             <button onClick={handleRun}
-              className="inline-flex items-center gap-2 px-5 py-2.5 bg-white/20 hover:bg-white/30 backdrop-blur rounded-xl font-semibold transition text-sm">
+              className="inline-flex items-center gap-2 px-4 sm:px-5 py-2 sm:py-2.5 bg-white/20 hover:bg-white/30 backdrop-blur rounded-xl font-semibold transition text-sm">
               <Play className="w-4 h-4" /> Run
             </button>
           </div>
@@ -428,7 +430,7 @@ export default function WorkflowDetailPage() {
                     <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Error Summary</h4>
                     <div className="bg-red-50 dark:bg-red-900/20 rounded-lg p-3">
                       <p className="text-sm text-red-700 dark:text-red-300 font-mono">{latestExec.error_message || 'Unknown error'}</p>
-                      <div className="flex gap-4 mt-2 text-xs text-red-500/70">
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs text-red-500/70">
                         <span>Execution: {latestExec.id?.substring(0, 8)}...</span>
                         <span>Duration: {formatDuration(latestExec.duration_ms)}</span>
                         <span>Trigger: {latestExec.trigger_type}</span>
@@ -526,7 +528,7 @@ export default function WorkflowDetailPage() {
             </h2>
             {results ? (
               <div className="space-y-3">
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div className="text-center p-3 bg-emerald-50 rounded-lg">
                     <p className="text-2xl font-bold text-emerald-600">{results.total_items}</p>
                     <p className="text-xs text-slate-500 mt-1">Records</p>
@@ -565,12 +567,12 @@ export default function WorkflowDetailPage() {
                 <div className="space-y-2">
                   {executions.map((ex) => (
                     <Link key={ex.id} to={`/executions/${ex.id}`}
-                      className="flex items-center justify-between p-3 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700/50 transition group">
+                      className="flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700/50 transition group gap-1 sm:gap-3">
                       <div className="flex items-center gap-3">
                         {execStatusBadge(ex.status)}
                         <span className="text-xs text-slate-500">{formatDate(ex.started_at)}</span>
                       </div>
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3 pl-0 sm:pl-0">
                         <span className="text-xs text-slate-400">{formatDuration(ex.duration_ms)}</span>
                         <span className="text-xs text-slate-400">{ex.trigger_type}</span>
                       </div>
@@ -612,7 +614,7 @@ export default function WorkflowDetailPage() {
                 <label className="text-xs text-slate-500">Description</label>
                 <p className="text-sm text-slate-700 dark:text-slate-300">{wf.description || 'No description'}</p>
               </div>
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
                   <label className="text-xs text-slate-500">Status</label>
                   <p className="mt-1">
@@ -632,7 +634,7 @@ export default function WorkflowDetailPage() {
                   <p className="text-sm font-medium text-slate-900 dark:text-white">{wf.step_count || wf.definition?.steps?.length || 0}</p>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs text-slate-500">Created</label>
                   <p className="text-sm text-slate-700 dark:text-slate-300">{formatDate(wf.created_at)}</p>
