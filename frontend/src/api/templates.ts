@@ -1,5 +1,18 @@
 import client from './client';
 
+export interface TemplateParameter {
+  key: string;
+  label: string;
+  type: 'url' | 'string' | 'number' | 'email' | 'select' | 'boolean' | 'credential' | 'textarea';
+  required: boolean;
+  placeholder?: string;
+  description?: string;
+  default?: unknown;
+  maps_to?: string;
+  credential_type?: string;
+  options?: Array<{ label: string; value: string }>;
+}
+
 export interface TemplateSummary {
   id: string;
   name: string;
@@ -10,6 +23,7 @@ export interface TemplateSummary {
   difficulty: 'beginner' | 'intermediate' | 'advanced';
   estimated_duration: string;
   step_count: number;
+  required_parameters: TemplateParameter[];
 }
 
 export interface TemplateDetail extends TemplateSummary {
@@ -20,6 +34,13 @@ export interface TemplateDetail extends TemplateSummary {
     config: Record<string, unknown>;
     depends_on?: string[];
   }>;
+}
+
+export interface ValidationResult {
+  valid: boolean;
+  errors: Array<{ key: string; message: string }>;
+  warnings: Array<{ key: string; message: string }>;
+  fields: Record<string, { status: 'ok' | 'error' | 'warning'; message: string }>;
 }
 
 export const templatesApi = {
@@ -45,15 +66,22 @@ export const templatesApi = {
     return Array.isArray(data) ? data : data?.categories ?? [];
   },
 
-  instantiate: async (
-    templateId: string,
-    name: string,
-    description?: string,
-  ): Promise<{ workflow_id: string; name: string; message: string }> => {
+  validate: async (templateId: string, parameters: Record<string, unknown>): Promise<ValidationResult> => {
+    const { data } = await client.post(`/templates/${templateId}/validate`, { parameters });
+    return data;
+  },
+
+  instantiate: async ({ templateId, name, description, parameters }: {
+    templateId: string;
+    name: string;
+    description?: string;
+    parameters?: Record<string, unknown>;
+  }): Promise<{ workflow_id: string; name: string }> => {
     const { data } = await client.post(`/templates/${templateId}/instantiate`, {
-      template_id: templateId,
       name,
       description,
+      template_id: templateId,
+      parameters,
     });
     return data;
   },
