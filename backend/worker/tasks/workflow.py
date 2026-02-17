@@ -226,7 +226,7 @@ async def _ai_diagnose_and_maybe_fix(
     AI-powered error diagnosis.
 
     1. Calls ClaudeClient.analyze() to understand the failure
-    2. Stores diagnosis in execution_journals table
+    2. Stores diagnosis in execution_journal table
     3. If auto-fixable (e.g. transient/rate-limit), triggers retry
 
     This runs in the worker after failure and is non-blocking.
@@ -309,16 +309,17 @@ Provide diagnosis as JSON:
     if not diagnosis:
         diagnosis = _rule_based_diagnosis(error_message)
 
-    # Store diagnosis in execution_journals
+    # Store diagnosis in execution_journal
     try:
         async with AsyncSessionLocal() as session:
             await session.execute(sa_text("""
-                INSERT INTO execution_journals
-                (id, execution_id, event_type, severity, details, created_at)
-                VALUES (gen_random_uuid(), :eid, 'ai_diagnosis', :severity,
+                INSERT INTO execution_journal
+                (id, execution_id, event_type, message, severity, details, created_at)
+                VALUES (gen_random_uuid(), :eid, 'ai_diagnosis', :msg, :severity,
                         CAST(:details AS jsonb), NOW())
             """), {
                 "eid": execution_id,
+                "msg": diagnosis.get("diagnosis", "AI diagnosis")[:500],
                 "severity": diagnosis.get("severity", "medium"),
                 "details": _json.dumps(diagnosis),
             })
@@ -350,12 +351,13 @@ Provide diagnosis as JSON:
             # Log auto-fix
             async with AsyncSessionLocal() as session:
                 await session.execute(sa_text("""
-                    INSERT INTO execution_journals
-                    (id, execution_id, event_type, severity, details, created_at)
-                    VALUES (gen_random_uuid(), :eid, 'ai_auto_fix', 'info',
+                    INSERT INTO execution_journal
+                    (id, execution_id, event_type, message, severity, details, created_at)
+                    VALUES (gen_random_uuid(), :eid, 'ai_auto_fix', :msg, 'info',
                             CAST(:details AS jsonb), NOW())
                 """), {
                     "eid": execution_id,
+                    "msg": f"AI auto-retry triggered: {new_exec_id}",
                     "details": _json.dumps({
                         "action": "retry",
                         "new_execution_id": new_exec_id,
