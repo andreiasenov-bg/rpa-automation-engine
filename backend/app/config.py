@@ -59,6 +59,10 @@ class Settings(BaseSettings):
     ALLOW_METHODS: list = ["*"]
     ALLOW_HEADERS: list = ["*"]
 
+    # Firebase Cloud Messaging (FCM) Settings
+    FCM_SERVICE_ACCOUNT_JSON: str = ""  # Path to Firebase service account JSON
+    FCM_PROJECT_ID: str = ""  # Firebase project ID
+
     # Storage Settings
     STORAGE_PATH: str = "./storage"  # Base path for workflow files (results, icons, docs)
 

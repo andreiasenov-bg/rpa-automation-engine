@@ -3,9 +3,11 @@
 Manage notification channels, send test notifications, view status.
 """
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from typing import Optional
+
+from app.dependencies import get_current_active_user
 
 from notifications.channels import NotificationChannel, NotificationPriority
 from notifications.manager import get_notification_manager
@@ -116,4 +118,74 @@ async def send_test_notification(channel: str = "websocket"):
         "success": result.success,
         "channel": channel,
         "error": result.error,
+    }
+
+
+# ─── FCM Device Token Management ────────────────────────────
+
+class FCMTokenRequest(BaseModel):
+    """Register a device token for push notifications."""
+    token: str
+    device_name: str = "Unknown"
+    platform: str = "web"  # web, android, ios
+
+
+# In-memory token store (per-org). In production, persist to DB.
+_device_tokens: dict[str, list[dict]] = {}
+
+
+@router.post("/fcm/register", summary="Register FCM device token")
+async def register_fcm_token(
+    request: FCMTokenRequest,
+    current_user=Depends(get_current_active_user),
+):
+    """Register a device token for push notifications."""
+    org_id = current_user.organization_id
+    user_id = current_user.id
+
+    if org_id not in _device_tokens:
+        _device_tokens[org_id] = []
+
+    # Remove existing entry for same token
+    _device_tokens[org_id] = [
+        t for t in _device_tokens[org_id] if t["token"] != request.token
+    ]
+
+    _device_tokens[org_id].append({
+        "token": request.token,
+        "user_id": user_id,
+        "device_name": request.device_name,
+        "platform": request.platform,
+    })
+
+    return {"success": True, "message": "Device registered for push notifications"}
+
+
+@router.delete("/fcm/unregister", summary="Unregister FCM device token")
+async def unregister_fcm_token(
+    token: str,
+    current_user=Depends(get_current_active_user),
+):
+    """Remove a device token."""
+    org_id = current_user.organization_id
+    if org_id in _device_tokens:
+        _device_tokens[org_id] = [
+            t for t in _device_tokens[org_id] if t["token"] != token
+        ]
+    return {"success": True}
+
+
+@router.get("/fcm/tokens", summary="List registered FCM tokens")
+async def list_fcm_tokens(
+    current_user=Depends(get_current_active_user),
+):
+    """List registered device tokens for the current organization."""
+    org_id = current_user.organization_id
+    tokens = _device_tokens.get(org_id, [])
+    return {
+        "tokens": [
+            {"device_name": t["device_name"], "platform": t["platform"]}
+            for t in tokens
+        ],
+        "count": len(tokens),
     }

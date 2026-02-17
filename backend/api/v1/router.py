@@ -38,6 +38,7 @@ from api.routes import triggers
 from api.routes import notifications
 from api.routes import task_types
 from api.routes import system_check
+from api.routes import api_keys
 
 api_v1_router = APIRouter()
 
@@ -224,6 +225,13 @@ api_v1_router.include_router(
     storage.router,
     prefix="/storage",
     tags=["Workflow Storage"],
+)
+
+# API Keys
+api_v1_router.include_router(
+    api_keys.router,
+    prefix="/api-keys",
+    tags=["API Keys"],
 )
 
 # System Health Check (post-deploy + daily)

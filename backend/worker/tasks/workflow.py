@@ -141,6 +141,19 @@ def execute_workflow(
         except Exception:
             logger.error(f"Could not update failed status for {execution_id}")
 
+        # Send failure notification (async, non-blocking)
+        try:
+            loop.run_until_complete(
+                _send_fail_notification(
+                    execution_id=execution_id,
+                    workflow_id=workflow_id,
+                    organization_id=organization_id,
+                    error_message=error_msg,
+                )
+            )
+        except Exception as notify_exc:
+            logger.warning(f"Failed to send failure notification: {notify_exc}")
+
         # Only retry on transient errors, not on workflow logic errors
         if self.request.retries < self.max_retries and _is_transient_error(exc):
             raise self.retry(exc=exc)
@@ -149,6 +162,40 @@ def execute_workflow(
 
     finally:
         loop.close()
+
+
+async def _send_fail_notification(
+    execution_id: str,
+    workflow_id: str,
+    organization_id: str,
+    error_message: str,
+) -> None:
+    """Send notification to all configured channels when a workflow fails."""
+    from sqlalchemy import select
+    from db.session import AsyncSessionLocal
+    from db.models.workflow import Workflow
+    from notifications.manager import get_notification_manager
+
+    # Get workflow name
+    workflow_name = workflow_id[:8]
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(Workflow.name).where(Workflow.id == workflow_id)
+            )
+            row = result.scalar_one_or_none()
+            if row:
+                workflow_name = row
+    except Exception:
+        pass
+
+    manager = get_notification_manager()
+    await manager.notify_workflow_failed(
+        workflow_name=workflow_name,
+        execution_id=execution_id,
+        error=error_message[:500],
+        organization_id=organization_id,
+    )
 
 
 def _is_transient_error(exc: Exception) -> bool:

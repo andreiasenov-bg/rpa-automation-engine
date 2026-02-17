@@ -495,3 +495,80 @@ async def sync_to_google_sheets(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to sync: {str(e)}",
         )
+
+
+# ─── Performance Alerts ─────────────────────────────────────
+
+@router.get("/alerts", summary="Get workflow performance alerts")
+async def get_performance_alerts(
+    threshold: float = Query(50.0, ge=0, le=100, description="Success rate threshold (%)"),
+    days: int = Query(7, ge=1, le=90, description="Analysis period"),
+    min_runs: int = Query(3, ge=1, description="Minimum runs to trigger alert"),
+    current_user: TokenPayload = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get alerts for workflows whose success rate drops below threshold.
+
+    Returns a list of workflows that have failed more than expected,
+    with their stats and recommended actions.
+    """
+    cutoff = utc_now() - timedelta(days=days)
+
+    # Get per-workflow stats
+    stmt = (
+        select(
+            Execution.workflow_id,
+            func.count(Execution.id).label("total"),
+            func.sum(case((Execution.status == "completed", 1), else_=0)).label("ok"),
+            func.sum(case((Execution.status == "failed", 1), else_=0)).label("failed"),
+            func.max(Execution.created_at).label("last_run"),
+        )
+        .where(
+            Execution.organization_id == current_user.organization_id,
+            Execution.created_at >= cutoff,
+            Execution.is_deleted == False,
+        )
+        .group_by(Execution.workflow_id)
+    )
+    result = await db.execute(stmt)
+    rows = result.all()
+
+    alerts = []
+    for row in rows:
+        total = row.total
+        ok = row.ok or 0
+        failed = row.failed or 0
+        rate = (ok / total * 100) if total > 0 else 0
+
+        if total >= min_runs and rate < threshold:
+            # Get workflow name
+            wf_result = await db.execute(
+                select(Workflow.name).where(Workflow.id == row.workflow_id)
+            )
+            wf_name = wf_result.scalar_one_or_none() or row.workflow_id[:8]
+
+            severity = "critical" if rate < 20 else "warning" if rate < threshold else "info"
+
+            alerts.append({
+                "workflow_id": row.workflow_id,
+                "workflow_name": wf_name,
+                "total_runs": total,
+                "successful": ok,
+                "failed": failed,
+                "success_rate": round(rate, 1),
+                "threshold": threshold,
+                "severity": severity,
+                "last_run": str(row.last_run) if row.last_run else None,
+                "message": f"{wf_name}: {rate:.0f}% success rate ({failed} failures in {days}d)",
+            })
+
+    # Sort by severity (critical first)
+    severity_order = {"critical": 0, "warning": 1, "info": 2}
+    alerts.sort(key=lambda a: (severity_order.get(a["severity"], 9), a["success_rate"]))
+
+    return {
+        "alerts": alerts,
+        "count": len(alerts),
+        "threshold": threshold,
+        "period_days": days,
+    }

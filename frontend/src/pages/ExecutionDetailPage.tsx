@@ -340,6 +340,175 @@ function StepTimeline({ steps, totalDurationMs }: { steps: StepInfo[]; totalDura
   );
 }
 
+/* ─── Retry Visualization Timeline ─── */
+
+interface RetryAttempt {
+  attempt: number;
+  status: 'completed' | 'failed' | 'running' | 'pending';
+  started_at?: string;
+  completed_at?: string;
+  duration_ms?: number;
+  error?: string;
+  trigger: string; // 'auto' | 'manual' | 'initial'
+}
+
+function RetryTimeline({ execution }: { execution: Execution }) {
+  const retryCount = execution.retry_count || 0;
+
+  // Build retry attempts from execution metadata
+  const attempts: RetryAttempt[] = [];
+
+  // Initial attempt is always #1
+  attempts.push({
+    attempt: 1,
+    status: retryCount === 0 ? (execution.status as RetryAttempt['status']) : 'failed',
+    started_at: execution.started_at,
+    completed_at: retryCount === 0 ? execution.completed_at : undefined,
+    duration_ms: retryCount === 0 ? execution.duration_ms : undefined,
+    error: retryCount > 0 ? 'Failed — triggered retry' : (execution.status === 'failed' ? execution.error_message : undefined),
+    trigger: 'initial',
+  });
+
+  // Retry attempts (from metadata if available, else synthesize)
+  const retryHistory = (execution as any).retry_history || [];
+  for (let i = 0; i < retryCount; i++) {
+    const hist = retryHistory[i];
+    const isLast = i === retryCount - 1;
+    attempts.push({
+      attempt: i + 2,
+      status: hist?.status || (isLast ? (execution.status as RetryAttempt['status']) : 'failed'),
+      started_at: hist?.started_at,
+      completed_at: hist?.completed_at || (isLast ? execution.completed_at : undefined),
+      duration_ms: hist?.duration_ms || (isLast ? execution.duration_ms : undefined),
+      error: hist?.error || (!isLast ? 'Failed — triggered retry' : (execution.status === 'failed' ? execution.error_message : undefined)),
+      trigger: hist?.trigger || 'auto',
+    });
+  }
+
+  if (attempts.length <= 1 && retryCount === 0) {
+    return (
+      <div className="text-center py-10">
+        <RotateCcw className="w-8 h-8 text-slate-300 dark:text-slate-600 mx-auto mb-2" />
+        <p className="text-sm text-slate-500 dark:text-slate-400">No retry attempts for this execution</p>
+        <p className="text-xs text-slate-400 mt-1">Retries happen automatically when transient errors occur</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Summary stats */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
+          <p className="text-[10px] text-slate-400 uppercase tracking-wider mb-1">Total Attempts</p>
+          <p className="text-2xl font-bold text-slate-900 dark:text-white">{attempts.length}</p>
+        </div>
+        <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
+          <p className="text-[10px] text-slate-400 uppercase tracking-wider mb-1">Retries</p>
+          <p className="text-2xl font-bold text-amber-600">{retryCount}</p>
+        </div>
+        <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
+          <p className="text-[10px] text-slate-400 uppercase tracking-wider mb-1">Final Status</p>
+          <StatusBadge status={execution.status} />
+        </div>
+        <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
+          <p className="text-[10px] text-slate-400 uppercase tracking-wider mb-1">Total Duration</p>
+          <p className="text-lg font-bold text-slate-900 dark:text-white font-mono">{formatDuration(execution.duration_ms)}</p>
+        </div>
+      </div>
+
+      {/* Timeline */}
+      <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
+        <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-1.5">
+          <RotateCcw className="w-3 h-3" /> Retry Timeline
+        </h3>
+        <div className="space-y-0">
+          {attempts.map((attempt, idx) => {
+            const isLast = idx === attempts.length - 1;
+            const statusCfg = STATUS_CONFIG[attempt.status] || STATUS_CONFIG.pending;
+            const Icon = statusCfg.icon;
+
+            return (
+              <div key={idx} className="flex gap-3">
+                {/* Timeline connector */}
+                <div className="flex flex-col items-center">
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${statusCfg.bg} ${statusCfg.border} border-2`}>
+                    {attempt.status === 'running' ? (
+                      <Loader2 className={`w-4 h-4 ${statusCfg.color} animate-spin`} />
+                    ) : (
+                      <Icon className={`w-4 h-4 ${statusCfg.color}`} />
+                    )}
+                  </div>
+                  {!isLast && (
+                    <div className="w-px flex-1 bg-slate-200 dark:bg-slate-700 my-1 min-h-[20px]" />
+                  )}
+                </div>
+
+                {/* Attempt card */}
+                <div className={`flex-1 pb-4 ${!isLast ? '' : ''}`}>
+                  <div className={`rounded-lg border ${
+                    attempt.status === 'failed'
+                      ? 'border-red-200 dark:border-red-800 bg-red-50/50 dark:bg-red-900/10'
+                      : attempt.status === 'completed'
+                        ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-900/10'
+                        : 'border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50'
+                  } px-4 py-3`}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold text-slate-900 dark:text-white">
+                          Attempt #{attempt.attempt}
+                        </span>
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${
+                          attempt.trigger === 'initial'
+                            ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+                            : attempt.trigger === 'manual'
+                              ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
+                              : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+                        }`}>
+                          {attempt.trigger === 'initial' ? 'Initial Run' : attempt.trigger === 'manual' ? 'Manual Retry' : 'Auto Retry'}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {attempt.duration_ms != null && (
+                          <span className="text-xs font-mono text-slate-500">{formatDuration(attempt.duration_ms)}</span>
+                        )}
+                        <StatusBadge status={attempt.status} />
+                      </div>
+                    </div>
+
+                    {/* Timestamps */}
+                    {attempt.started_at && (
+                      <div className="flex gap-4 mt-2 text-[10px] text-slate-400">
+                        <span>Started: {formatDatetime(attempt.started_at)}</span>
+                        {attempt.completed_at && <span>Ended: {formatDatetime(attempt.completed_at)}</span>}
+                      </div>
+                    )}
+
+                    {/* Error */}
+                    {attempt.error && (
+                      <div className="mt-2 text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded px-2.5 py-1.5 font-mono">
+                        {attempt.error}
+                      </div>
+                    )}
+
+                    {/* Arrow to next retry */}
+                    {!isLast && attempt.status === 'failed' && (
+                      <div className="mt-2 flex items-center gap-1.5 text-[10px] text-amber-600 dark:text-amber-400">
+                        <RotateCcw className="w-3 h-3" />
+                        <span>Retrying after {((attempts[idx + 1]?.attempt || 2) - 1) * 30}s delay...</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ─── Data Tab: Results viewer with table, search, sort, export ─── */
 
 interface DataRow {
@@ -1393,7 +1562,7 @@ export default function ExecutionDetailPage() {
   const [execution, setExecution] = useState<Execution | null>(null);
   const [steps, setSteps] = useState<StepInfo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'overview' | 'data' | 'comparison'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'retries' | 'data' | 'comparison'>('overview');
   const { on } = useWebSocket();
 
   const fetchExecution = useCallback(async () => {
@@ -1531,6 +1700,21 @@ export default function ExecutionDetailPage() {
         >
           <Activity className="w-3.5 h-3.5" /> Overview
         </button>
+        {(execution.retry_count > 0) && (
+          <button
+            onClick={() => setActiveTab('retries')}
+            className={`inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition -mb-px ${
+              activeTab === 'retries'
+                ? 'border-amber-500 text-amber-600 dark:text-amber-400'
+                : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+            }`}
+          >
+            <RotateCcw className="w-3.5 h-3.5" /> Retries
+            <span className="ml-1 inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 text-[10px] font-bold">
+              {execution.retry_count}
+            </span>
+          </button>
+        )}
         <button
           onClick={() => setActiveTab('data')}
           className={`inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition -mb-px ${
@@ -1554,7 +1738,9 @@ export default function ExecutionDetailPage() {
       </div>
 
       {/* Tab content */}
-      {activeTab === 'overview' ? (
+      {activeTab === 'retries' ? (
+        <RetryTimeline execution={execution} />
+      ) : activeTab === 'overview' ? (
         <>
           {/* Progress bar */}
           <div className="mb-6">

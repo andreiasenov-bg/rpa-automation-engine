@@ -35,6 +35,7 @@ class NotificationChannel(str, Enum):
     SLACK = "slack"
     WEBHOOK = "webhook"
     WEBSOCKET = "websocket"
+    FCM = "fcm"
     IN_APP = "in_app"
 
 
@@ -396,4 +397,175 @@ class WebSocketChannel(BaseChannel):
             )
 
     async def validate_config(self, config: dict) -> tuple[bool, Optional[str]]:
+        return True, None
+
+
+# ─── Firebase Cloud Messaging (FCM) Channel ──────────────────
+
+class FCMChannel(BaseChannel):
+    """Send push notifications via Firebase Cloud Messaging (FCM v1 HTTP API).
+
+    Config:
+        service_account_json: Path to Firebase service account JSON file
+        project_id: Firebase project ID
+
+    Device tokens are stored per-user and passed via notification.recipient
+    or notification.metadata["device_tokens"].
+    """
+
+    channel_type = NotificationChannel.FCM
+
+    def __init__(self, config: dict = None):
+        self.config = config or {}
+        self._access_token: Optional[str] = None
+        self._token_expiry: float = 0
+
+    async def _get_access_token(self) -> str:
+        """Get a valid OAuth2 access token for FCM v1 API.
+
+        Uses the service account credentials to generate a short-lived token.
+        Caches the token until it expires.
+        """
+        import time
+
+        if self._access_token and time.time() < self._token_expiry - 60:
+            return self._access_token
+
+        try:
+            from google.oauth2 import service_account
+            from google.auth.transport.requests import Request
+
+            sa_path = self.config.get("service_account_json", "")
+            credentials = service_account.Credentials.from_service_account_file(
+                sa_path,
+                scopes=["https://www.googleapis.com/auth/firebase.messaging"],
+            )
+            credentials.refresh(Request())
+            self._access_token = credentials.token
+            self._token_expiry = credentials.expiry.timestamp() if credentials.expiry else time.time() + 3500
+            return self._access_token
+        except Exception as exc:
+            logger.error("FCM token refresh failed: %s", exc)
+            raise
+
+    async def send(self, notification: Notification) -> DeliveryResult:
+        """Send push notification via FCM v1 HTTP API."""
+        try:
+            project_id = self.config.get("project_id")
+            if not project_id:
+                return DeliveryResult(
+                    success=False,
+                    channel=self.channel_type,
+                    recipient=notification.recipient,
+                    error="FCM project_id not configured",
+                )
+
+            # Device tokens: from recipient (single) or metadata (multiple)
+            tokens = []
+            if notification.recipient:
+                tokens.append(notification.recipient)
+            if notification.metadata.get("device_tokens"):
+                tokens.extend(notification.metadata["device_tokens"])
+
+            if not tokens:
+                return DeliveryResult(
+                    success=False,
+                    channel=self.channel_type,
+                    recipient="",
+                    error="No device tokens provided",
+                )
+
+            access_token = await self._get_access_token()
+            url = f"https://fcm.googleapis.com/v1/projects/{project_id}/messages:send"
+
+            # Priority mapping
+            android_priority = "high" if notification.priority in (
+                NotificationPriority.HIGH, NotificationPriority.CRITICAL
+            ) else "normal"
+
+            sent = 0
+            errors = []
+
+            async with httpx.AsyncClient(timeout=10) as client:
+                for token in tokens:
+                    payload = {
+                        "message": {
+                            "token": token,
+                            "notification": {
+                                "title": notification.title,
+                                "body": notification.message,
+                            },
+                            "data": {
+                                k: str(v) for k, v in (notification.metadata or {}).items()
+                                if k != "device_tokens"
+                            },
+                            "android": {
+                                "priority": android_priority,
+                                "notification": {
+                                    "click_action": "OPEN_DASHBOARD",
+                                    "channel_id": "rpa_alerts",
+                                },
+                            },
+                            "webpush": {
+                                "headers": {"Urgency": android_priority},
+                                "notification": {
+                                    "icon": "/icons/rpa-icon-192.png",
+                                    "badge": "/icons/rpa-badge-72.png",
+                                    "requireInteraction": notification.priority in (
+                                        NotificationPriority.HIGH, NotificationPriority.CRITICAL
+                                    ),
+                                },
+                            },
+                        }
+                    }
+
+                    response = await client.post(
+                        url,
+                        json=payload,
+                        headers={
+                            "Authorization": f"Bearer {access_token}",
+                            "Content-Type": "application/json",
+                        },
+                    )
+
+                    if response.status_code == 200:
+                        sent += 1
+                    else:
+                        errors.append(f"{token[:20]}...: HTTP {response.status_code}")
+                        logger.warning(
+                            "FCM send failed for token %s...: %s",
+                            token[:20],
+                            response.text,
+                        )
+
+            if sent > 0:
+                return DeliveryResult(
+                    success=True,
+                    channel=self.channel_type,
+                    recipient=f"{sent}/{len(tokens)} devices",
+                    message=f"FCM push sent to {sent} device(s)",
+                    delivered_at=datetime.now(timezone.utc).isoformat(),
+                )
+            else:
+                return DeliveryResult(
+                    success=False,
+                    channel=self.channel_type,
+                    recipient=f"0/{len(tokens)} devices",
+                    error="; ".join(errors[:3]),
+                )
+
+        except Exception as e:
+            logger.error("FCM send failed: %s", e)
+            return DeliveryResult(
+                success=False,
+                channel=self.channel_type,
+                recipient=notification.recipient,
+                error=str(e),
+            )
+
+    async def validate_config(self, config: dict) -> tuple[bool, Optional[str]]:
+        if not config.get("project_id"):
+            return False, "Missing project_id"
+        if not config.get("service_account_json"):
+            return False, "Missing service_account_json path"
         return True, None

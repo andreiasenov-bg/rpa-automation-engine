@@ -11,6 +11,7 @@ from notifications.channels import (
     BaseChannel,
     DeliveryResult,
     EmailChannel,
+    FCMChannel,
     Notification,
     NotificationChannel,
     NotificationPriority,
@@ -58,6 +59,9 @@ class NotificationManager:
 
         if "webhook" in config:
             self.register_channel(WebhookChannel(config["webhook"]))
+
+        if "fcm" in config:
+            self.register_channel(FCMChannel(config["fcm"]))
 
         # WebSocket is registered separately with a connection manager
         self._initialized = True
@@ -171,14 +175,29 @@ class NotificationManager:
         organization_id: str,
         channels: list[NotificationChannel] = None,
     ) -> list[DeliveryResult]:
-        """Send notification when a workflow fails."""
-        channels = channels or [NotificationChannel.WEBSOCKET, NotificationChannel.SLACK]
+        """Send notification when a workflow fails.
+
+        Dispatches to WebSocket (real-time), Slack, and FCM (push) by default.
+        """
+        default_channels = [NotificationChannel.WEBSOCKET, NotificationChannel.SLACK]
+        # Add FCM if configured
+        if NotificationChannel.FCM in self._channels:
+            default_channels.append(NotificationChannel.FCM)
+        # Add Email if configured
+        if NotificationChannel.EMAIL in self._channels:
+            default_channels.append(NotificationChannel.EMAIL)
+
+        channels = channels or default_channels
         return await self.send_multi(
             title=f"Workflow FAILED: {workflow_name}",
             message=f"Execution {execution_id[:8]} failed: {error}",
             channels=channels,
             priority=NotificationPriority.HIGH,
-            metadata={"execution_id": execution_id, "error": error},
+            metadata={
+                "execution_id": execution_id,
+                "error": error,
+                "type": "execution_failed",
+            },
             organization_id=organization_id,
         )
 

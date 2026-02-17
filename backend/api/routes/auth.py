@@ -4,9 +4,13 @@ from fastapi import APIRouter, HTTPException, status, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 import logging
 
+from pydantic import BaseModel as PydanticBaseModel
+
 from core.security import (
     create_access_token,
     create_refresh_token,
+    hash_password,
+    verify_password,
     verify_token,
     TokenPayload,
 )
@@ -178,3 +182,43 @@ async def get_current_user_info(
         roles=[r.name for r in user.roles] if user.roles else [],
         created_at=user.created_at,
     )
+
+
+class ChangePasswordRequest(PydanticBaseModel):
+    current_password: str
+    new_password: str
+
+
+@router.post("/change-password")
+async def change_password(
+    request: ChangePasswordRequest,
+    current_user=Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Change the current user's password."""
+    from db.models.user import User
+    from sqlalchemy import select
+
+    if len(request.new_password) < 6:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must be at least 6 characters",
+        )
+
+    result = await db.execute(select(User).where(User.id == current_user.id))
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if not verify_password(request.current_password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect",
+        )
+
+    user.password_hash = hash_password(request.new_password)
+    await db.commit()
+
+    logger.info("Password changed for user %s", user.email)
+    return {"success": True, "message": "Password changed successfully"}
