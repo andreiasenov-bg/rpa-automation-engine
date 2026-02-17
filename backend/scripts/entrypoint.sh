@@ -36,7 +36,14 @@ python -m scripts.seed 2>&1 || {
     echo "[entrypoint] WARNING: Seed script failed (may already be seeded)"
 }
 
-# Start application based on role
+# If docker-compose passes an explicit command, run it directly.
+# This lets `command: uvicorn ... --reload` work from compose.
+if [ $# -gt 0 ]; then
+    echo "[entrypoint] Running command from compose: $*"
+    exec "$@"
+fi
+
+# Otherwise, start application based on APP_ROLE
 ROLE="${APP_ROLE:-api}"
 
 case "$ROLE" in

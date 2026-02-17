@@ -107,6 +107,19 @@ services:
       celery -A worker.celery_app beat
       --loglevel=info
 
+  deployer:
+    image: python:3.11-slim
+    container_name: rpa-deployer
+    working_dir: /repo
+    ports:
+      - "9000:9000"
+    volumes:
+      - .:/repo
+    environment:
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+    command: python /repo/scripts/deployer.py
+    restart: unless-stopped
+
   frontend:
     image: node:20-alpine
     container_name: rpa-frontend
