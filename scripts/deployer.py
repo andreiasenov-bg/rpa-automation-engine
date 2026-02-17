@@ -21,6 +21,8 @@ import urllib.error
 PORT = 9000
 REPO_DIR = "/repo"
 BACKEND_URL = "http://backend:8000"
+# Deployer authentication token (required)
+DEPLOY_TOKEN = os.environ.get("DEPLOY_TOKEN", "")
 # Auth token is fetched on-demand for health checks
 _AUTH_CACHE = {"token": None, "expires": 0}
 
@@ -117,8 +119,29 @@ def _restart_celery() -> dict:
 
 
 class DeployHandler(http.server.BaseHTTPRequestHandler):
+    def _verify_token(self) -> bool:
+        """Verify Authorization: Bearer <DEPLOY_TOKEN> header.
+
+        Returns True if valid, False otherwise.
+        """
+        if not DEPLOY_TOKEN:
+            print("[deployer] WARNING: DEPLOY_TOKEN not set!")
+            return False
+
+        auth_header = self.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return False
+
+        token = auth_header[7:]  # Remove "Bearer " prefix
+        return token == DEPLOY_TOKEN
+
     def do_POST(self):
         path = self.path.rstrip("/")
+
+        # All POST endpoints require authentication
+        if not self._verify_token():
+            self._json_response(401, {"error": "Unauthorized: missing or invalid token"})
+            return
 
         if path in ("", "/deploy", "/pull"):
             # Step 1: Git pull

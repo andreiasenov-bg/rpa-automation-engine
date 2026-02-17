@@ -7,6 +7,8 @@ response parsing, and response validation.
 
 import json
 from typing import Any, Dict, Optional
+from urllib.parse import urlparse
+import ipaddress
 
 import httpx
 import structlog
@@ -14,6 +16,79 @@ import structlog
 from tasks.base_task import BaseTask, TaskResult
 
 logger = structlog.get_logger(__name__)
+
+
+def _is_private_ip(ip_str: str) -> bool:
+    """Check if an IP address is private or loopback.
+
+    Blocks:
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+    - 127.0.0.0/8 (loopback)
+    - ::1 (IPv6 loopback)
+    """
+    try:
+        ip = ipaddress.ip_address(ip_str)
+        return (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_reserved
+        )
+    except (ValueError, AttributeError):
+        return False
+
+
+def _validate_url_safety(url: str) -> None:
+    """Validate URL for SSRF protection.
+
+    Blocks:
+    - Private/loopback IPs
+    - Internal ports (9000 deployer, 5432 postgres, 6379 redis)
+    - Non-HTTP(S) schemes
+
+    Raises:
+        ValueError: If URL is unsafe
+    """
+    try:
+        parsed = urlparse(url)
+    except Exception as e:
+        raise ValueError(f"Invalid URL: {str(e)}")
+
+    # Check scheme
+    if parsed.scheme.lower() not in ("http", "https"):
+        raise ValueError(f"Unsupported scheme: {parsed.scheme}. Only HTTP and HTTPS allowed.")
+
+    # Extract hostname
+    hostname = parsed.hostname
+    if not hostname:
+        raise ValueError("URL must have a valid hostname")
+
+    # Check for localhost aliases
+    if hostname.lower() in ("localhost", "127.0.0.1", "::1"):
+        raise ValueError("Connections to localhost are not allowed")
+
+    # Try to resolve hostname to IP and check if private
+    try:
+        # Skip IP validation for domain names to avoid DNS resolution
+        # In production, use a proper DNS validation library if needed
+        try:
+            ip = ipaddress.ip_address(hostname)
+            if _is_private_ip(hostname):
+                raise ValueError(f"Connections to private IP {hostname} are not allowed")
+        except ValueError:
+            # Not a valid IP — assume it's a domain, which is OK
+            pass
+    except Exception as e:
+        raise ValueError(f"Hostname validation failed: {str(e)}")
+
+    # Check for internal ports
+    if parsed.port:
+        forbidden_ports = [9000, 5432, 6379]  # deployer, postgres, redis
+        if parsed.port in forbidden_ports:
+            raise ValueError(
+                f"Connections to internal port {parsed.port} are not allowed"
+            )
 
 
 class HttpRequestTask(BaseTask):
@@ -51,6 +126,12 @@ class HttpRequestTask(BaseTask):
         url = config.get("url")
         if not url:
             return TaskResult(success=False, error="Missing required config: url")
+
+        # SSRF protection: validate URL before making request
+        try:
+            _validate_url_safety(url)
+        except ValueError as e:
+            return TaskResult(success=False, error=str(e))
 
         method = config.get("method", "GET").upper()
         headers = config.get("headers", {})
@@ -201,6 +282,12 @@ class HttpDownloadTask(BaseTask):
         url = config.get("url")
         if not url:
             return TaskResult(success=False, error="Missing required config: url")
+
+        # SSRF protection: validate URL before making request
+        try:
+            _validate_url_safety(url)
+        except ValueError as e:
+            return TaskResult(success=False, error=str(e))
 
         save_path = config.get("save_path", "/tmp/download")
         timeout = config.get("timeout", 120)

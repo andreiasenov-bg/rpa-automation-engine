@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.config import get_settings
 from app.dependencies import get_current_active_user, get_db
 
 logger = logging.getLogger(__name__)
@@ -78,8 +79,9 @@ def require_permission(permission: str):
     """FastAPI dependency that enforces a single permission.
 
     Returns 403 if the user lacks the required permission.
-    Falls back to allowing access if no roles/permissions are configured
-    (graceful degradation for bootstrapping).
+    In development/testing: falls back to allowing access if no roles/permissions
+    are configured (graceful degradation for bootstrapping).
+    In production: denies access if no permissions found.
     """
 
     async def _check(
@@ -89,15 +91,28 @@ def require_permission(permission: str):
         user_perms = await _get_user_permissions(
             current_user.sub, current_user.org_id, db
         )
+        settings = get_settings()
 
         # Graceful degradation: if no permissions exist at all (fresh install),
-        # allow access to prevent lockout
+        # allow access in development/testing to prevent lockout during bootstrap
         if not user_perms:
-            logger.debug(
-                "RBAC: No permissions found for user %s, allowing access (bootstrap mode)",
-                current_user.sub,
-            )
-            return current_user
+            if settings.is_production:
+                # In production, deny access if no permissions configured
+                logger.warning(
+                    "RBAC denied: user=%s has no permissions assigned (production mode)",
+                    current_user.email,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Missing required permission: {permission}",
+                )
+            else:
+                # In development/testing, allow access to prevent lockout during bootstrap
+                logger.debug(
+                    "RBAC: No permissions found for user %s, allowing access (bootstrap mode)",
+                    current_user.sub,
+                )
+                return current_user
 
         if not _check_permission(user_perms, permission):
             logger.warning(
@@ -117,7 +132,11 @@ def require_permission(permission: str):
 
 
 def require_any_permission(*permissions: str):
-    """FastAPI dependency that enforces at least one of the given permissions."""
+    """FastAPI dependency that enforces at least one of the given permissions.
+
+    In development/testing: allows access if no permissions found (bootstrap mode).
+    In production: denies access if no permissions found.
+    """
 
     async def _check(
         current_user=Depends(get_current_active_user),
@@ -126,9 +145,18 @@ def require_any_permission(*permissions: str):
         user_perms = await _get_user_permissions(
             current_user.sub, current_user.org_id, db
         )
+        settings = get_settings()
 
         if not user_perms:
-            return current_user
+            if settings.is_production:
+                # In production, deny access if no permissions configured
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Missing one of required permissions: {', '.join(permissions)}",
+                )
+            else:
+                # In development/testing, allow access to prevent lockout during bootstrap
+                return current_user
 
         for perm in permissions:
             if _check_permission(user_perms, perm):
@@ -143,7 +171,11 @@ def require_any_permission(*permissions: str):
 
 
 def require_all_permissions(*permissions: str):
-    """FastAPI dependency that enforces all of the given permissions."""
+    """FastAPI dependency that enforces all of the given permissions.
+
+    In development/testing: allows access if no permissions found (bootstrap mode).
+    In production: denies access if no permissions found.
+    """
 
     async def _check(
         current_user=Depends(get_current_active_user),
@@ -152,9 +184,18 @@ def require_all_permissions(*permissions: str):
         user_perms = await _get_user_permissions(
             current_user.sub, current_user.org_id, db
         )
+        settings = get_settings()
 
         if not user_perms:
-            return current_user
+            if settings.is_production:
+                # In production, deny access if no permissions configured
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Missing required permissions: {', '.join(permissions)}",
+                )
+            else:
+                # In development/testing, allow access to prevent lockout during bootstrap
+                return current_user
 
         missing = [p for p in permissions if not _check_permission(user_perms, p)]
         if missing:

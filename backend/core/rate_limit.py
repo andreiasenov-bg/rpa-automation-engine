@@ -171,15 +171,24 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return response
 
     def _get_identifier(self, request: Request) -> str:
-        """Get a unique identifier for the requestor."""
+        """Get a unique identifier for the requestor.
+
+        Uses direct client IP as primary source (not trusting X-Forwarded-For).
+        Only falls back to X-Forwarded-For if direct client is unavailable.
+        """
         # Try to get user ID from request state (set by auth middleware)
         user_id = getattr(request.state, "user_id", None)
         if user_id:
             return f"user:{user_id}"
 
-        # Fall back to client IP
+        # Use direct client IP (most reliable, not spoofable)
+        if request.client and request.client.host:
+            return f"ip:{request.client.host}"
+
+        # Only as fallback, use first IP from X-Forwarded-For if available
+        # This is less reliable but better than nothing
         forwarded = request.headers.get("X-Forwarded-For")
         if forwarded:
             return f"ip:{forwarded.split(',')[0].strip()}"
 
-        return f"ip:{request.client.host if request.client else 'unknown'}"
+        return f"ip:unknown"

@@ -31,8 +31,9 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
 
     # Security Settings
-    SECRET_KEY: str = "your-secret-key-change-this-in-production"
-    ENCRYPTION_KEY: str = "mhwWpnVSuXO2IZMsjOXx5Tg01C2g_sw9PNqYSeKHpls="
+    # MUST be set in environment for production; defaults only safe for development
+    SECRET_KEY: str = ""
+    ENCRYPTION_KEY: str = ""
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 hours
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
@@ -84,6 +85,24 @@ class Settings(BaseSettings):
     def cors_origins_list(self) -> list[str]:
         """Parse ALLOWED_ORIGINS string into a list."""
         return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",") if origin.strip()]
+
+    def validate_secrets(self) -> None:
+        """Validate that critical secrets are not using defaults in production.
+
+        Raises:
+            RuntimeError: If production environment has empty or default SECRET_KEY/ENCRYPTION_KEY
+        """
+        if self.is_production:
+            if not self.SECRET_KEY:
+                raise RuntimeError(
+                    "CRITICAL: SECRET_KEY environment variable must be set in production. "
+                    "Do not use default values."
+                )
+            if not self.ENCRYPTION_KEY:
+                raise RuntimeError(
+                    "CRITICAL: ENCRYPTION_KEY environment variable must be set in production. "
+                    "Do not use default values."
+                )
 
     class Config:
         """Pydantic config."""

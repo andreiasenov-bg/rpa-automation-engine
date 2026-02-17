@@ -29,6 +29,27 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["authentication"])
 
 
+def _validate_password_strength(password: str) -> str:
+    """Validate password meets minimum security requirements.
+
+    Returns: Empty string if valid
+    Raises: ValueError with message if invalid
+    """
+    if len(password) < 8:
+        raise ValueError("Password must be at least 8 characters long")
+
+    has_upper = any(c.isupper() for c in password)
+    has_lower = any(c.islower() for c in password)
+    has_digit = any(c.isdigit() for c in password)
+
+    if not (has_upper and has_lower and has_digit):
+        raise ValueError(
+            "Password must contain at least 1 uppercase letter, 1 lowercase letter, and 1 digit"
+        )
+
+    return ""
+
+
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 async def register(
     request: RegisterRequest,
@@ -39,6 +60,15 @@ async def register(
 
     Returns access and refresh tokens for the newly created user.
     """
+    # Validate password strength
+    try:
+        _validate_password_strength(request.password)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
     auth_svc = AuthService(db)
 
     try:
@@ -199,10 +229,13 @@ async def change_password(
     from db.models.user import User
     from sqlalchemy import select
 
-    if len(request.new_password) < 6:
+    # Validate new password strength
+    try:
+        _validate_password_strength(request.new_password)
+    except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Password must be at least 6 characters",
+            detail=str(e),
         )
 
     result = await db.execute(select(User).where(User.id == current_user.id))

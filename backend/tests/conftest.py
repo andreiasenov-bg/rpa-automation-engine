@@ -23,6 +23,7 @@ from sqlalchemy.orm import sessionmaker
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 os.environ.setdefault("SECRET_KEY", "test-secret-key-not-for-production")
+os.environ.setdefault("ENCRYPTION_KEY", "test-encryption-key-not-for-production")
 os.environ.setdefault("ENVIRONMENT", "testing")
 os.environ.setdefault("LOG_FORMAT", "colored")
 

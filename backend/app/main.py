@@ -22,6 +22,28 @@ from core.middleware import RequestTrackingMiddleware, setup_exception_handlers
 from core.metrics import MetricsMiddleware, metrics_router
 from core.rate_limit import RateLimitMiddleware
 from core.security_scanner import check_secrets_on_startup
+from starlette.middleware.base import BaseHTTPMiddleware
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Add security headers to all responses."""
+
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+
+        # Standard security headers
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Cache-Control"] = "no-store"
+
+        # Additional headers for production
+        settings = get_settings()
+        if settings.is_production:
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+
+        return response
 
 
 @asynccontextmanager
@@ -30,6 +52,13 @@ async def lifespan(app: FastAPI):
     # Startup
     settings = get_settings()
     setup_logging()
+
+    # Validate secrets are not using defaults in production
+    try:
+        settings.validate_secrets()
+    except RuntimeError as e:
+        print(f"[startup] FATAL: {e}")
+        raise
 
     # Security scan — blocks startup in production if critical secrets found
     try:
@@ -132,13 +161,16 @@ def create_app() -> FastAPI:
     # Request tracking middleware
     app.add_middleware(RequestTrackingMiddleware)
 
+    # Security headers middleware
+    app.add_middleware(SecurityHeadersMiddleware)
+
     # CORS middleware
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins_list,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+        allow_headers=["Content-Type", "Authorization", "X-Request-ID"],
     )
 
     # Global exception handlers

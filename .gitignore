@@ -73,6 +73,7 @@ celerybeat.pid
 *.pem
 *.key
 secrets/
+k8s/secrets.yaml
 
 # Playwright test artifacts
 frontend/test-results/

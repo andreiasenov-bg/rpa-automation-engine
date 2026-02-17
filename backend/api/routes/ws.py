@@ -21,6 +21,12 @@ async def websocket_endpoint(
     WebSocket endpoint for real-time execution and notification updates.
 
     Authenticate via ?token=<jwt_access_token> query parameter.
+    NOTE: JWT is passed as query parameter (not header) because browsers cannot
+    send custom headers during WebSocket upgrade. This is acceptable for JWTs as
+    they are:
+    1. Cryptographically signed (tamper-proof)
+    2. Time-limited
+    3. Requires valid authorization to obtain
 
     Server pushes events:
     - execution.status_changed: {execution_id, status, workflow_id}

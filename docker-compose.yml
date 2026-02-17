@@ -19,7 +19,7 @@ x-backend-common: &backend-common
     REDIS_HOST: redis
     REDIS_PORT: "6379"
     ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@rpa-engine.com}
-    ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123!}
+    ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD environment variable is required}
   depends_on:
     postgres:
       condition: service_healthy
@@ -37,7 +37,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-rpa_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rpa_secret_dev}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -50,7 +50,7 @@ services:
     image: redis:7-alpine
     container_name: rpa-redis
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -115,10 +115,10 @@ services:
       - "9000:9000"
     volumes:
       - .:/repo
-      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
-    command: sh -c "apt-get update -qq && apt-get install -y -qq git curl >/dev/null 2>&1 && curl -fsSL https://get.docker.com | sh -s -- --version 24.0 2>/dev/null || true && python /repo/scripts/deployer.py"
+      DEPLOY_TOKEN: ${DEPLOY_TOKEN:?DEPLOY_TOKEN environment variable is required}
+    command: sh -c "apt-get update -qq && apt-get install -y -qq git curl >/dev/null 2>&1 && python /repo/scripts/deployer.py"
     restart: unless-stopped
 
   frontend:

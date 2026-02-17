@@ -15,6 +15,8 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from app.config import get_settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -37,6 +39,7 @@ class RequestTrackingMiddleware(BaseHTTPMiddleware):
         except Exception as exc:
             # Catch unhandled exceptions
             duration_ms = (time.monotonic() - start_time) * 1000
+            settings = get_settings()
             logger.error(
                 "Unhandled exception",
                 extra={
@@ -48,10 +51,16 @@ class RequestTrackingMiddleware(BaseHTTPMiddleware):
                 },
                 exc_info=True,
             )
+            # In production, don't expose error details to client
+            if settings.is_production:
+                error_detail = "Internal server error"
+            else:
+                error_detail = str(exc) or "Internal server error"
+
             return JSONResponse(
                 status_code=500,
                 content={
-                    "detail": str(exc) or "Internal server error",
+                    "detail": error_detail,
                     "request_id": request_id,
                 },
                 headers={"X-Request-ID": request_id},
