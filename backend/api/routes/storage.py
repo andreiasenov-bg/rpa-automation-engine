@@ -157,13 +157,14 @@ async def get_latest_results(
         raise HTTPException(status_code=404, detail="Workflow not found")
 
     # Fetch from DB execution_states (authoritative source)
+    # Use latest COMPLETED execution — running executions have no state_data yet
     row = (await db.execute(sa_text(
         "SELECT e.id, e.status, e.started_at, e.completed_at, e.duration_ms, "
         "       es.state_data "
         "FROM executions e "
         "LEFT JOIN execution_states es ON es.execution_id = e.id "
-        "WHERE e.workflow_id = :wid "
-        "ORDER BY e.created_at DESC LIMIT 1"
+        "WHERE e.workflow_id = :wid AND e.status = 'completed' "
+        "ORDER BY e.completed_at DESC LIMIT 1"
     ), {"wid": workflow_id})).fetchone()
 
     if not row or not row[5]:
@@ -203,14 +204,15 @@ async def download_latest_results(
     if not wf:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
-    # Get latest execution + its full state_data from DB
+    # Get latest COMPLETED execution + its full state_data from DB
+    # Running executions have no state_data yet, so we skip them
     row = (await db.execute(sa_text(
         "SELECT e.id, e.status, e.started_at, e.completed_at, e.duration_ms, "
         "       es.state_data "
         "FROM executions e "
         "LEFT JOIN execution_states es ON es.execution_id = e.id "
-        "WHERE e.workflow_id = :wid "
-        "ORDER BY e.created_at DESC LIMIT 1"
+        "WHERE e.workflow_id = :wid AND e.status = 'completed' "
+        "ORDER BY e.completed_at DESC LIMIT 1"
     ), {"wid": workflow_id})).fetchone()
 
     if not row or not row[5]:
@@ -443,11 +445,18 @@ async def get_workflow_detail(
     } for r in schedule_rows]
 
     # Latest results summary — from DB execution_states (authoritative)
+    # Use latest COMPLETED execution (not just latest — a running execution has no state yet)
     results_summary = None
-    if row:  # row from latest execution query above
+    completed_row = (await db.execute(sa_text(
+        "SELECT id, status, trigger_type, started_at, completed_at, duration_ms "
+        "FROM executions WHERE workflow_id = :wid AND status = 'completed' "
+        "ORDER BY completed_at DESC LIMIT 1"
+    ), {"wid": workflow_id})).fetchone()
+
+    if completed_row:
         state_row = (await db.execute(sa_text(
             "SELECT state_data FROM execution_states WHERE execution_id = :eid LIMIT 1"
-        ), {"eid": str(row[0])})).fetchone()
+        ), {"eid": str(completed_row[0])})).fetchone()
 
         if state_row and state_row[0]:
             import json as _json
@@ -469,8 +478,8 @@ async def get_workflow_detail(
                         break
 
             results_summary = {
-                "saved_at": row[4].isoformat() if row[4] else (row[3].isoformat() if row[3] else None),
-                "execution_id": str(row[0]),
+                "saved_at": completed_row[4].isoformat() if completed_row[4] else (completed_row[3].isoformat() if completed_row[3] else None),
+                "execution_id": str(completed_row[0]),
                 "total_items": total_items,
                 "file_size": 0,  # Size will be calculated on download
             }
