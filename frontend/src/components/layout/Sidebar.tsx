@@ -1,3 +1,13 @@
+/**
+ * Sidebar — Main navigation drawer.
+ *
+ * Behaviour:
+ *  - Desktop (≥ lg): always visible, relative position, inline in flex layout
+ *  - Mobile (< lg): fixed position, slides in/out via layoutStore.sidebarOpen
+ *
+ * All state is managed through layoutStore (Zustand) — no props needed.
+ */
+
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -20,6 +30,7 @@ import {
   X,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
+import { useLayoutStore } from '@/stores/layoutStore';
 import { useLocale } from '@/i18n';
 
 interface NavItem {
@@ -77,13 +88,9 @@ const navGroups: NavGroup[] = [
   },
 ];
 
-interface SidebarProps {
-  open: boolean;
-  onClose: () => void;
-}
-
-export default function Sidebar({ open, onClose }: SidebarProps) {
+export default function Sidebar() {
   const { user, logout } = useAuthStore();
+  const { sidebarOpen, closeSidebar } = useLayoutStore();
   const { t } = useLocale();
 
   return (
@@ -92,7 +99,7 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
         fixed inset-y-0 left-0 z-50 w-60 bg-slate-900 text-slate-300 flex flex-col
         transform transition-transform duration-200 ease-in-out
         lg:relative lg:translate-x-0 lg:z-auto
-        ${open ? 'translate-x-0' : '-translate-x-full'}
+        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
       `}
     >
       {/* Logo + mobile close */}
@@ -100,8 +107,9 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
         <Bot className="w-7 h-7 text-indigo-400" />
         <span className="text-lg font-bold text-white tracking-tight flex-1">RPA Engine</span>
         <button
-          onClick={onClose}
+          onClick={closeSidebar}
           className="p-1.5 rounded-lg hover:bg-slate-800 lg:hidden"
+          aria-label="Close menu"
         >
           <X className="w-5 h-5 text-slate-400" />
         </button>

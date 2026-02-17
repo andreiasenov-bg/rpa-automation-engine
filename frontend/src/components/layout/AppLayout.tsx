@@ -1,4 +1,18 @@
-import { useState, useEffect, useCallback } from 'react';
+/**
+ * AppLayout — Root layout for all authenticated pages.
+ *
+ * Manages:
+ *  - Sidebar (drawer on mobile via layoutStore, inline on desktop)
+ *  - TopBar with hamburger + search
+ *  - Main content area with responsive padding
+ *  - Global overlays (search, chat, onboarding)
+ *
+ * Responsive breakpoint: lg (1024px)
+ *   < lg → sidebar hidden, hamburger visible, drawer mode
+ *   ≥ lg → sidebar inline, hamburger hidden
+ */
+
+import { useEffect } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
@@ -7,13 +21,15 @@ import GlobalSearch from '@/components/GlobalSearch';
 import ChatAssistant from '@/components/chat/ChatAssistant';
 import OnboardingTour from '@/components/help/OnboardingTour';
 import { useHelpStore } from '@/stores/helpStore';
+import { useLayoutStore } from '@/stores/layoutStore';
 
 export default function AppLayout() {
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const { sidebarOpen, closeSidebar, searchOpen, closeSearch, toggleSearch } =
+    useLayoutStore();
   const { onboardingCompleted, startOnboarding } = useHelpStore();
   const location = useLocation();
 
+  // Auto-start onboarding for new users
   useEffect(() => {
     if (!onboardingCompleted) {
       const timer = setTimeout(() => startOnboarding(), 1000);
@@ -23,7 +39,7 @@ export default function AppLayout() {
 
   // Close sidebar on route change (mobile)
   useEffect(() => {
-    setSidebarOpen(false);
+    closeSidebar();
   }, [location.pathname]);
 
   // Global Cmd/Ctrl+K listener to open search
@@ -31,32 +47,27 @@ export default function AppLayout() {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
-        setSearchOpen((prev) => !prev);
+        toggleSearch();
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, []);
-
-  const handleCloseSearch = useCallback(() => setSearchOpen(false), []);
+  }, [toggleSearch]);
 
   return (
     <div className="flex min-h-screen">
-      {/* Mobile overlay */}
+      {/* Mobile overlay — closes sidebar on tap */}
       {sidebarOpen && (
         <div
           className="fixed inset-0 z-40 bg-black/50 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
+          onClick={closeSidebar}
         />
       )}
 
-      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      <Sidebar />
 
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-        <TopBar
-          onSearchOpen={() => setSearchOpen(true)}
-          onMenuOpen={() => setSidebarOpen(true)}
-        />
+        <TopBar />
         <main className="flex-1 overflow-auto">
           <div className="p-3 sm:p-4 md:p-6 max-w-7xl mx-auto">
             <Breadcrumb />
@@ -64,7 +75,8 @@ export default function AppLayout() {
           </div>
         </main>
       </div>
-      {searchOpen && <GlobalSearch onClose={handleCloseSearch} />}
+
+      {searchOpen && <GlobalSearch onClose={closeSearch} />}
       <ChatAssistant />
       <OnboardingTour />
     </div>

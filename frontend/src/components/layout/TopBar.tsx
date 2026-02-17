@@ -1,27 +1,30 @@
 /**
- * TopBar — Global header with search trigger + notification center.
- * Includes hamburger menu button on mobile.
+ * TopBar — Global header with hamburger, search, and notifications.
+ *
+ * Uses layoutStore for sidebar toggle and search — no props needed.
+ *
+ * Responsive:
+ *  - Hamburger (☰) visible only on mobile (< lg)
+ *  - Search bar adapts width: full on mobile, 16rem on sm, 20rem on md+
+ *  - Kbd shortcut badge hidden on mobile
  */
 
 import { Search, Command, Menu } from 'lucide-react';
 import NotificationCenter from '@/components/NotificationCenter';
+import { useLayoutStore } from '@/stores/layoutStore';
 import { useLocale } from '@/i18n';
 
-interface TopBarProps {
-  onSearchOpen: () => void;
-  onMenuOpen: () => void;
-}
-
-export default function TopBar({ onSearchOpen, onMenuOpen }: TopBarProps) {
+export default function TopBar() {
+  const { openSidebar, openSearch } = useLayoutStore();
   const { t } = useLocale();
 
   return (
     <header className="h-14 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 flex items-center justify-between px-3 sm:px-4 md:px-6 gap-2">
       {/* Left side: hamburger + search */}
       <div className="flex items-center gap-2 flex-1 min-w-0">
-        {/* Mobile hamburger */}
+        {/* Mobile hamburger — hidden on lg+ */}
         <button
-          onClick={onMenuOpen}
+          onClick={openSidebar}
           className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 lg:hidden flex-shrink-0"
           aria-label="Open menu"
         >
@@ -30,7 +33,7 @@ export default function TopBar({ onSearchOpen, onMenuOpen }: TopBarProps) {
 
         {/* Search trigger */}
         <button
-          onClick={onSearchOpen}
+          onClick={openSearch}
           className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 text-sm text-slate-400 hover:border-slate-300 hover:text-slate-500 transition-colors w-full max-w-[16rem] sm:max-w-xs md:w-64"
         >
           <Search className="w-4 h-4 flex-shrink-0" />
