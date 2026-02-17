@@ -33,6 +33,7 @@ const ExecutionDetailPage = lazy(() => import('@/pages/ExecutionDetailPage'));
 const AICreatorPage = lazy(() => import('@/pages/AICreatorPage'));
 const IntegrationsPage = lazy(() => import('@/pages/IntegrationsPage'));
 const WorkflowFilesPage = lazy(() => import('@/pages/WorkflowFilesPage'));
+const ReportsPage = lazy(() => import('@/pages/ReportsPage'));
 
 import ErrorBoundary from '@/components/ErrorBoundary';
 import ToastContainer from '@/components/ToastContainer';
@@ -99,6 +100,7 @@ function AppRoutes() {
         <Route path="plugins" element={<Suspense fallback={<PageLoader />}><PluginsPage /></Suspense>} />
         <Route path="integrations" element={<Suspense fallback={<PageLoader />}><IntegrationsPage /></Suspense>} />
         <Route path="api-docs" element={<Suspense fallback={<PageLoader />}><ApiDocsPage /></Suspense>} />
+        <Route path="reports" element={<Suspense fallback={<PageLoader />}><ReportsPage /></Suspense>} />
       </Route>
 
       {/* Catch-all */}

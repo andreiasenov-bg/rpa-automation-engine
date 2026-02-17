@@ -27,6 +27,7 @@ import {
   FileText,
   Wand2,
   Globe,
+  BarChart3,
   X,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
@@ -81,6 +82,7 @@ const navGroups: NavGroup[] = [
       { to: '/audit-log', icon: Shield, i18nKey: 'nav.auditLog' },
       { to: '/notifications', icon: Bell, i18nKey: 'nav.notifications' },
       { to: '/plugins', icon: Puzzle, i18nKey: 'nav.plugins' },
+      { to: '/reports', icon: BarChart3, i18nKey: 'nav.reports' },
       { to: '/api-docs', icon: FileText, i18nKey: 'nav.apiDocs' },
       { to: '/admin', icon: Wrench, i18nKey: 'nav.admin' },
       { to: '/settings', icon: Settings, i18nKey: 'nav.settings' },

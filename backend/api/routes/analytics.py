@@ -251,3 +251,247 @@ async def get_workflow_performance(
         "limit": limit,
         "workflows": workflows,
     }
+
+
+# ─── Export & Looker Studio Integration ─── #
+
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+import csv
+import io
+
+
+class SheetsSyncRequest(BaseModel):
+    spreadsheet_id: str
+    sheet_name: str = "RPA Analytics"
+
+
+@router.get("/export/executions")
+async def export_executions(
+    days: int = Query(30, ge=1, le=365),
+    format: str = Query("json", regex="^(json|csv)$"),
+    current_user: TokenPayload = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Export flat execution data for Looker Studio / Google Sheets."""
+    org_id = current_user.org_id
+    cutoff = datetime.utcnow() - timedelta(days=days)
+
+    stmt = (
+        select(
+            Execution.id,
+            Workflow.name.label("workflow_name"),
+            Execution.status,
+            Execution.started_at,
+            Execution.completed_at,
+            Execution.duration_ms,
+            Execution.trigger_type,
+            Execution.error_message,
+        )
+        .select_from(Execution)
+        .outerjoin(Workflow, Execution.workflow_id == Workflow.id)
+        .where(
+            and_(
+                Execution.organization_id == org_id,
+                Execution.is_deleted == False,
+                Execution.created_at >= cutoff,
+            )
+        )
+        .order_by(desc(Execution.created_at))
+    )
+
+    result = await db.execute(stmt)
+    rows = result.all()
+
+    columns = [
+        "id", "workflow_name", "status", "started_at",
+        "completed_at", "duration_ms", "trigger_type", "error_message",
+    ]
+
+    data = []
+    for row in rows:
+        data.append({
+            "id": str(row[0]),
+            "workflow_name": row[1] or "Unknown",
+            "status": row[2] or "",
+            "started_at": row[3].isoformat() if row[3] else "",
+            "completed_at": row[4].isoformat() if row[4] else "",
+            "duration_ms": row[5] or 0,
+            "trigger_type": row[6] or "",
+            "error_message": row[7] or "",
+        })
+
+    if format == "csv":
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=columns)
+        writer.writeheader()
+        writer.writerows(data)
+        output.seek(0)
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=executions_{days}d.csv"},
+        )
+
+    return {"columns": columns, "rows": data, "total": len(data), "period_days": days}
+
+
+@router.get("/export/summary")
+async def export_daily_summary(
+    days: int = Query(30, ge=1, le=365),
+    format: str = Query("json", regex="^(json|csv)$"),
+    current_user: TokenPayload = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Export daily aggregated summary — ideal for Looker Studio data source."""
+    org_id = current_user.org_id
+    cutoff = datetime.utcnow() - timedelta(days=days)
+
+    from sqlalchemy import func as sql_func, cast, Date
+
+    day_expr = sql_func.date_trunc("day", Execution.created_at)
+
+    stmt = (
+        select(
+            day_expr.label("date"),
+            func.count(Execution.id).label("total"),
+            func.sum(case((Execution.status == "completed", 1), else_=0)).label("completed"),
+            func.sum(case((Execution.status == "failed", 1), else_=0)).label("failed"),
+            func.sum(case((Execution.status == "running", 1), else_=0)).label("running"),
+            func.avg(Execution.duration_ms).label("avg_duration_ms"),
+        )
+        .where(
+            and_(
+                Execution.organization_id == org_id,
+                Execution.is_deleted == False,
+                Execution.created_at >= cutoff,
+            )
+        )
+        .group_by(day_expr)
+        .order_by(day_expr)
+    )
+
+    result = await db.execute(stmt)
+    rows = result.all()
+
+    columns = ["date", "total", "completed", "failed", "running", "avg_duration_ms", "success_rate"]
+    data = []
+    for row in rows:
+        total = row[1] or 0
+        completed = row[2] or 0
+        failed = row[3] or 0
+        running = row[4] or 0
+        avg_dur = float(row[5]) if row[5] else 0.0
+        rate = round((completed / total) * 100, 2) if total > 0 else 0.0
+        data.append({
+            "date": row[0].strftime("%Y-%m-%d") if row[0] else "",
+            "total": total,
+            "completed": completed,
+            "failed": failed,
+            "running": running,
+            "avg_duration_ms": round(avg_dur, 1),
+            "success_rate": rate,
+        })
+
+    if format == "csv":
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=columns)
+        writer.writeheader()
+        writer.writerows(data)
+        output.seek(0)
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=summary_{days}d.csv"},
+        )
+
+    return {"columns": columns, "rows": data, "total": len(data), "period_days": days}
+
+
+@router.post("/sheets-sync")
+async def sync_to_google_sheets(
+    request: SheetsSyncRequest,
+    current_user: TokenPayload = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Push analytics summary data to a Google Sheet for Looker Studio.
+    
+    Writes daily summary + workflow performance to the specified spreadsheet.
+    The sheet then serves as a Looker Studio data source via native Google Sheets connector.
+    """
+    org_id = current_user.org_id
+    cutoff = datetime.utcnow() - timedelta(days=90)
+
+    from sqlalchemy import func as sql_func
+
+    # ── Daily summary data ──
+    day_expr = sql_func.date_trunc("day", Execution.created_at)
+    stmt = (
+        select(
+            day_expr.label("date"),
+            func.count(Execution.id).label("total"),
+            func.sum(case((Execution.status == "completed", 1), else_=0)).label("completed"),
+            func.sum(case((Execution.status == "failed", 1), else_=0)).label("failed"),
+            func.avg(Execution.duration_ms).label("avg_duration_ms"),
+        )
+        .where(
+            and_(
+                Execution.organization_id == org_id,
+                Execution.is_deleted == False,
+                Execution.created_at >= cutoff,
+            )
+        )
+        .group_by(day_expr)
+        .order_by(day_expr)
+    )
+    result = await db.execute(stmt)
+    summary_rows = result.all()
+
+    # ── Write to Google Sheets ──
+    try:
+        from integrations.google_sheets import GoogleSheetsClient
+        sheets = GoogleSheetsClient()
+
+        # Header row
+        header = ["Date", "Total Executions", "Completed", "Failed", "Avg Duration (ms)", "Success Rate %"]
+        values = [header]
+        for row in summary_rows:
+            total = row[1] or 0
+            completed = row[2] or 0
+            rate = round((completed / total) * 100, 1) if total > 0 else 0
+            values.append([
+                row[0].strftime("%Y-%m-%d") if row[0] else "",
+                total,
+                completed,
+                row[3] or 0,
+                round(float(row[4]), 1) if row[4] else 0,
+                rate,
+            ])
+
+        await sheets.write_range(
+            spreadsheet_id=request.spreadsheet_id,
+            range_str=f"A1:{chr(64 + len(header))}{len(values)}",
+            values=values,
+            sheet_name=request.sheet_name,
+        )
+
+        return {
+            "ok": True,
+            "rows_written": len(values) - 1,
+            "sheet_name": request.sheet_name,
+            "spreadsheet_id": request.spreadsheet_id,
+            "message": f"Synced {len(values) - 1} days of analytics data",
+        }
+
+    except ImportError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Google Sheets integration not configured. Install google-auth and google-api-python-client.",
+        )
+    except Exception as e:
+        logger.error(f"Sheets sync failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to sync: {str(e)}",
+        )
