@@ -214,6 +214,7 @@ async def create_schedule(
     )
     db.add(schedule)
     await db.flush()
+    await db.refresh(schedule)
 
     return _to_response(schedule, workflow_name=workflow.name)
 
@@ -297,6 +298,7 @@ async def update_schedule(
         schedule.next_run_at = None
 
     await db.flush()
+    await db.refresh(schedule)
 
     # Fetch workflow name
     wf_result = await db.execute(
@@ -362,6 +364,7 @@ async def toggle_schedule(
         schedule.next_run_at = None
 
     await db.flush()
+    await db.refresh(schedule)
 
     wf_result = await db.execute(
         select(Workflow.name).where(Workflow.id == schedule.workflow_id)
@@ -402,5 +405,6 @@ async def recalculate_all_schedules(
             logger.info(f"Schedule '{schedule.name}' next_run_at: {next_run}")
 
     await db.flush()
+    # No refresh needed — response doesn't access ORM attributes
 
     return {"updated": updated, "total": len(schedules)}
