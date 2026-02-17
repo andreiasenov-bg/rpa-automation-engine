@@ -43,10 +43,11 @@ class Schedule(BaseModel):
     is_enabled: Mapped[bool] = mapped_column(default=True, index=True)
     next_run_at: Mapped[Optional[datetime]] = mapped_column(nullable=True, index=True)
 
-    # Relationships
+    # Relationships — use "noload" to avoid greenlet_spawn errors in async
+    # sessions.  Endpoints that need related data do explicit JOINs.
     organization: Mapped["Organization"] = relationship(
-        "Organization", back_populates="schedules", lazy="selectin"
+        "Organization", back_populates="schedules", lazy="noload"
     )
     workflow: Mapped["Workflow"] = relationship(
-        "Workflow", back_populates="schedules", lazy="selectin"
+        "Workflow", back_populates="schedules", lazy="noload"
     )

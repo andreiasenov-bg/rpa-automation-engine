@@ -139,7 +139,8 @@ def _compute_next_run(cron_expression: str, tz: str = "UTC"):
         tz_obj = pytz.timezone(tz)
         now = datetime.now(tz_obj)
         cron = croniter(cron_expression, now)
-        return cron.get_next(datetime).astimezone(pytz.utc)
+        # Return naive UTC datetime — asyncpg requires naive for TIMESTAMP columns
+        return cron.get_next(datetime).astimezone(pytz.utc).replace(tzinfo=None)
     except ImportError:
         logger.warning("croniter not installed — cannot compute next_run_at")
         return None
