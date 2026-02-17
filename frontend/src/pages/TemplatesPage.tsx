@@ -15,8 +15,19 @@ import {
   AlertCircle,
   AlertTriangle,
   Info,
+  Brain,
+  MessageSquare,
+  Zap,
+  Check,
 } from 'lucide-react';
-import { templatesApi, type TemplateSummary, type TemplateParameter, type ValidationResult } from '@/api/templates';
+import {
+  templatesApi,
+  type TemplateSummary,
+  type TemplateParameter,
+  type ValidationResult,
+  type AIReviewResult,
+  type AIFieldAnalysis,
+} from '@/api/templates';
 
 /* ━━━ Difficulty badge ━━━ */
 const DIFFICULTY_COLORS: Record<string, { bg: string; text: string; border: string }> = {
@@ -24,6 +35,20 @@ const DIFFICULTY_COLORS: Record<string, { bg: string; text: string; border: stri
   intermediate: { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200' },
   advanced: { bg: 'bg-rose-50', text: 'text-rose-700', border: 'border-rose-200' },
 };
+
+/* ━━━ Confidence indicator ━━━ */
+function ConfidenceBadge({ value }: { value: number }) {
+  const pct = Math.round(value * 100);
+  const color =
+    pct >= 80 ? 'text-emerald-600 bg-emerald-50' :
+    pct >= 50 ? 'text-amber-600 bg-amber-50' :
+    'text-red-600 bg-red-50';
+  return (
+    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${color}`}>
+      {pct}%
+    </span>
+  );
+}
 
 /* ━━━ Template Card ━━━ */
 function TemplateCard({ template, onUse }: { template: TemplateSummary; onUse: (t: TemplateSummary) => void }) {
@@ -91,11 +116,13 @@ function ParamField({
   value,
   onChange,
   fieldStatus,
+  aiSuggested,
 }: {
   param: TemplateParameter;
   value: string;
   onChange: (key: string, val: string) => void;
   fieldStatus?: { status: string; message: string };
+  aiSuggested?: boolean;
 }) {
   const isError = fieldStatus?.status === 'error';
   const isOk = fieldStatus?.status === 'ok';
@@ -103,6 +130,8 @@ function ParamField({
     ? 'border-red-300 focus:ring-red-500/20 focus:border-red-400'
     : isOk
     ? 'border-emerald-300 focus:ring-emerald-500/20 focus:border-emerald-400'
+    : aiSuggested
+    ? 'border-violet-300 focus:ring-violet-500/20 focus:border-violet-400'
     : 'border-slate-200 focus:ring-indigo-500/20 focus:border-indigo-300';
 
   const inputClass = `w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 ${borderClass}`;
@@ -114,6 +143,11 @@ function ParamField({
         {param.required && <span className="text-red-400 text-xs">*</span>}
         {param.type === 'credential' && (
           <span className="ml-1 text-[10px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded">credential</span>
+        )}
+        {aiSuggested && (
+          <span className="ml-1 text-[10px] bg-violet-50 text-violet-600 px-1.5 py-0.5 rounded flex items-center gap-0.5">
+            <Sparkles className="w-2.5 h-2.5" /> AI
+          </span>
         )}
       </label>
       {param.description && (
@@ -171,6 +205,54 @@ function ParamField({
   );
 }
 
+/* ━━━ AI Suggestion Card ━━━ */
+function AISuggestionCard({
+  analysis,
+  paramLabel,
+  onApply,
+  applied,
+}: {
+  analysis: AIFieldAnalysis;
+  paramLabel: string;
+  onApply: () => void;
+  applied: boolean;
+}) {
+  return (
+    <div className={`p-3 rounded-lg border transition-all ${
+      applied ? 'bg-violet-50/50 border-violet-200' : 'bg-white border-slate-200 hover:border-violet-200'
+    }`}>
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-sm font-medium text-slate-700">{paramLabel}</span>
+        <div className="flex items-center gap-2">
+          <ConfidenceBadge value={analysis.confidence} />
+          {analysis.suggested_value && !applied && (
+            <button
+              onClick={onApply}
+              className="text-[10px] font-medium text-violet-600 bg-violet-50 hover:bg-violet-100 px-2 py-0.5 rounded transition-colors"
+            >
+              Apply
+            </button>
+          )}
+          {applied && (
+            <span className="flex items-center gap-0.5 text-[10px] text-emerald-600">
+              <Check className="w-3 h-3" /> Applied
+            </span>
+          )}
+        </div>
+      </div>
+      {analysis.suggested_value && (
+        <p className="text-xs font-mono text-violet-700 bg-violet-50 px-2 py-1 rounded mb-1 break-all">
+          {analysis.suggested_value}
+        </p>
+      )}
+      <p className="text-xs text-slate-500">{analysis.reason}</p>
+    </div>
+  );
+}
+
+/* ━━━ WIZARD STEP NAMES ━━━ */
+const STEP_NAMES = ['Describe', 'AI Review', 'Configure', 'Validate', 'Create'];
+
 /* ━━━ Create Wizard Modal ━━━ */
 function CreateWizardModal({
   template,
@@ -184,8 +266,9 @@ function CreateWizardModal({
   const params = template.required_parameters ?? [];
   const hasParams = params.length > 0;
 
-  // Wizard steps: 0=Configure, 1=Validate, 2=Create (name/desc)
-  const [step, setStep] = useState(hasParams ? 0 : 2);
+  // 5-step wizard: 0=Describe, 1=AI Review, 2=Configure, 3=Validate, 4=Create
+  const [step, setStep] = useState(hasParams ? 0 : 4);
+  const [instruction, setInstruction] = useState('');
   const [paramValues, setParamValues] = useState<Record<string, string>>(() => {
     const defaults: Record<string, string> = {};
     params.forEach(p => {
@@ -193,6 +276,9 @@ function CreateWizardModal({
     });
     return defaults;
   });
+  const [aiReview, setAiReview] = useState<AIReviewResult | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [appliedSuggestions, setAppliedSuggestions] = useState<Set<string>>(new Set());
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [validating, setValidating] = useState(false);
   const [name, setName] = useState(template.name);
@@ -202,8 +288,42 @@ function CreateWizardModal({
 
   const handleParamChange = useCallback((key: string, val: string) => {
     setParamValues(prev => ({ ...prev, [key]: val }));
-    setValidation(null); // Reset validation when values change
+    setValidation(null);
   }, []);
+
+  const handleAIReview = async () => {
+    setAiLoading(true);
+    setError('');
+    try {
+      const result = await templatesApi.aiReview(template.id, instruction, paramValues);
+      setAiReview(result);
+      setStep(1);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'AI review failed';
+      setError(msg);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const handleApplySuggestion = (key: string, value: string) => {
+    setParamValues(prev => ({ ...prev, [key]: value }));
+    setAppliedSuggestions(prev => new Set([...prev, key]));
+  };
+
+  const handleApplyAll = () => {
+    if (!aiReview) return;
+    const newValues = { ...paramValues };
+    const newApplied = new Set(appliedSuggestions);
+    for (const [key, value] of Object.entries(aiReview.suggested_parameters)) {
+      if (value && params.find(p => p.key === key && p.type !== 'credential')) {
+        newValues[key] = value;
+        newApplied.add(key);
+      }
+    }
+    setParamValues(newValues);
+    setAppliedSuggestions(newApplied);
+  };
 
   const handleValidate = async () => {
     setValidating(true);
@@ -212,8 +332,7 @@ function CreateWizardModal({
       const result = await templatesApi.validate(template.id, paramValues);
       setValidation(result);
       if (result.valid) {
-        // Auto-advance to create step after short delay
-        setTimeout(() => setStep(2), 600);
+        setTimeout(() => setStep(4), 600);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Validation failed';
@@ -232,6 +351,7 @@ function CreateWizardModal({
         name,
         description: desc || undefined,
         parameters: hasParams ? paramValues : undefined,
+        instruction: instruction || undefined,
       });
       onCreated(result.workflow_id);
     } catch (err: unknown) {
@@ -246,6 +366,14 @@ function CreateWizardModal({
   const optionalParams = params.filter(p => !p.required);
   const allRequiredFilled = requiredParams.every(p => paramValues[p.key]?.trim());
 
+  // Get label for a param key
+  const getParamLabel = (key: string) => params.find(p => p.key === key)?.label ?? key;
+
+  // Determine which step subtitle to show
+  const stepSubtitle = hasParams
+    ? `Step ${step + 1} — ${STEP_NAMES[step]}`
+    : 'Create workflow from template';
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 max-h-[85vh] flex flex-col">
@@ -255,13 +383,7 @@ function CreateWizardModal({
             <span className="text-2xl">{template.icon}</span>
             <div>
               <h2 className="text-base font-semibold text-slate-900">{template.name}</h2>
-              <p className="text-xs text-slate-400">
-                {hasParams
-                  ? step === 0 ? 'Step 1 — Configure parameters'
-                    : step === 1 ? 'Step 2 — Validate configuration'
-                    : 'Step 3 — Create workflow'
-                  : 'Create workflow from template'}
-              </p>
+              <p className="text-xs text-slate-400">{stepSubtitle}</p>
             </div>
           </div>
           <button onClick={onClose} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors">
@@ -272,7 +394,7 @@ function CreateWizardModal({
         {/* Progress bar */}
         {hasParams && (
           <div className="flex gap-1 px-6 pt-3">
-            {[0, 1, 2].map(s => (
+            {[0, 1, 2, 3, 4].map(s => (
               <div key={s} className={`h-1 flex-1 rounded-full transition-colors ${
                 s <= step ? 'bg-indigo-500' : 'bg-slate-100'
               }`} />
@@ -289,9 +411,147 @@ function CreateWizardModal({
             </div>
           )}
 
-          {/* Step 0: Configure Parameters */}
+          {/* ━━━ Step 0: Describe — What should this workflow do? ━━━ */}
           {step === 0 && (
             <div>
+              <div className="flex items-center gap-2 mb-4">
+                <MessageSquare className="w-5 h-5 text-indigo-500" />
+                <h3 className="text-sm font-semibold text-slate-700">
+                  What should this workflow do?
+                </h3>
+              </div>
+
+              <div className="mb-4">
+                <label className="text-sm font-medium text-slate-700 mb-1 block">
+                  Instructions <span className="text-red-400 text-xs">*</span>
+                </label>
+                <p className="text-xs text-slate-400 mb-2">
+                  Describe in detail what you want this workflow to accomplish. AI will analyze your description and suggest optimal configuration.
+                </p>
+                <textarea
+                  value={instruction}
+                  onChange={(e) => setInstruction(e.target.value)}
+                  placeholder={`Example: "Scrape laptop prices from emag.bg every day and alert me when prices drop below 1500 lv"`}
+                  rows={4}
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-300 resize-none"
+                />
+              </div>
+
+              <div className="mb-4">
+                <label className="text-sm font-medium text-slate-700 mb-1 block">
+                  Workflow Name
+                </label>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder={template.name}
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-300"
+                />
+              </div>
+
+              <div className="p-3 bg-violet-50 rounded-lg border border-violet-100">
+                <div className="flex items-center gap-2 mb-1">
+                  <Brain className="w-4 h-4 text-violet-500" />
+                  <span className="text-xs font-medium text-violet-700">AI-Assisted Configuration</span>
+                </div>
+                <p className="text-xs text-violet-600">
+                  After you describe your task, AI will review the template architecture, suggest parameter values,
+                  and auto-fill fields it can determine from public information.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* ━━━ Step 1: AI Review — Suggestions ━━━ */}
+          {step === 1 && (
+            <div>
+              {aiLoading ? (
+                <div className="flex flex-col items-center py-8 gap-3">
+                  <div className="relative">
+                    <Brain className="w-10 h-10 text-violet-500" />
+                    <Loader2 className="w-5 h-5 text-violet-400 animate-spin absolute -bottom-1 -right-1" />
+                  </div>
+                  <p className="text-sm text-slate-500">AI is analyzing your instruction...</p>
+                  <p className="text-xs text-slate-400">Reviewing template architecture and suggesting parameters</p>
+                </div>
+              ) : aiReview ? (
+                <div className="space-y-4">
+                  {/* Overall analysis */}
+                  <div className={`p-4 rounded-xl border ${
+                    aiReview.overall_confidence >= 0.7
+                      ? 'bg-violet-50 border-violet-200'
+                      : aiReview.overall_confidence >= 0.4
+                      ? 'bg-amber-50 border-amber-200'
+                      : 'bg-red-50 border-red-200'
+                  }`}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <Brain className="w-5 h-5 text-violet-500" />
+                      <span className="text-sm font-medium text-slate-700">AI Analysis</span>
+                      <ConfidenceBadge value={aiReview.overall_confidence} />
+                    </div>
+                    <p className="text-sm text-slate-600">{aiReview.explanation}</p>
+                  </div>
+
+                  {/* Suggestions */}
+                  {aiReview.field_analysis.length > 0 && (
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                          Parameter Suggestions
+                        </h4>
+                        {Object.keys(aiReview.suggested_parameters).length > 0 && (
+                          <button
+                            onClick={handleApplyAll}
+                            className="flex items-center gap-1 text-[11px] font-medium text-violet-600 hover:text-violet-700 bg-violet-50 hover:bg-violet-100 px-2.5 py-1 rounded-md transition-colors"
+                          >
+                            <Zap className="w-3 h-3" />
+                            Apply All
+                          </button>
+                        )}
+                      </div>
+                      <div className="space-y-2">
+                        {aiReview.field_analysis.map(fa => (
+                          <AISuggestionCard
+                            key={fa.key}
+                            analysis={fa}
+                            paramLabel={getParamLabel(fa.key)}
+                            onApply={() => fa.suggested_value && handleApplySuggestion(fa.key, fa.suggested_value)}
+                            applied={appliedSuggestions.has(fa.key)}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Warnings */}
+                  {aiReview.warnings.length > 0 && (
+                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                      <p className="text-xs font-medium text-amber-700 mb-1 flex items-center gap-1">
+                        <AlertTriangle className="w-3.5 h-3.5" /> Warnings
+                      </p>
+                      {aiReview.warnings.map((w, i) => (
+                        <p key={i} className="text-xs text-amber-600 mt-0.5">{w}</p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : null}
+            </div>
+          )}
+
+          {/* ━━━ Step 2: Configure Parameters ━━━ */}
+          {step === 2 && (
+            <div>
+              {instruction && (
+                <div className="mb-4 p-3 bg-slate-50 rounded-lg border border-slate-100">
+                  <p className="text-xs font-medium text-slate-500 mb-1 flex items-center gap-1">
+                    <MessageSquare className="w-3 h-3" /> Your instruction:
+                  </p>
+                  <p className="text-xs text-slate-600 italic">{instruction}</p>
+                </div>
+              )}
+
               {requiredParams.length > 0 && (
                 <div className="mb-4">
                   <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
@@ -304,6 +564,7 @@ function CreateWizardModal({
                       value={paramValues[p.key] ?? ''}
                       onChange={handleParamChange}
                       fieldStatus={validation?.fields[p.key]}
+                      aiSuggested={appliedSuggestions.has(p.key)}
                     />
                   ))}
                 </div>
@@ -321,6 +582,7 @@ function CreateWizardModal({
                       value={paramValues[p.key] ?? ''}
                       onChange={handleParamChange}
                       fieldStatus={validation?.fields[p.key]}
+                      aiSuggested={appliedSuggestions.has(p.key)}
                     />
                   ))}
                 </div>
@@ -328,8 +590,8 @@ function CreateWizardModal({
             </div>
           )}
 
-          {/* Step 1: Validation Results */}
-          {step === 1 && (
+          {/* ━━━ Step 3: Validation Results ━━━ */}
+          {step === 3 && (
             <div>
               {validating ? (
                 <div className="flex flex-col items-center py-8 gap-3">
@@ -338,7 +600,6 @@ function CreateWizardModal({
                 </div>
               ) : validation ? (
                 <div className="space-y-3">
-                  {/* Overall status */}
                   <div className={`p-4 rounded-xl border flex items-center gap-3 ${
                     validation.valid
                       ? 'bg-emerald-50 border-emerald-200'
@@ -361,7 +622,6 @@ function CreateWizardModal({
                     </div>
                   </div>
 
-                  {/* Per-field results */}
                   <div className="space-y-2">
                     {params.map(p => {
                       const fs = validation.fields[p.key];
@@ -383,7 +643,6 @@ function CreateWizardModal({
                     })}
                   </div>
 
-                  {/* Warnings */}
                   {validation.warnings.length > 0 && (
                     <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
                       <p className="text-xs font-medium text-amber-700 mb-1">Warnings:</p>
@@ -397,13 +656,22 @@ function CreateWizardModal({
             </div>
           )}
 
-          {/* Step 2: Name & Create */}
-          {step === 2 && (
+          {/* ━━━ Step 4: Name & Create ━━━ */}
+          {step === 4 && (
             <div>
               {hasParams && validation?.valid && (
                 <div className="mb-4 p-3 bg-emerald-50 border border-emerald-200 rounded-lg flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-emerald-500" />
                   <span className="text-sm text-emerald-700">Parameters validated successfully</span>
+                </div>
+              )}
+
+              {instruction && (
+                <div className="mb-4 p-3 bg-violet-50 rounded-lg border border-violet-100">
+                  <p className="text-xs font-medium text-violet-600 mb-1 flex items-center gap-1">
+                    <Brain className="w-3 h-3" /> Instruction:
+                  </p>
+                  <p className="text-xs text-violet-700 italic">{instruction}</p>
                 </div>
               )}
 
@@ -438,7 +706,12 @@ function CreateWizardModal({
                   <div className="space-y-1">
                     {params.filter(p => paramValues[p.key]?.trim()).map(p => (
                       <div key={p.key} className="flex items-center justify-between text-xs">
-                        <span className="text-slate-500">{p.label}</span>
+                        <span className="text-slate-500 flex items-center gap-1">
+                          {p.label}
+                          {appliedSuggestions.has(p.key) && (
+                            <Sparkles className="w-2.5 h-2.5 text-violet-400" />
+                          )}
+                        </span>
                         <span className="text-slate-700 font-mono truncate ml-2 max-w-[200px]">
                           {p.type === 'credential' ? '••••••' : paramValues[p.key]}
                         </span>
@@ -456,7 +729,14 @@ function CreateWizardModal({
           <div>
             {step > 0 && hasParams && (
               <button
-                onClick={() => { setStep(step - 1); setError(''); }}
+                onClick={() => {
+                  if (step === 3 && !validation?.valid) {
+                    setStep(2);
+                  } else {
+                    setStep(step - 1);
+                  }
+                  setError('');
+                }}
                 className="flex items-center gap-1 px-3 py-2 text-sm text-slate-600 hover:text-slate-900 transition-colors"
               >
                 <ArrowLeft className="w-3.5 h-3.5" />
@@ -473,9 +753,42 @@ function CreateWizardModal({
               Cancel
             </button>
 
+            {/* Step 0: Describe → trigger AI review */}
             {step === 0 && (
               <button
-                onClick={() => { setStep(1); handleValidate(); }}
+                onClick={() => { handleAIReview(); setStep(1); }}
+                disabled={!instruction.trim() || aiLoading}
+                className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-violet-600 hover:bg-violet-700 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {aiLoading ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Analyzing...
+                  </>
+                ) : (
+                  <>
+                    <Brain className="w-3.5 h-3.5" />
+                    Review with AI
+                  </>
+                )}
+              </button>
+            )}
+
+            {/* Step 1: AI Review → go to Configure */}
+            {step === 1 && !aiLoading && aiReview && (
+              <button
+                onClick={() => setStep(2)}
+                className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors"
+              >
+                Configure
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            )}
+
+            {/* Step 2: Configure → Validate */}
+            {step === 2 && (
+              <button
+                onClick={() => { setStep(3); handleValidate(); }}
                 disabled={!allRequiredFilled}
                 className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
@@ -484,16 +797,18 @@ function CreateWizardModal({
               </button>
             )}
 
-            {step === 1 && validation && !validation.valid && (
+            {/* Step 3: Validation failed → Fix */}
+            {step === 3 && validation && !validation.valid && (
               <button
-                onClick={() => { setStep(0); setValidation(null); }}
+                onClick={() => { setStep(2); setValidation(null); }}
                 className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-amber-500 hover:bg-amber-600 rounded-lg transition-colors"
               >
                 Fix Errors
               </button>
             )}
 
-            {step === 2 && (
+            {/* Step 4: Create */}
+            {step === 4 && (
               <button
                 onClick={handleCreate}
                 disabled={!name.trim() || creating}
