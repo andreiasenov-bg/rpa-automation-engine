@@ -33,8 +33,8 @@ class Settings(BaseSettings):
     # Security Settings
     SECRET_KEY: str = "your-secret-key-change-this-in-production"
     ENCRYPTION_KEY: str = "your-encryption-key-must-be-32-bytes-base64-encoded"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 hours
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
     # Claude AI Settings
     # Accepts either ANTHROPIC_API_KEY or CHAT_API_KEY (for backward compat)
