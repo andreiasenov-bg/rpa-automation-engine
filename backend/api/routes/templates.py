@@ -1,12 +1,13 @@
 """Workflow Templates API routes.
 
 Provides a library of pre-built workflow templates that users can browse,
-preview, and instantiate as new workflows. Includes parameter validation
-to ensure templates work before creating workflows.
+preview, and instantiate as new workflows. Includes parameter validation,
+AI-assisted review and auto-fill for optimal configuration.
 """
 
 import re
 import uuid
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -19,6 +20,7 @@ from core.security import TokenPayload
 from db.models.workflow import Workflow
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 # ━━━ Import comprehensive template library (25+ templates) ━━━━━━━━━━━━━━━━
@@ -119,6 +121,63 @@ def _merge_parameters_into_steps(steps: list, params: dict, param_defs: list) ->
     return merged
 
 
+def _build_ai_review_prompt(template: dict, param_defs: list, instruction: str, current_params: dict) -> str:
+    """Build the prompt for AI-assisted parameter review."""
+    params_desc = []
+    for p in param_defs:
+        auto = p.get("auto_fillable", False)
+        hint = p.get("ai_hint", "")
+        current_val = current_params.get(p["key"], "")
+        params_desc.append(
+            f"  - {p['key']} ({p['type']}, {'required' if p.get('required') else 'optional'}): "
+            f"{p.get('description', p['label'])}"
+            f"{' [AUTO-FILLABLE]' if auto else ''}"
+            f"{f' [HINT: {hint}]' if hint else ''}"
+            f"{f' [CURRENT: {current_val}]' if current_val else ''}"
+        )
+
+    return f"""You are an RPA workflow parameter advisor. Analyze the user's instruction and suggest optimal parameter values.
+
+TEMPLATE: {template['name']}
+DESCRIPTION: {template['description']}
+CATEGORY: {template['category']}
+
+AVAILABLE PARAMETERS:
+{chr(10).join(params_desc)}
+
+USER INSTRUCTION: {instruction}
+
+Based on the user's instruction, respond with a JSON object:
+{{
+  "suggested_parameters": {{
+    "param_key": "suggested_value"
+  }},
+  "field_analysis": [
+    {{
+      "key": "param_key",
+      "action": "fill|modify|keep|add_warning",
+      "suggested_value": "value or null",
+      "confidence": 0.0-1.0,
+      "reason": "Why this value is suggested"
+    }}
+  ],
+  "warnings": [
+    "Any concerns about the configuration"
+  ],
+  "overall_confidence": 0.0-1.0,
+  "explanation": "Brief analysis of the instruction and how it maps to this template"
+}}
+
+RULES:
+- For URL fields marked AUTO-FILLABLE: construct the most likely URL from the instruction
+- For CSS selectors: suggest selectors for well-known sites if mentioned
+- For number fields: extract numbers from the instruction or use sensible defaults
+- NEVER suggest values for credential-type fields (security risk)
+- If the instruction is in Bulgarian or another language, understand it and respond in the same language for explanations
+- Rate confidence honestly: 0.9+ only for very certain values, 0.5-0.8 for educated guesses
+- If the instruction doesn't match this template well, set overall_confidence < 0.3 and explain why"""
+
+
 # ━━━ Request / Response models ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 class TemplateInstantiateRequest(BaseModel):
@@ -126,9 +185,15 @@ class TemplateInstantiateRequest(BaseModel):
     name: str
     description: Optional[str] = None
     parameters: Optional[dict] = None
+    instruction: Optional[str] = None
 
 
 class TemplateValidateRequest(BaseModel):
+    parameters: dict = {}
+
+
+class AIReviewRequest(BaseModel):
+    instruction: str
     parameters: dict = {}
 
 
@@ -180,6 +245,81 @@ async def get_template(
         if t["id"] == template_id:
             return _enrich_template(t, include_steps=True)
     raise HTTPException(status_code=404, detail="Template not found")
+
+
+@router.post("/{template_id}/ai-review")
+async def ai_review_template(
+    template_id: str,
+    body: AIReviewRequest,
+    current_user: TokenPayload = Depends(get_current_active_user),
+):
+    """AI-assisted review of template parameters based on user instruction.
+
+    Analyzes the user's description of what the workflow should do,
+    suggests parameter values, and identifies potential issues.
+    """
+    template = None
+    for t in BUILTIN_TEMPLATES:
+        if t["id"] == template_id:
+            template = t
+            break
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    param_defs = get_template_parameters(template_id)
+    if not param_defs:
+        return {
+            "suggested_parameters": {},
+            "field_analysis": [],
+            "warnings": [],
+            "overall_confidence": 1.0,
+            "explanation": "This template has no configurable parameters.",
+        }
+
+    # Build prompt and call Claude
+    prompt = _build_ai_review_prompt(template, param_defs, body.instruction, body.parameters)
+
+    try:
+        from integrations.claude_client import ClaudeClient
+        client = ClaudeClient()
+
+        result = await client.analyze(
+            data={
+                "template_id": template_id,
+                "template_name": template["name"],
+                "instruction": body.instruction,
+                "current_parameters": body.parameters,
+                "parameter_definitions": [
+                    {k: v for k, v in p.items() if k != "maps_to"}
+                    for p in param_defs
+                ],
+            },
+            instruction=prompt,
+            output_format="json",
+        )
+
+        # Ensure result has expected structure
+        if not isinstance(result, dict):
+            result = {}
+
+        return {
+            "suggested_parameters": result.get("suggested_parameters", {}),
+            "field_analysis": result.get("field_analysis", []),
+            "warnings": result.get("warnings", []),
+            "overall_confidence": result.get("overall_confidence", 0.5),
+            "explanation": result.get("explanation", "AI analysis completed."),
+        }
+
+    except Exception as e:
+        logger.warning(f"AI review failed for template {template_id}: {e}")
+        # Graceful fallback — return empty suggestions, don't block the wizard
+        return {
+            "suggested_parameters": {},
+            "field_analysis": [],
+            "warnings": [f"AI review unavailable: {str(e)[:100]}"],
+            "overall_confidence": 0.0,
+            "explanation": "AI review could not be completed. You can still configure parameters manually.",
+        }
 
 
 @router.post("/{template_id}/validate")
@@ -273,16 +413,21 @@ async def instantiate_template(
                 detail=f"Missing required parameters: {labels}",
             )
 
+    # Build workflow definition with instruction metadata
+    definition = {
+        "steps": steps,
+        "source_template": template_id,
+    }
+    if body.instruction:
+        definition["user_instruction"] = body.instruction
+
     workflow = Workflow(
         id=str(uuid.uuid4()),
         organization_id=current_user.org_id,
         created_by_id=current_user.sub,
         name=body.name,
         description=body.description or template["description"],
-        definition={
-            "steps": steps,
-            "source_template": template_id,
-        },
+        definition=definition,
         version=1,
         status="draft",
     )
