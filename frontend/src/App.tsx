@@ -34,6 +34,8 @@ const AICreatorPage = lazy(() => import('@/pages/AICreatorPage'));
 const IntegrationsPage = lazy(() => import('@/pages/IntegrationsPage'));
 const WorkflowFilesPage = lazy(() => import('@/pages/WorkflowFilesPage'));
 const ReportsPage = lazy(() => import('@/pages/ReportsPage'));
+const ProfilerPage = lazy(() => import('@/pages/ProfilerPage'));
+const ApiHealthPage = lazy(() => import('@/pages/ApiHealthPage'));
 
 import ErrorBoundary from '@/components/ErrorBoundary';
 import ToastContainer from '@/components/ToastContainer';
@@ -100,7 +102,9 @@ function AppRoutes() {
         <Route path="plugins" element={<Suspense fallback={<PageLoader />}><PluginsPage /></Suspense>} />
         <Route path="integrations" element={<Suspense fallback={<PageLoader />}><IntegrationsPage /></Suspense>} />
         <Route path="api-docs" element={<Suspense fallback={<PageLoader />}><ApiDocsPage /></Suspense>} />
-        <Route path="reports" element={<Suspense fallback={<PageLoader />}><ReportsPage /></Suspense>} />
+        <Route path="profiler" element={<ProfilerPage />} />
+                  <Route path="api-health" element={<ApiHealthPage />} />
+                  <Route path="reports" element={<Suspense fallback={<PageLoader />}><ReportsPage /></Suspense>} />
       </Route>
 
       {/* Catch-all */}
