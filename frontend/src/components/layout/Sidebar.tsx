@@ -1,11 +1,11 @@
 /**
- * Sidebar — Main navigation drawer.
+ * Sidebar â Main navigation drawer.
  *
  * Behaviour:
- *  - Desktop (≥ lg): always visible, relative position, inline in flex layout
+ *  - Desktop (â¥ lg): always visible, relative position, inline in flex layout
  *  - Mobile (< lg): fixed position, slides in/out via layoutStore.sidebarOpen
  *
- * All state is managed through layoutStore (Zustand) — no props needed.
+ * All state is managed through layoutStore (Zustand) â no props needed.
  */
 
 import { NavLink } from 'react-router-dom';
@@ -29,6 +29,8 @@ import {
   Globe,
   BarChart3,
   X,
+  Activity,
+  Cpu,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import { useLayoutStore } from '@/stores/layoutStore';
@@ -72,6 +74,13 @@ const navGroups: NavGroup[] = [
     items: [
       { to: '/integrations', icon: Globe, i18nKey: 'nav.integrations' },
       { to: '/credentials', icon: Key, i18nKey: 'nav.credentials' },
+    ],
+  },
+  {
+    label: 'MONITORING',
+    items: [
+      { to: '/api-health', icon: Activity, i18nKey: 'nav.apiHealth' },
+      { to: '/profiler', icon: Cpu, i18nKey: 'nav.profiler' },
     ],
   },
   {
