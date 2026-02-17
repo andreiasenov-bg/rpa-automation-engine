@@ -37,6 +37,7 @@ from api.routes import integrations as integrations_routes
 from api.routes import triggers
 from api.routes import notifications
 from api.routes import task_types
+from api.routes import system_check
 
 api_v1_router = APIRouter()
 
@@ -224,3 +225,6 @@ api_v1_router.include_router(
     prefix="/storage",
     tags=["Workflow Storage"],
 )
+
+# System Health Check (post-deploy + daily)
+api_v1_router.include_router(system_check.router)

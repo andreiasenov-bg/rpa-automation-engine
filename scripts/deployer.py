@@ -2,20 +2,27 @@
 """
 Lightweight HTTP deployer — runs inside Docker, triggers git pull.
 
-Listens on port 9000. Any POST request runs `git pull` on the
-mounted repo volume. uvicorn --reload then picks up file changes.
+Listens on port 9000. POST /deploy runs `git pull`, waits for
+uvicorn reload, then runs system health checks automatically.
 
-For Celery worker/beat restarts, POST to /restart-workers.
+POST /deploy  → git pull + health check
+GET  /status  → git log + branch info
+GET  /health  → deployer alive check
 """
 
 import http.server
 import json
 import subprocess
 import os
-import sys
+import time
+import urllib.request
+import urllib.error
 
 PORT = 9000
 REPO_DIR = "/repo"
+BACKEND_URL = "http://backend:8000"
+# Auth token is fetched on-demand for health checks
+_AUTH_CACHE = {"token": None, "expires": 0}
 
 
 def _run(cmd: list[str], cwd: str = REPO_DIR) -> dict:
@@ -34,19 +41,103 @@ def _run(cmd: list[str], cwd: str = REPO_DIR) -> dict:
         return {"ok": False, "error": str(e)}
 
 
+def _get_auth_token() -> str:
+    """Get a fresh JWT token for system-check calls."""
+    now = time.time()
+    if _AUTH_CACHE["token"] and _AUTH_CACHE["expires"] > now:
+        return _AUTH_CACHE["token"]
+
+    try:
+        data = json.dumps({
+            "email": os.environ.get("ADMIN_EMAIL", "admin@rpa-engine.com"),
+            "password": os.environ.get("ADMIN_PASSWORD", "admin123!"),
+        }).encode()
+        req = urllib.request.Request(
+            f"{BACKEND_URL}/api/v1/auth/login",
+            data=data,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = json.loads(resp.read())
+            _AUTH_CACHE["token"] = body.get("access_token", "")
+            _AUTH_CACHE["expires"] = now + 3600  # cache for 1h
+            return _AUTH_CACHE["token"]
+    except Exception as e:
+        print(f"[deployer] Auth failed: {e}")
+        return ""
+
+
+def _run_health_check() -> dict:
+    """Call the backend system-check endpoint after deploy."""
+    token = _get_auth_token()
+    if not token:
+        return {"ok": False, "error": "Could not authenticate for health check"}
+
+    try:
+        req = urllib.request.Request(
+            f"{BACKEND_URL}/api/v1/system-check/",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read())
+    except Exception as e:
+        return {"ok": False, "error": f"Health check failed: {e}"}
+
+
+def _wait_for_reload(max_wait: int = 15) -> bool:
+    """Wait for uvicorn to reload after file changes."""
+    for i in range(max_wait):
+        try:
+            req = urllib.request.Request(f"{BACKEND_URL}/api/v1/health/")
+            with urllib.request.urlopen(req, timeout=3):
+                if i > 0:
+                    print(f"[deployer] Backend back up after {i}s")
+                return True
+        except Exception:
+            time.sleep(1)
+    return False
+
+
 class DeployHandler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         path = self.path.rstrip("/")
 
         if path in ("", "/deploy", "/pull"):
-            # Git pull
-            result = _run(["git", "pull", "origin", "main"])
-            self._json_response(200 if result["ok"] else 500, result)
+            # Step 1: Git pull
+            pull_result = _run(["git", "pull", "origin", "main"])
+            if not pull_result["ok"]:
+                self._json_response(500, {
+                    "step": "git_pull",
+                    "result": pull_result,
+                })
+                return
+
+            # Step 2: Wait for uvicorn to reload
+            print("[deployer] Waiting for uvicorn reload...")
+            time.sleep(2)  # Give uvicorn time to detect changes
+            backend_up = _wait_for_reload()
+
+            # Step 3: Run health check
+            health = {}
+            if backend_up:
+                print("[deployer] Running post-deploy health check...")
+                health = _run_health_check()
+            else:
+                health = {"status": "unknown", "issues": ["Backend didn't respond after reload"]}
+
+            self._json_response(200, {
+                "deploy": pull_result,
+                "backend_reloaded": backend_up,
+                "health_check": health,
+            })
+
+        elif path == "/health-check":
+            # Manual health check trigger (no git pull)
+            health = _run_health_check()
+            self._json_response(200, health)
 
         elif path == "/restart-workers":
-            # Touch a file that could trigger celery restart
-            # For now, just report that API auto-reloads via uvicorn
-            result = {"ok": True, "message": "API auto-reloads via --reload. Celery workers need manual restart."}
+            result = {"ok": True, "message": "API auto-reloads via --reload. Celery workers need manual container restart."}
             self._json_response(200, result)
 
         else:
@@ -56,7 +147,6 @@ class DeployHandler(http.server.BaseHTTPRequestHandler):
         path = self.path.rstrip("/")
 
         if path in ("", "/health", "/status"):
-            # Show git status
             status = _run(["git", "status", "--short"])
             log = _run(["git", "log", "--oneline", "-5"])
             branch = _run(["git", "branch", "--show-current"])
@@ -82,11 +172,9 @@ class DeployHandler(http.server.BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    # Configure git safe directory (mounted volume)
     subprocess.run(["git", "config", "--global", "safe.directory", REPO_DIR],
                     capture_output=True)
 
-    # If GITHUB_TOKEN is set, configure credential helper
     token = os.environ.get("GITHUB_TOKEN", "")
     if token:
         subprocess.run(
@@ -94,11 +182,13 @@ if __name__ == "__main__":
              f"!f() {{ echo \"password={token}\"; }}; f"],
             capture_output=True,
         )
-        print(f"[deployer] GitHub token configured")
+        print("[deployer] GitHub token configured")
 
     server = http.server.HTTPServer(("0.0.0.0", PORT), DeployHandler)
     print(f"[deployer] Listening on port {PORT}")
     print(f"[deployer] Repo: {REPO_DIR}")
+    print(f"[deployer] POST /deploy = git pull + health check")
+    print(f"[deployer] POST /health-check = health check only")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
