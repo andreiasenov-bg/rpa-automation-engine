@@ -19,6 +19,10 @@ until redis-cli -h "${REDIS_HOST:-redis}" -p "${REDIS_PORT:-6379}" ping 2>/dev/n
 done
 echo "[entrypoint] Redis is ready"
 
+# Install any new Python dependencies (hot-reload friendly)
+echo "[entrypoint] Checking Python dependencies..."
+pip install --no-cache-dir -q croniter 2>/dev/null || true
+
 # Run Alembic migrations
 echo "[entrypoint] Running database migrations..."
 cd /app
