@@ -11,8 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel, Field
 from typing import Optional
 
-from app.dependencies import get_current_active_user, TokenPayload
-from db.session import get_db
+from app.dependencies import get_current_active_user, get_db, TokenPayload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from notifications.channels import NotificationChannel, NotificationPriority
@@ -112,7 +111,7 @@ async def list_notifications(
             ai_diagnosis = None
             try:
                 diag_row = (await db.execute(sa_text("""
-                    SELECT details FROM execution_journals
+                    SELECT details FROM execution_journal
                     WHERE execution_id = :eid AND event_type = 'ai_diagnosis'
                     ORDER BY created_at DESC LIMIT 1
                 """), {"eid": exec_id})).fetchone()
@@ -258,7 +257,7 @@ async def ai_diagnose_execution(
     """
     Trigger AI analysis of a failed execution.
     ClaudeClient analyzes the error, workflow config, and execution context,
-    then stores diagnosis in execution_journals and optionally retries.
+    then stores diagnosis in execution_journal and optionally retries.
     """
     from sqlalchemy import text as sa_text
 
@@ -336,15 +335,16 @@ Respond in this JSON format:
             "confidence": 0.0,
         }
 
-    # Store diagnosis in execution_journals
+    # Store diagnosis in execution_journal
     try:
         await db.execute(sa_text("""
-            INSERT INTO execution_journals
-            (id, execution_id, event_type, severity, details, created_at)
-            VALUES (gen_random_uuid(), :eid, 'ai_diagnosis', :severity,
+            INSERT INTO execution_journal
+            (id, execution_id, event_type, message, severity, details, created_at)
+            VALUES (gen_random_uuid(), :eid, 'ai_diagnosis', :msg, :severity,
                     CAST(:details AS jsonb), NOW())
         """), {
             "eid": execution_id,
+            "msg": diagnosis.get("diagnosis", "AI diagnosis")[:500],
             "severity": diagnosis.get("severity", "medium"),
             "details": _json.dumps(diagnosis),
         })
@@ -390,12 +390,13 @@ Respond in this JSON format:
 
                 # Update journal with auto-fix info
                 await db.execute(sa_text("""
-                    INSERT INTO execution_journals
-                    (id, execution_id, event_type, severity, details, created_at)
-                    VALUES (gen_random_uuid(), :eid, 'ai_auto_fix', 'info',
+                    INSERT INTO execution_journal
+                    (id, execution_id, event_type, message, severity, details, created_at)
+                    VALUES (gen_random_uuid(), :eid, 'ai_auto_fix', :msg, 'info',
                             CAST(:details AS jsonb), NOW())
                 """), {
                     "eid": execution_id,
+                    "msg": f"AI auto-retry triggered: {new_exec_id}",
                     "details": _json.dumps({"action": "retry", "new_execution_id": new_exec_id}),
                 })
                 await db.commit()
