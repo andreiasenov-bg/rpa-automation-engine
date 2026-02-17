@@ -18,6 +18,7 @@ from db.models.schedule import Schedule
 from db.models.audit_log import AuditLog
 from db.models.trigger import Trigger
 from db.models.execution_state import ExecutionStateModel, ExecutionCheckpointModel, ExecutionJournalModel
+from db.models.api_key import APIKey
 
 __all__ = [
     "Organization",
@@ -38,4 +39,5 @@ __all__ = [
     "ExecutionStateModel",
     "ExecutionCheckpointModel",
     "ExecutionJournalModel",
+    "APIKey",
 ]

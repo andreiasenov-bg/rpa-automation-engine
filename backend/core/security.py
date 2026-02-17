@@ -311,36 +311,14 @@ async def get_current_user(
 
 def require_permission(required_permissions: List[str]) -> Callable:
     """
-    Factory function to create a FastAPI dependency that checks RBAC permissions.
+    Legacy stub — real RBAC enforcement lives in ``core.rbac``.
 
-    Args:
-        required_permissions: List of required permission codes (e.g., ["workflows:read", "workflows:write"])
+    All route-level permission checks import from ``core.rbac.require_permission``
+    which loads User → Role → Permission from the database and supports wildcard
+    matching (e.g. "admin.*").
 
-    Returns:
-        Dependency function that checks if user has required permissions
+    This wrapper is kept only for any code that still imports from ``core.security``.
+    It delegates to ``core.rbac.require_all_permissions``.
     """
-
-    async def permission_checker(
-        current_user: TokenPayload = Depends(get_current_user),
-    ) -> TokenPayload:
-        """
-        Check if the current user has the required permissions.
-
-        Args:
-            current_user: Current authenticated user
-
-        Returns:
-            Current user if authorized
-
-        Raises:
-            HTTPException: If user lacks required permissions
-        """
-        # This is a placeholder implementation
-        # In production, you would load user roles and permissions from the database
-        # and check them against required_permissions
-
-        # For now, we'll just return the user
-        # TODO: Implement actual permission checking from database
-        return current_user
-
-    return permission_checker
+    from core.rbac import require_all_permissions as _rbac_check
+    return _rbac_check(*required_permissions)

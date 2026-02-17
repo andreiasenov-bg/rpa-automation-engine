@@ -9,12 +9,17 @@ Each key is scoped to an organization and can have specific permissions.
 """
 
 import hashlib
+import logging
 import secrets
 from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import Request, HTTPException, Security
 from fastapi.security import APIKeyHeader, APIKeyQuery
+from sqlalchemy import select, update, or_
+from sqlalchemy.sql import func
+
+logger = logging.getLogger(__name__)
 
 # Security schemes
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -98,33 +103,57 @@ async def resolve_api_key(
 
     key_hash = hash_api_key(raw_key)
 
-    # In production, this queries the database
-    # For now, return None to fall through to JWT auth
-    # TODO: Implement DB lookup when api_keys table is added
-    #
-    # Example DB query:
-    # async with get_session() as session:
-    #     result = await session.execute(
-    #         select(APIKeyModel)
-    #         .where(APIKeyModel.key_hash == key_hash)
-    #         .where(APIKeyModel.is_active == True)
-    #         .where(or_(APIKeyModel.expires_at.is_(None), APIKeyModel.expires_at > func.now()))
-    #     )
-    #     db_key = result.scalar_one_or_none()
-    #     if db_key:
-    #         await session.execute(
-    #             update(APIKeyModel)
-    #             .where(APIKeyModel.id == db_key.id)
-    #             .values(last_used_at=func.now(), usage_count=APIKeyModel.usage_count + 1)
-    #         )
-    #         return APIKeyInfo(
-    #             key_id=str(db_key.id),
-    #             organization_id=str(db_key.organization_id),
-    #             name=db_key.name,
-    #             permissions=db_key.permissions or [],
-    #         )
+    # Look up key in database
+    try:
+        from db.session import AsyncSessionLocal
+        from db.models.api_key import APIKey
 
-    return None
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(APIKey).where(
+                    APIKey.key_hash == key_hash,
+                    APIKey.is_active == True,
+                    APIKey.is_deleted == False,
+                    or_(
+                        APIKey.expires_at.is_(None),
+                        APIKey.expires_at > func.now(),
+                    ),
+                )
+            )
+            db_key = result.scalar_one_or_none()
+
+            if db_key is None:
+                logger.warning("Invalid API key attempted (hash prefix: %s...)", key_hash[:8])
+                raise HTTPException(
+                    status_code=401,
+                    detail="Invalid or expired API key",
+                )
+
+            # Update last_used_at and usage_count
+            await session.execute(
+                update(APIKey)
+                .where(APIKey.id == db_key.id)
+                .values(
+                    last_used_at=func.now(),
+                    usage_count=APIKey.usage_count + 1,
+                )
+            )
+            await session.commit()
+
+            return APIKeyInfo(
+                key_id=str(db_key.id),
+                organization_id=str(db_key.organization_id),
+                name=db_key.name,
+                permissions=db_key.permissions or [],
+                rate_limit_group=db_key.rate_limit_group,
+            )
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # If DB is not available or table doesn't exist yet, fall through
+        logger.debug("API key lookup failed (DB may not be ready): %s", exc)
+        return None
 
 
 def require_api_permission(permission: str):

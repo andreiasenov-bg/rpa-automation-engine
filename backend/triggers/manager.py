@@ -83,24 +83,45 @@ class TriggerManager:
             self._initialized = True
             return 0
 
-        # TODO: Query Trigger model for all enabled, non-deleted triggers
-        # triggers = await db_session.execute(
-        #     select(Trigger).where(
-        #         Trigger.is_enabled == True,
-        #         Trigger.is_deleted == False
-        #     )
-        # )
-        # for trigger in triggers.scalars():
-        #     await self.start_trigger(
-        #         trigger_id=trigger.id,
-        #         trigger_type=trigger.trigger_type,
-        #         config=trigger.config or {},
-        #         workflow_id=trigger.workflow_id,
-        #         organization_id=trigger.organization_id,
-        #     )
+        from sqlalchemy import select
+        from db.models.trigger import Trigger
+
+        try:
+            result = await db_session.execute(
+                select(Trigger).where(
+                    Trigger.is_enabled == True,
+                    Trigger.is_deleted == False,
+                )
+            )
+            triggers = result.scalars().all()
+
+            loaded = 0
+            for trigger in triggers:
+                tr_result = await self.start_trigger(
+                    trigger_id=trigger.id,
+                    trigger_type=trigger.trigger_type,
+                    config=trigger.config or {},
+                    workflow_id=trigger.workflow_id,
+                    organization_id=trigger.organization_id,
+                )
+                if tr_result.success:
+                    loaded += 1
+                else:
+                    logger.warning(
+                        "Failed to start trigger %s: %s",
+                        trigger.id,
+                        tr_result.message,
+                    )
+
+            logger.info(
+                "Trigger manager initialized: %d/%d triggers loaded",
+                loaded,
+                len(triggers),
+            )
+        except Exception as exc:
+            logger.error("Failed to load triggers from DB: %s", exc, exc_info=True)
 
         self._initialized = True
-        logger.info("Trigger manager initialized")
         return len(self._active_triggers)
 
     async def start_trigger(

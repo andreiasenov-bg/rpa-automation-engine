@@ -238,6 +238,9 @@ def resume_workflow(self, execution_id: str, saved_state: dict):
 
 async def _resume_workflow(execution_id: str, saved_state: dict) -> dict:
     """Async workflow resume logic."""
+    from sqlalchemy import select
+    from db.session import AsyncSessionLocal
+    from db.models.workflow import Workflow
     from workflow.engine import WorkflowEngine, ExecutionContext
     from workflow.checkpoint import CheckpointManager
     from tasks.registry import get_task_registry
@@ -252,8 +255,19 @@ async def _resume_workflow(execution_id: str, saved_state: dict) -> dict:
 
     resume_context = ExecutionContext.from_dict(saved_state)
 
-    # TODO: Load workflow definition from DB using resume_context.workflow_id
-    definition = {}  # Placeholder
+    # Load workflow definition from DB
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Workflow).where(Workflow.id == resume_context.workflow_id)
+        )
+        workflow = result.scalar_one_or_none()
+
+    if not workflow:
+        raise RuntimeError(
+            f"Cannot resume: workflow {resume_context.workflow_id} not found in DB"
+        )
+
+    definition = workflow.definition or {}
 
     context = await engine.execute(
         execution_id=execution_id,
