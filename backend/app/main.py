@@ -21,6 +21,9 @@ from core.logging_config import setup_logging
 from core.middleware import RequestTrackingMiddleware, setup_exception_handlers
 from core.metrics import MetricsMiddleware, metrics_router
 from core.rate_limit import RateLimitMiddleware
+from core.profiler import ProfilerMiddleware
+from api.routes import profiler as profiler_routes
+from api.routes import api_health as api_health_routes
 from core.security_scanner import check_secrets_on_startup
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -60,7 +63,7 @@ async def lifespan(app: FastAPI):
         print(f"[startup] FATAL: {e}")
         raise
 
-    # Security scan — blocks startup in production if critical secrets found
+    # Security scan â blocks startup in production if critical secrets found
     try:
         check_secrets_on_startup()
     except RuntimeError as e:
@@ -152,7 +155,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # Prometheus metrics middleware (outermost — measures all requests)
+    # Prometheus metrics middleware (outermost â measures all requests)
     app.add_middleware(MetricsMiddleware)
 
     # Rate limiting middleware
@@ -160,6 +163,9 @@ def create_app() -> FastAPI:
 
     # Request tracking middleware
     app.add_middleware(RequestTrackingMiddleware)
+
+    # Profiler middleware (CPU, memory, duration tracking)
+    app.add_middleware(ProfilerMiddleware)
 
     # Security headers middleware
     app.add_middleware(SecurityHeadersMiddleware)
@@ -176,16 +182,20 @@ def create_app() -> FastAPI:
     # Global exception handlers
     setup_exception_handlers(app)
 
-    # Root health check (unversioned — for load balancers / k8s probes)
+    # Root health check (unversioned â for load balancers / k8s probes)
     app.include_router(health.router, prefix="/api", tags=["Health"])
 
-    # Versioned API — all business endpoints under /api/v1
+    # Versioned API â all business endpoints under /api/v1
     app.include_router(api_v1_router, prefix=settings.API_V1_PREFIX)
 
-    # WebSocket endpoint (not under /api/v1 — mounted directly on the app)
+    # WebSocket endpoint (not under /api/v1 â mounted directly on the app)
     app.include_router(ws_router)
 
-    # Prometheus metrics (unauthenticated — for scrapers)
+    # Profiler & API Health Monitor
+    app.include_router(profiler_routes.router, prefix="/api/v1", tags=["Profiler"])
+    app.include_router(api_health_routes.router, prefix="/api/v1", tags=["API Health"])
+
+    # Prometheus metrics (unauthenticated â for scrapers)
     app.include_router(metrics_router)
 
     return app
@@ -194,7 +204,7 @@ def create_app() -> FastAPI:
 def _start_schedule_poller() -> "threading.Event":
     """Launch a daemon thread that polls schedules every 60 seconds.
 
-    This runs inside the FastAPI/uvicorn process — no Celery beat needed.
+    This runs inside the FastAPI/uvicorn process â no Celery beat needed.
     Returns a threading.Event that can be set to stop the poller.
     """
     import threading
@@ -298,7 +308,7 @@ def _start_schedule_poller() -> "threading.Event":
                     dispatched += 1
                     logger.info(
                         f"[schedule-poller] Dispatched '{schedule.name}' "
-                        f"→ {execution_id}, next: {schedule.next_run_at}"
+                        f"â {execution_id}, next: {schedule.next_run_at}"
                     )
                 except Exception as e:
                     logger.error(f"[schedule-poller] {schedule.id}: {e}", exc_info=True)
