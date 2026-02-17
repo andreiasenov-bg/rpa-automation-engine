@@ -1,7 +1,7 @@
 """Notification API routes.
 
 Manage notification channels, send test notifications, view status.
-Provides in-app notification feed from execution events + AI diagnosis.
+Provides in-app notification feed from execution events + AI diagnosis + fix history.
 """
 
 import json as _json
@@ -56,9 +56,9 @@ async def list_notifications(
     Return recent notification feed for the current user/org.
 
     Sources:
-      1. Failed executions  → type='error'
+      1. Failed executions  → type='error'  (with AI diagnosis + fix info)
       2. Completed executions with results → type='success'
-      3. AI diagnoses stored in execution journals → embedded in error notifications
+      3. AI auto-fixes → type='warning' (shows what was fixed)
     """
     from sqlalchemy import text as sa_text
 
@@ -120,39 +120,124 @@ async def list_notifications(
             except Exception:
                 pass
 
-            title = f"❌ {wf_name} — Failed"
-            message = f"Error: {error_msg[:200]}" if error_msg else "Execution failed"
-            if duration_str:
-                message += f" (after {duration_str})"
+            # ── Check for AI auto-fix applied ──
+            ai_fix = None
+            try:
+                fix_row = (await db.execute(sa_text("""
+                    SELECT details, message FROM execution_journal
+                    WHERE execution_id = :eid AND event_type = 'ai_auto_fix'
+                    ORDER BY created_at DESC LIMIT 1
+                """), {"eid": exec_id})).fetchone()
+                if fix_row and fix_row[0]:
+                    ai_fix = fix_row[0] if isinstance(fix_row[0], dict) else _json.loads(fix_row[0])
+            except Exception:
+                pass
 
-            if ai_diagnosis:
-                diagnosis_text = ai_diagnosis.get("diagnosis", "")
-                fix_suggestion = ai_diagnosis.get("fix_suggestion", "")
-                auto_fixed = ai_diagnosis.get("auto_fixed", False)
-                if auto_fixed:
-                    title = f"🔧 {wf_name} — Auto-Fixed & Retried"
-                    message = f"AI diagnosed: {diagnosis_text[:150]}. Auto-fix applied, retrying..."
-                elif diagnosis_text:
-                    message += f"\n💡 AI: {diagnosis_text[:150]}"
-                    if fix_suggestion:
-                        message += f"\n🔧 Fix: {fix_suggestion[:100]}"
+            # Build notification based on whether fix was applied
+            if ai_fix and ai_fix.get("action") == "fix_definition":
+                # ── Auto-fix was applied (definition was modified) ──
+                title = f"🔧 {wf_name} — Auto-Fixed"
+                changes = ai_fix.get("changes_summary", "Definition updated")
+                message = f"AI diagnosed & fixed: {changes[:200]}"
+                new_exec = ai_fix.get("new_execution_id") or ""
+                if new_exec:
+                    # Check if the re-run succeeded
+                    rerun_row = None
+                    try:
+                        rerun_row = (await db.execute(sa_text(
+                            "SELECT status FROM executions WHERE id = :eid"
+                        ), {"eid": new_exec})).fetchone()
+                    except Exception:
+                        pass
+                    if rerun_row:
+                        if rerun_row[0] == "completed":
+                            title = f"✅🔧 {wf_name} — Auto-Fixed & Succeeded"
+                            message += " → Re-run succeeded!"
+                        elif rerun_row[0] == "failed":
+                            title = f"⚠️ {wf_name} — Auto-Fix Applied, Re-run Failed"
+                            message += " → Re-run also failed."
+                        elif rerun_row[0] == "running":
+                            title = f"🔧⏳ {wf_name} — Auto-Fixed, Re-running..."
+                            message += " → Re-running now..."
+                    old_ver = ai_fix.get("old_version", "?")
+                    new_ver = ai_fix.get("new_version", "?")
+                    message += f" (v{old_ver} → v{new_ver})"
 
-            notifications.append({
-                "id": nid,
-                "type": "error" if not (ai_diagnosis and ai_diagnosis.get("auto_fixed")) else "warning",
-                "title": title,
-                "message": message,
-                "resource_type": "execution",
-                "resource_id": exec_id,
-                "read": nid in read_set,
-                "created_at": completed_at.isoformat() if completed_at else datetime.utcnow().isoformat(),
-                "metadata": {
-                    "workflow_id": str(r[1]),
-                    "workflow_name": wf_name,
-                    "trigger_type": trigger_type,
-                    "ai_diagnosis": ai_diagnosis,
-                },
-            })
+                notifications.append({
+                    "id": nid,
+                    "type": "warning",
+                    "title": title,
+                    "message": message,
+                    "resource_type": "execution",
+                    "resource_id": exec_id,
+                    "read": nid in read_set,
+                    "created_at": completed_at.isoformat() if completed_at else datetime.utcnow().isoformat(),
+                    "metadata": {
+                        "workflow_id": str(r[1]),
+                        "workflow_name": wf_name,
+                        "trigger_type": trigger_type,
+                        "ai_diagnosis": ai_diagnosis,
+                        "ai_fix": ai_fix,
+                    },
+                })
+
+            elif ai_fix and ai_fix.get("action") == "retry":
+                # ── Simple retry was triggered ──
+                title = f"🔄 {wf_name} — Auto-Retried"
+                diag_text = ai_diagnosis.get("diagnosis", "") if ai_diagnosis else ""
+                message = f"Error: {error_msg[:100]}" if error_msg else "Failed"
+                if diag_text:
+                    message += f"\n💡 AI: {diag_text[:150]}"
+                message += "\n🔄 Auto-retry in progress..."
+
+                notifications.append({
+                    "id": nid,
+                    "type": "warning",
+                    "title": title,
+                    "message": message,
+                    "resource_type": "execution",
+                    "resource_id": exec_id,
+                    "read": nid in read_set,
+                    "created_at": completed_at.isoformat() if completed_at else datetime.utcnow().isoformat(),
+                    "metadata": {
+                        "workflow_id": str(r[1]),
+                        "workflow_name": wf_name,
+                        "trigger_type": trigger_type,
+                        "ai_diagnosis": ai_diagnosis,
+                        "ai_fix": ai_fix,
+                    },
+                })
+            else:
+                # ── Plain failure, no auto-fix ──
+                title = f"❌ {wf_name} — Failed"
+                message = f"Error: {error_msg[:200]}" if error_msg else "Execution failed"
+                if duration_str:
+                    message += f" (after {duration_str})"
+
+                if ai_diagnosis:
+                    diagnosis_text = ai_diagnosis.get("diagnosis", "")
+                    fix_suggestion = ai_diagnosis.get("fix_suggestion", "")
+                    if diagnosis_text:
+                        message += f"\n💡 AI: {diagnosis_text[:150]}"
+                        if fix_suggestion:
+                            message += f"\n🔧 Fix: {fix_suggestion[:100]}"
+
+                notifications.append({
+                    "id": nid,
+                    "type": "error",
+                    "title": title,
+                    "message": message,
+                    "resource_type": "execution",
+                    "resource_id": exec_id,
+                    "read": nid in read_set,
+                    "created_at": completed_at.isoformat() if completed_at else datetime.utcnow().isoformat(),
+                    "metadata": {
+                        "workflow_id": str(r[1]),
+                        "workflow_name": wf_name,
+                        "trigger_type": trigger_type,
+                        "ai_diagnosis": ai_diagnosis,
+                    },
+                })
 
         elif exec_status == "completed":
             # Get result count from execution_states
@@ -207,6 +292,77 @@ async def list_notifications(
     return {"notifications": notifications, "total": len(notifications)}
 
 
+# ─── Fix History endpoint ─────────────────────────────────────
+
+@router.get("/fix-history", summary="AI auto-fix history")
+async def get_fix_history(
+    per_page: int = Query(default=20, ge=1, le=50),
+    current_user: TokenPayload = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Return history of all AI auto-fixes applied to workflows.
+    Shows: problem → diagnosis → fix applied → result.
+    """
+    from sqlalchemy import text as sa_text
+
+    org_id = current_user.org_id
+
+    rows = (await db.execute(sa_text("""
+        SELECT
+            ej.execution_id,
+            ej.message,
+            ej.details,
+            ej.created_at,
+            e.workflow_id,
+            w.name AS workflow_name,
+            e.error_message
+        FROM execution_journal ej
+        JOIN executions e ON e.id = ej.execution_id
+        JOIN workflows w ON w.id = e.workflow_id
+        WHERE w.organization_id = :org_id
+          AND ej.event_type = 'ai_auto_fix'
+        ORDER BY ej.created_at DESC
+        LIMIT :limit
+    """), {"org_id": org_id, "limit": per_page})).fetchall()
+
+    fixes = []
+    for r in rows:
+        details = r[2] if isinstance(r[2], dict) else (_json.loads(r[2]) if r[2] else {})
+
+        # Check if re-run execution succeeded
+        rerun_status = None
+        new_exec_id = details.get("new_execution_id")
+        if new_exec_id:
+            try:
+                status_row = (await db.execute(sa_text(
+                    "SELECT status FROM executions WHERE id = :eid"
+                ), {"eid": new_exec_id})).fetchone()
+                if status_row:
+                    rerun_status = status_row[0]
+            except Exception:
+                pass
+
+        fixes.append({
+            "execution_id": str(r[0]),
+            "workflow_id": str(r[4]),
+            "workflow_name": r[5] or str(r[4])[:8],
+            "original_error": (r[6] or "")[:300],
+            "fix_action": details.get("action", "unknown"),
+            "changes_summary": details.get("changes_summary", r[1]),
+            "changes_detail": details.get("changes_detail", []),
+            "old_version": details.get("old_version"),
+            "new_version": details.get("new_version"),
+            "root_cause": details.get("root_cause", "unknown"),
+            "diagnosis": details.get("diagnosis", ""),
+            "rerun_execution_id": new_exec_id,
+            "rerun_status": rerun_status,
+            "fixed_at": r[3].isoformat() if r[3] else None,
+        })
+
+    return {"fixes": fixes, "total": len(fixes)}
+
+
 # ─── Mark read endpoints ────────────────────────────────────────
 
 @router.put("/{notification_id}/read", summary="Mark notification as read")
@@ -248,7 +404,7 @@ async def mark_all_read(
 
 # ─── AI Diagnosis ─────────────────────────────────────────────
 
-@router.post("/{execution_id}/ai-diagnose", summary="Trigger AI diagnosis for failed execution")
+@router.post("/{execution_id}/ai-diagnose", summary="Trigger AI diagnosis + auto-fix for failed execution")
 async def ai_diagnose_execution(
     execution_id: str,
     current_user: TokenPayload = Depends(get_current_active_user),
@@ -257,14 +413,15 @@ async def ai_diagnose_execution(
     """
     Trigger AI analysis of a failed execution.
     ClaudeClient analyzes the error, workflow config, and execution context,
-    then stores diagnosis in execution_journal and optionally retries.
+    then stores diagnosis in execution_journal.
+    If fixable, generates a corrected definition, applies it, and re-runs.
     """
     from sqlalchemy import text as sa_text
 
     # Get execution + workflow info
     row = (await db.execute(sa_text("""
         SELECT e.id, e.status, e.error_message, e.workflow_id,
-               w.name, w.definition,
+               w.name, w.definition, w.version, w.organization_id,
                es.state_data
         FROM executions e
         LEFT JOIN workflows w ON w.id = e.workflow_id
@@ -278,9 +435,12 @@ async def ai_diagnose_execution(
         raise HTTPException(status_code=400, detail="Only failed executions can be diagnosed")
 
     error_message = row[2] or "Unknown error"
+    workflow_id = str(row[3])
     workflow_name = row[4] or "Unknown"
     definition = row[5] if isinstance(row[5], dict) else (_json.loads(row[5]) if row[5] else {})
-    state_data = row[6] if isinstance(row[6], dict) else (_json.loads(row[6]) if row[6] else {})
+    wf_version = row[6] or 1
+    org_id = str(row[7])
+    state_data = row[8] if isinstance(row[8], dict) else (_json.loads(row[8]) if row[8] else {})
 
     # Extract step error details
     step_errors = []
@@ -289,7 +449,7 @@ async def ai_diagnose_execution(
         if isinstance(si, dict) and si.get("error"):
             step_errors.append({"step": sid, "error": str(si["error"])[:300], "status": si.get("status", "unknown")})
 
-    # Build AI analysis prompt
+    # ── Step 1: Diagnose ──
     prompt = f"""Analyze this RPA workflow execution failure and provide diagnosis.
 
 WORKFLOW: {workflow_name}
@@ -299,22 +459,29 @@ ERROR: {error_message}
 STEP ERRORS:
 {_json.dumps(step_errors, indent=2) if step_errors else "No step-level errors captured."}
 
-WORKFLOW DEFINITION (steps):
-{_json.dumps(definition.get('steps', [])[:5], indent=2, default=str)[:2000]}
+FULL WORKFLOW DEFINITION:
+{_json.dumps(definition, indent=2, default=str)[:3000]}
 
 Respond in this JSON format:
 {{
   "diagnosis": "Brief explanation of what went wrong and why",
-  "root_cause": "connection_error | auth_error | data_error | config_error | rate_limit | site_changed | timeout | unknown",
-  "severity": "low | medium | high | critical",
-  "fix_suggestion": "Specific actionable fix the user can apply",
+  "root_cause": "connection_error|auth_error|data_error|config_error|rate_limit|site_changed|timeout|unknown",
+  "severity": "low|medium|high|critical",
+  "fix_suggestion": "Specific actionable fix",
   "auto_fixable": true/false,
-  "auto_fix_action": "retry | update_selector | refresh_token | increase_timeout | null",
-  "confidence": 0.0-1.0
-}}"""
+  "auto_fix_action": "retry|fix_definition|null",
+  "confidence": 0.0-1.0,
+  "needs_definition_change": true/false,
+  "affected_steps": ["step-id-1"]
+}}
+
+Set "auto_fix_action": "fix_definition" when the issue is a bad selector, wrong URL,
+timeout too low, or any config that can be programmatically corrected.
+Set "auto_fix_action": "retry" ONLY for transient errors."""
 
     # Call ClaudeClient
     diagnosis = None
+    ai_available = False
     try:
         from integrations.claude_client import get_claude_client
         ai = get_claude_client()
@@ -323,6 +490,7 @@ Respond in this JSON format:
             diagnosis = ai.safe_extract_json(raw)
         elif isinstance(raw, dict):
             diagnosis = raw
+        ai_available = True
     except Exception as ai_err:
         logger.warning(f"AI diagnosis failed for {execution_id}: {ai_err}")
         diagnosis = {
@@ -335,7 +503,7 @@ Respond in this JSON format:
             "confidence": 0.0,
         }
 
-    # Store diagnosis in execution_journal
+    # Store diagnosis
     try:
         await db.execute(sa_text("""
             INSERT INTO execution_journal
@@ -352,54 +520,163 @@ Respond in this JSON format:
     except Exception as db_err:
         logger.warning(f"Could not store AI diagnosis: {db_err}")
 
-    # Auto-fix: if diagnosis says retry is the fix, trigger retry
+    # ── Step 2: Auto-fix if possible ──
     auto_fixed = False
-    if diagnosis.get("auto_fixable") and diagnosis.get("auto_fix_action") == "retry":
+    fix_result = None
+    fix_action = diagnosis.get("auto_fix_action")
+
+    if diagnosis.get("auto_fixable") and fix_action == "fix_definition" and ai_available:
+        # ── REAL AUTO-FIX: Ask Claude for corrected definition ──
+        fix_prompt = f"""You are an RPA workflow repair AI. Fix this workflow definition.
+
+WORKFLOW: {workflow_name}
+ERROR: {error_message[:500]}
+DIAGNOSIS: {diagnosis.get('diagnosis', 'Unknown')}
+ROOT CAUSE: {diagnosis.get('root_cause', 'unknown')}
+AFFECTED STEPS: {_json.dumps(diagnosis.get('affected_steps', []))}
+
+STEP ERRORS:
+{_json.dumps(step_errors, indent=2) if step_errors else "None."}
+
+CURRENT DEFINITION (the one that failed):
+{_json.dumps(definition, indent=2, default=str)[:4000]}
+
+Return JSON:
+{{
+  "fixed_definition": {{ ... COMPLETE corrected workflow definition ... }},
+  "changes_summary": "Brief description of changes",
+  "changes_detail": [
+    {{"step_id": "step-1", "field": "config.timeout", "old_value": "30", "new_value": "60", "reason": "Timeout was too low"}}
+  ]
+}}
+
+Rules: Return FULL definition. Only change what's needed. For selectors: use more robust selectors. For timeouts: increase 2x."""
+
+        try:
+            from integrations.claude_client import get_claude_client
+            ai = get_claude_client()
+            raw = await ai.analyze(fix_prompt, output_format="json")
+            if isinstance(raw, str):
+                fix_result = ai.safe_extract_json(raw)
+            elif isinstance(raw, dict):
+                fix_result = raw
+        except Exception as fix_err:
+            logger.warning(f"AI fix generation failed: {fix_err}")
+
+        if fix_result and "fixed_definition" in fix_result:
+            new_definition = fix_result["fixed_definition"]
+            changes_summary = fix_result.get("changes_summary", "AI auto-fix applied")
+            changes_detail = fix_result.get("changes_detail", [])
+
+            if isinstance(new_definition, dict) and "steps" in new_definition:
+                # Apply fix to DB
+                try:
+                    new_ver = wf_version + 1
+                    await db.execute(sa_text("""
+                        UPDATE workflows
+                        SET definition = CAST(:def AS jsonb),
+                            version = :new_ver,
+                            updated_at = NOW()
+                        WHERE id = :wid
+                    """), {
+                        "wid": workflow_id,
+                        "def": _json.dumps(new_definition),
+                        "new_ver": new_ver,
+                    })
+                    await db.commit()
+
+                    # Log fix history
+                    fix_history = {
+                        "action": "fix_definition",
+                        "changes_summary": changes_summary,
+                        "changes_detail": changes_detail,
+                        "old_version": wf_version,
+                        "new_version": new_ver,
+                        "old_definition_snapshot": _json.dumps(definition, default=str)[:5000],
+                        "diagnosis": diagnosis.get("diagnosis", ""),
+                        "root_cause": diagnosis.get("root_cause", "unknown"),
+                        "error_message": error_message[:500],
+                    }
+
+                    # Create new execution
+                    from uuid import uuid4
+                    new_exec_id = str(uuid4())
+                    await db.execute(sa_text("""
+                        INSERT INTO executions
+                        (id, workflow_id, status, trigger_type, created_at)
+                        VALUES (:eid, :wid, 'pending', 'ai_auto_fix', NOW())
+                    """), {"eid": new_exec_id, "wid": workflow_id})
+
+                    fix_history["new_execution_id"] = new_exec_id
+
+                    await db.execute(sa_text("""
+                        INSERT INTO execution_journal
+                        (id, execution_id, event_type, message, severity, details, created_at)
+                        VALUES (gen_random_uuid(), :eid, 'ai_auto_fix', :msg, 'info',
+                                CAST(:details AS jsonb), NOW())
+                    """), {
+                        "eid": execution_id,
+                        "msg": f"AI auto-fix applied: {changes_summary[:300]}",
+                        "details": _json.dumps(fix_history),
+                    })
+                    await db.commit()
+
+                    # Dispatch re-run
+                    from worker.tasks.workflow import execute_workflow
+                    execute_workflow.delay(
+                        execution_id=new_exec_id,
+                        workflow_id=workflow_id,
+                        organization_id=org_id,
+                        definition=new_definition,
+                    )
+
+                    auto_fixed = True
+                    diagnosis["auto_fixed"] = True
+                    diagnosis["fix_applied"] = changes_summary
+                    diagnosis["changes_detail"] = changes_detail
+                    diagnosis["retry_execution_id"] = new_exec_id
+                    diagnosis["old_version"] = wf_version
+                    diagnosis["new_version"] = new_ver
+                    logger.info(f"AI auto-fix applied to workflow {workflow_id}: v{wf_version} → v{new_ver}, re-running as {new_exec_id}")
+
+                except Exception as apply_err:
+                    logger.warning(f"Failed to apply AI fix: {apply_err}")
+
+    elif diagnosis.get("auto_fixable") and fix_action == "retry":
+        # ── Simple retry ──
         try:
             from worker.tasks.workflow import execute_workflow
-            # Get original execution params
-            exec_row = (await db.execute(sa_text("""
-                SELECT e.workflow_id, w.definition, w.organization_id
-                FROM executions e
-                LEFT JOIN workflows w ON w.id = e.workflow_id
-                WHERE e.id = :eid
-            """), {"eid": execution_id})).fetchone()
+            from uuid import uuid4
+            new_exec_id = str(uuid4())
+            await db.execute(sa_text("""
+                INSERT INTO executions
+                (id, workflow_id, status, trigger_type, created_at)
+                VALUES (:eid, :wid, 'pending', 'ai_retry', NOW())
+            """), {"eid": new_exec_id, "wid": workflow_id})
+            await db.commit()
 
-            if exec_row:
-                from uuid import uuid4
-                new_exec_id = str(uuid4())
-                # Create new execution record
-                await db.execute(sa_text("""
-                    INSERT INTO executions
-                    (id, workflow_id, status, trigger_type, created_at)
-                    VALUES (:eid, :wid, 'pending', 'ai_retry', NOW())
-                """), {"eid": new_exec_id, "wid": str(exec_row[0])})
-                await db.commit()
+            execute_workflow.delay(
+                execution_id=new_exec_id,
+                workflow_id=workflow_id,
+                organization_id=org_id,
+                definition=definition,
+            )
+            auto_fixed = True
+            diagnosis["auto_fixed"] = True
+            diagnosis["retry_execution_id"] = new_exec_id
 
-                # Dispatch Celery task
-                execute_workflow.delay(
-                    execution_id=new_exec_id,
-                    workflow_id=str(exec_row[0]),
-                    organization_id=str(exec_row[2]),
-                    definition=exec_row[1] if isinstance(exec_row[1], dict) else _json.loads(exec_row[1]),
-                )
-                auto_fixed = True
-                diagnosis["auto_fixed"] = True
-                diagnosis["retry_execution_id"] = new_exec_id
-                logger.info(f"AI auto-retry triggered: {new_exec_id} (from failed {execution_id})")
-
-                # Update journal with auto-fix info
-                await db.execute(sa_text("""
-                    INSERT INTO execution_journal
-                    (id, execution_id, event_type, message, severity, details, created_at)
-                    VALUES (gen_random_uuid(), :eid, 'ai_auto_fix', :msg, 'info',
-                            CAST(:details AS jsonb), NOW())
-                """), {
-                    "eid": execution_id,
-                    "msg": f"AI auto-retry triggered: {new_exec_id}",
-                    "details": _json.dumps({"action": "retry", "new_execution_id": new_exec_id}),
-                })
-                await db.commit()
+            await db.execute(sa_text("""
+                INSERT INTO execution_journal
+                (id, execution_id, event_type, message, severity, details, created_at)
+                VALUES (gen_random_uuid(), :eid, 'ai_auto_fix', :msg, 'info',
+                        CAST(:details AS jsonb), NOW())
+            """), {
+                "eid": execution_id,
+                "msg": f"AI auto-retry triggered: {new_exec_id}",
+                "details": _json.dumps({"action": "retry", "new_execution_id": new_exec_id}),
+            })
+            await db.commit()
+            logger.info(f"AI auto-retry triggered: {new_exec_id} (from failed {execution_id})")
         except Exception as retry_err:
             logger.warning(f"Auto-fix retry failed: {retry_err}")
 
