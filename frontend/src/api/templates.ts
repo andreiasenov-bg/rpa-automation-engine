@@ -11,6 +11,8 @@ export interface TemplateParameter {
   maps_to?: string;
   credential_type?: string;
   options?: Array<{ label: string; value: string }>;
+  auto_fillable?: boolean;
+  ai_hint?: string;
 }
 
 export interface TemplateSummary {
@@ -43,6 +45,22 @@ export interface ValidationResult {
   fields: Record<string, { status: 'ok' | 'error' | 'warning'; message: string }>;
 }
 
+export interface AIFieldAnalysis {
+  key: string;
+  action: 'fill' | 'modify' | 'keep' | 'add_warning';
+  suggested_value: string | null;
+  confidence: number;
+  reason: string;
+}
+
+export interface AIReviewResult {
+  suggested_parameters: Record<string, string>;
+  field_analysis: AIFieldAnalysis[];
+  warnings: string[];
+  overall_confidence: number;
+  explanation: string;
+}
+
 export const templatesApi = {
   list: async (filters: { category?: string; difficulty?: string; search?: string } = {}): Promise<{
     templates: TemplateSummary[];
@@ -66,22 +84,32 @@ export const templatesApi = {
     return Array.isArray(data) ? data : data?.categories ?? [];
   },
 
+  aiReview: async (templateId: string, instruction: string, parameters?: Record<string, string>): Promise<AIReviewResult> => {
+    const { data } = await client.post(`/templates/${templateId}/ai-review`, {
+      instruction,
+      parameters: parameters ?? {},
+    });
+    return data;
+  },
+
   validate: async (templateId: string, parameters: Record<string, unknown>): Promise<ValidationResult> => {
     const { data } = await client.post(`/templates/${templateId}/validate`, { parameters });
     return data;
   },
 
-  instantiate: async ({ templateId, name, description, parameters }: {
+  instantiate: async ({ templateId, name, description, parameters, instruction }: {
     templateId: string;
     name: string;
     description?: string;
     parameters?: Record<string, unknown>;
+    instruction?: string;
   }): Promise<{ workflow_id: string; name: string }> => {
     const { data } = await client.post(`/templates/${templateId}/instantiate`, {
       name,
       description,
       template_id: templateId,
       parameters,
+      instruction,
     });
     return data;
   },
