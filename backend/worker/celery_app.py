@@ -76,6 +76,11 @@ celery_app.conf.update(
             "schedule": crontab(minute="*/2"),  # Every 2 minutes
             "options": {"queue": "health"},
         },
+        "poll-schedules": {
+            "task": "worker.tasks.schedule_poller.poll_schedules",
+            "schedule": crontab(minute="*/1"),  # Every minute
+            "options": {"queue": "triggers"},
+        },
     },
 
     # Auto-discover task modules
@@ -85,5 +90,6 @@ celery_app.conf.update(
         "worker.tasks.notifications",
         "worker.tasks.health",
         "worker.tasks.maintenance",
+        "worker.tasks.schedule_poller",
     ],
 )

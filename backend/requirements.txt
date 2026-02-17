@@ -23,6 +23,7 @@ redis==5.2.1
 
 # Scheduling
 apscheduler==3.10.4
+croniter==6.0.0
 
 # Validation & Serialization
 pydantic==2.10.3
