@@ -42,7 +42,7 @@ async def list_api_keys(
     result = await db.execute(
         select(APIKey)
         .where(
-            APIKey.organization_id == current_user.organization_id,
+            APIKey.organization_id == current_user.org_id,
             APIKey.is_deleted == False,
         )
         .order_by(APIKey.created_at.desc())
@@ -80,13 +80,13 @@ async def create_api_key(
         expires_at = datetime.now(timezone.utc) + timedelta(days=request.expires_in_days)
 
     api_key = APIKey(
-        organization_id=current_user.organization_id,
+        organization_id=current_user.org_id,
         name=request.name,
         key_hash=key_hash,
         prefix=raw_key[:11],
         permissions=request.permissions,
         expires_at=expires_at,
-        created_by_id=current_user.id,
+        created_by_id=current_user.sub,
     )
     db.add(api_key)
     await db.commit()
@@ -113,7 +113,7 @@ async def revoke_api_key(
     result = await db.execute(
         select(APIKey).where(
             APIKey.id == key_id,
-            APIKey.organization_id == current_user.organization_id,
+            APIKey.organization_id == current_user.org_id,
         )
     )
     api_key = result.scalar_one_or_none()

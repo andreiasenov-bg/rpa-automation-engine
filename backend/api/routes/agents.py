@@ -68,7 +68,7 @@ async def list_agents(
 ):
     """List agents in the organization with pagination and filtering."""
     conditions = [
-        Agent.organization_id == current_user.org,
+        Agent.organization_id == current_user.org_id,
         Agent.is_deleted == False,
     ]
 
@@ -110,7 +110,7 @@ async def register_agent(
 
     agent = Agent(
         id=str(uuid.uuid4()),
-        organization_id=current_user.org,
+        organization_id=current_user.org_id,
         name=body.name,
         agent_token_hash=token_hash,
         status="inactive",
@@ -133,7 +133,7 @@ async def agent_stats(
     db: AsyncSession = Depends(get_db),
 ):
     """Get agent statistics."""
-    base = and_(Agent.organization_id == current_user.org, Agent.is_deleted == False)
+    base = and_(Agent.organization_id == current_user.org_id, Agent.is_deleted == False)
 
     total = (await db.execute(select(func.count()).select_from(Agent).where(base))).scalar() or 0
 
@@ -161,7 +161,7 @@ async def get_agent(
     agent = (await db.execute(
         select(Agent).where(
             Agent.id == agent_id,
-            Agent.organization_id == current_user.org,
+            Agent.organization_id == current_user.org_id,
             Agent.is_deleted == False,
         )
     )).scalar_one_or_none()
@@ -183,7 +183,7 @@ async def update_agent(
     agent = (await db.execute(
         select(Agent).where(
             Agent.id == agent_id,
-            Agent.organization_id == current_user.org,
+            Agent.organization_id == current_user.org_id,
             Agent.is_deleted == False,
         )
     )).scalar_one_or_none()
@@ -212,7 +212,7 @@ async def remove_agent(
     agent = (await db.execute(
         select(Agent).where(
             Agent.id == agent_id,
-            Agent.organization_id == current_user.org,
+            Agent.organization_id == current_user.org_id,
             Agent.is_deleted == False,
         )
     )).scalar_one_or_none()
@@ -254,7 +254,7 @@ async def rotate_agent_token(
     agent = (await db.execute(
         select(Agent).where(
             Agent.id == agent_id,
-            Agent.organization_id == current_user.org,
+            Agent.organization_id == current_user.org_id,
             Agent.is_deleted == False,
         )
     )).scalar_one_or_none()

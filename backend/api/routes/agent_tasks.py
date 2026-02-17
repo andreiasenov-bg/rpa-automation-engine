@@ -149,7 +149,7 @@ async def get_task_queue(
 ):
     """View the pending task queue for the organization."""
     base = and_(
-        Execution.organization_id == current_user.org,
+        Execution.organization_id == current_user.org_id,
         Execution.status == "pending",
         Execution.agent_id.is_(None),
     )
@@ -191,7 +191,7 @@ async def get_agent_assigned_tasks(
     rows = (await db.execute(
         select(Execution).where(
             and_(
-                Execution.organization_id == current_user.org,
+                Execution.organization_id == current_user.org_id,
                 Execution.agent_id == agent_id,
                 Execution.status == "running",
             )

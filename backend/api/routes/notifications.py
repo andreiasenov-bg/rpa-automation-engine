@@ -140,8 +140,8 @@ async def register_fcm_token(
     current_user=Depends(get_current_active_user),
 ):
     """Register a device token for push notifications."""
-    org_id = current_user.organization_id
-    user_id = current_user.id
+    org_id = current_user.org_id
+    user_id = current_user.sub
 
     if org_id not in _device_tokens:
         _device_tokens[org_id] = []
@@ -167,7 +167,7 @@ async def unregister_fcm_token(
     current_user=Depends(get_current_active_user),
 ):
     """Remove a device token."""
-    org_id = current_user.organization_id
+    org_id = current_user.org_id
     if org_id in _device_tokens:
         _device_tokens[org_id] = [
             t for t in _device_tokens[org_id] if t["token"] != token
@@ -180,7 +180,7 @@ async def list_fcm_tokens(
     current_user=Depends(get_current_active_user),
 ):
     """List registered device tokens for the current organization."""
-    org_id = current_user.organization_id
+    org_id = current_user.org_id
     tokens = _device_tokens.get(org_id, [])
     return {
         "tokens": [

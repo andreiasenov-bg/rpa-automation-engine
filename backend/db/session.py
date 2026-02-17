@@ -21,9 +21,12 @@ AsyncSessionLocal = async_sessionmaker(
 
 
 async def init_db():
-    """Initialize database tables."""
-    # TODO: Create all tables from models
-    pass
+    """Initialize database tables from all registered models."""
+    from db.base import Base
+    import db.models  # noqa: F401 — triggers model registration
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
 
 async def close_db():

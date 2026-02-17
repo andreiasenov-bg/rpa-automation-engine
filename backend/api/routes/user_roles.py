@@ -49,7 +49,7 @@ async def get_user_roles(
         .options(selectinload(User.roles))
         .where(
             User.id == user_id,
-            User.organization_id == current_user.org,
+            User.organization_id == current_user.org_id,
             User.is_deleted == False,
         )
     )).scalar_one_or_none()
@@ -91,7 +91,7 @@ async def assign_role(
     user = (await db.execute(
         select(User).where(
             User.id == user_id,
-            User.organization_id == current_user.org,
+            User.organization_id == current_user.org_id,
             User.is_deleted == False,
         )
     )).scalar_one_or_none()
@@ -103,7 +103,7 @@ async def assign_role(
     role = (await db.execute(
         select(Role).where(
             Role.id == body.role_id,
-            Role.organization_id == current_user.org,
+            Role.organization_id == current_user.org_id,
             Role.is_deleted == False,
         )
     )).scalar_one_or_none()
@@ -148,7 +148,7 @@ async def remove_role(
     user = (await db.execute(
         select(User).where(
             User.id == user_id,
-            User.organization_id == current_user.org,
+            User.organization_id == current_user.org_id,
             User.is_deleted == False,
         )
     )).scalar_one_or_none()
@@ -186,7 +186,7 @@ async def bulk_assign_role(
     role = (await db.execute(
         select(Role).where(
             Role.id == body.role_id,
-            Role.organization_id == current_user.org,
+            Role.organization_id == current_user.org_id,
             Role.is_deleted == False,
         )
     )).scalar_one_or_none()
@@ -198,7 +198,7 @@ async def bulk_assign_role(
     users = (await db.execute(
         select(User.id).where(
             User.id.in_(body.user_ids),
-            User.organization_id == current_user.org,
+            User.organization_id == current_user.org_id,
             User.is_deleted == False,
         )
     )).scalars().all()
@@ -257,7 +257,7 @@ async def users_by_role(
         .options(selectinload(Role.users))
         .where(
             Role.id == role_id,
-            Role.organization_id == current_user.org,
+            Role.organization_id == current_user.org_id,
             Role.is_deleted == False,
         )
     )).scalar_one_or_none()

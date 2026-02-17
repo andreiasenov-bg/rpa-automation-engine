@@ -55,7 +55,7 @@ async def export_executions(
             Execution.created_at,
         )
         .join(Workflow, Execution.workflow_id == Workflow.id, isouter=True)
-        .where(Execution.organization_id == current_user.organization_id)
+        .where(Execution.organization_id == current_user.org_id)
         .where(Execution.deleted_at.is_(None))
         .order_by(desc(Execution.created_at))
         .limit(limit)
@@ -151,7 +151,7 @@ async def export_audit_logs(
             AuditLog.created_at,
         )
         .join(User, AuditLog.user_id == User.id, isouter=True)
-        .where(AuditLog.organization_id == current_user.organization_id)
+        .where(AuditLog.organization_id == current_user.org_id)
         .order_by(desc(AuditLog.created_at))
         .limit(limit)
     )
@@ -238,7 +238,7 @@ async def export_analytics(
             func.sum(case((Execution.status == "running", 1), else_=0)).label("running"),
         )
         .join(Execution, Workflow.id == Execution.workflow_id, isouter=True)
-        .where(Workflow.organization_id == current_user.organization_id)
+        .where(Workflow.organization_id == current_user.org_id)
         .where(Workflow.deleted_at.is_(None))
         .group_by(Workflow.id, Workflow.name, Workflow.status)
         .order_by(desc(func.count(Execution.id)))

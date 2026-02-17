@@ -524,7 +524,7 @@ async def get_performance_alerts(
             func.max(Execution.created_at).label("last_run"),
         )
         .where(
-            Execution.organization_id == current_user.organization_id,
+            Execution.organization_id == current_user.org_id,
             Execution.created_at >= cutoff,
             Execution.is_deleted == False,
         )

@@ -56,7 +56,7 @@ async def db_engine():
 
 @pytest_asyncio.fixture
 async def db_session(db_engine) -> AsyncGenerator[AsyncSession, None]:
-    """Provide a transactional DB session that rolls back after each test."""
+    """Provide a DB session that commits (so the app can read data) and cleans up after."""
     async_session_factory = sessionmaker(
         db_engine,
         class_=AsyncSession,
@@ -64,9 +64,13 @@ async def db_session(db_engine) -> AsyncGenerator[AsyncSession, None]:
         autoflush=False,
     )
     async with async_session_factory() as session:
-        async with session.begin():
-            yield session
-            await session.rollback()
+        yield session
+        await session.commit()
+
+    # Clean up all data after each test
+    async with db_engine.begin() as conn:
+        for table in reversed(Base.metadata.sorted_tables):
+            await conn.execute(table.delete())
 
 
 # ---------------------------------------------------------------------------
@@ -76,6 +80,12 @@ async def db_session(db_engine) -> AsyncGenerator[AsyncSession, None]:
 @pytest_asyncio.fixture
 async def app(db_engine):
     """Create a FastAPI app instance wired to the test database."""
+    # Ensure tables exist and are clean
+    async with db_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+        for table in reversed(Base.metadata.sorted_tables):
+            await conn.execute(table.delete())
+
     # Patch the database module to use our test engine
     import db.database as db_mod
     original_engine = db_mod.engine
@@ -88,6 +98,11 @@ async def app(db_engine):
         expire_on_commit=False,
         autoflush=False,
     )
+
+    # Ensure tables exist on the patched engine
+    import db.models  # noqa: F401
+    async with db_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
     from app.main import create_app
     test_app = create_app()
@@ -103,7 +118,7 @@ async def app(db_engine):
 async def client(app) -> AsyncGenerator[AsyncClient, None]:
     """Async HTTP test client."""
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+    async with AsyncClient(transport=transport, base_url="http://test", follow_redirects=True) as ac:
         yield ac
 
 
@@ -116,10 +131,11 @@ async def test_org(db_session):
     """Create a test organization."""
     from db.models.organization import Organization
 
+    unique_suffix = uuid4().hex[:8]
     org = Organization(
         id=str(uuid4()),
-        name="Test Organization",
-        slug="test-org",
+        name=f"Test Organization {unique_suffix}",
+        slug=f"test-org-{unique_suffix}",
         subscription_plan="enterprise",
         settings={"timezone": "UTC"},
     )
@@ -137,7 +153,7 @@ async def test_user(db_session, test_org):
     user = User(
         id=str(uuid4()),
         organization_id=test_org.id,
-        email="test@example.com",
+        email=f"test-{uuid4().hex[:8]}@example.com",
         password_hash=hash_password("TestPassword123!"),
         first_name="Test",
         last_name="User",

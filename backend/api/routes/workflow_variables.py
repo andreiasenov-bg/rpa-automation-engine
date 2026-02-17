@@ -100,7 +100,7 @@ async def get_variables(
     db: AsyncSession = Depends(get_db),
 ):
     """Get the variable schema for a workflow."""
-    wf = await _get_workflow(workflow_id, current_user.org, db)
+    wf = await _get_workflow(workflow_id, current_user.org_id, db)
     definition = _get_definition(wf)
 
     return {
@@ -120,7 +120,7 @@ async def update_variables(
     db: AsyncSession = Depends(get_db),
 ):
     """Update the variable schema for a workflow."""
-    wf = await _get_workflow(workflow_id, current_user.org, db)
+    wf = await _get_workflow(workflow_id, current_user.org_id, db)
     definition = _get_definition(wf)
 
     # Check for duplicate variable names
@@ -150,7 +150,7 @@ async def update_step_mappings(
     db: AsyncSession = Depends(get_db),
 ):
     """Update step input/output variable mappings."""
-    wf = await _get_workflow(workflow_id, current_user.org, db)
+    wf = await _get_workflow(workflow_id, current_user.org_id, db)
     definition = _get_definition(wf)
 
     # Validate step IDs exist in workflow
@@ -182,7 +182,7 @@ async def validate_execution_variables(
     db: AsyncSession = Depends(get_db),
 ):
     """Validate variables before execution. Returns errors for missing required variables or type mismatches."""
-    wf = await _get_workflow(workflow_id, current_user.org, db)
+    wf = await _get_workflow(workflow_id, current_user.org_id, db)
     definition = _get_definition(wf)
     schema = definition.get("variables", [])
 

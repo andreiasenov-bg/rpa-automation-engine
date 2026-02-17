@@ -268,8 +268,26 @@ class CredentialVault:
             raise ValueError(f"Decryption failed: {str(e)}")
 
 
-# Global vault instance
-vault = CredentialVault()
+# Global vault instance — lazy init to avoid import-time crashes in tests
+_vault: Optional["CredentialVault"] = None
+
+
+def get_vault() -> "CredentialVault":
+    """Get or create the global CredentialVault (lazy singleton)."""
+    global _vault
+    if _vault is None:
+        _vault = CredentialVault()
+    return _vault
+
+
+# Backward-compatible alias (property-like access for existing code)
+class _VaultProxy:
+    """Proxy that lazily initialises CredentialVault on first attribute access."""
+
+    def __getattr__(self, name: str):
+        return getattr(get_vault(), name)
+
+vault = _VaultProxy()
 
 
 async def get_current_user(

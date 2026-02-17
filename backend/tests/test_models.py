@@ -14,7 +14,7 @@ class TestOrganizationModel:
             id=str(uuid4()),
             name="Acme Corp",
             slug="acme-corp",
-            plan="enterprise",
+            subscription_plan="enterprise",
         )
         db_session.add(org)
         await db_session.flush()
@@ -40,8 +40,9 @@ class TestUserModel:
             id=str(uuid4()),
             organization_id=test_org.id,
             email="newuser@test.com",
-            hashed_password=hash_password("Pass123!"),
-            full_name="New User",
+            password_hash=hash_password("Pass123!"),
+            first_name="New",
+            last_name="User",
         )
         db_session.add(user)
         await db_session.flush()

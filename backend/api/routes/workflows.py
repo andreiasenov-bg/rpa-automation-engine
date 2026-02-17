@@ -586,7 +586,7 @@ async def get_workflow_history(
     Get audit history for a workflow (version changes, publishes, etc.).
     """
     conditions = and_(
-        AuditLog.organization_id == current_user.org,
+        AuditLog.organization_id == current_user.org_id,
         AuditLog.resource_type == "workflow",
         AuditLog.resource_id == workflow_id,
         AuditLog.is_deleted == False,

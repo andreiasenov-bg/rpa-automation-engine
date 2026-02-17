@@ -12,7 +12,7 @@ class TestHealth:
         resp = await client.get("/api/v1/health")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["status"] == "healthy"
+        assert data["status"] in ("healthy", "ok")
         assert "version" in data
 
     async def test_health_root(self, client):

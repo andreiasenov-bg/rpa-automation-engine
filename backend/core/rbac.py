@@ -87,7 +87,7 @@ def require_permission(permission: str):
         db: AsyncSession = Depends(get_db),
     ):
         user_perms = await _get_user_permissions(
-            current_user.id, current_user.organization_id, db
+            current_user.sub, current_user.org_id, db
         )
 
         # Graceful degradation: if no permissions exist at all (fresh install),
@@ -95,7 +95,7 @@ def require_permission(permission: str):
         if not user_perms:
             logger.debug(
                 "RBAC: No permissions found for user %s, allowing access (bootstrap mode)",
-                current_user.id,
+                current_user.sub,
             )
             return current_user
 
@@ -124,7 +124,7 @@ def require_any_permission(*permissions: str):
         db: AsyncSession = Depends(get_db),
     ):
         user_perms = await _get_user_permissions(
-            current_user.id, current_user.organization_id, db
+            current_user.sub, current_user.org_id, db
         )
 
         if not user_perms:
@@ -150,7 +150,7 @@ def require_all_permissions(*permissions: str):
         db: AsyncSession = Depends(get_db),
     ):
         user_perms = await _get_user_permissions(
-            current_user.id, current_user.organization_id, db
+            current_user.sub, current_user.org_id, db
         )
 
         if not user_perms:
@@ -187,7 +187,7 @@ def require_org_owner():
         from db.models.organization import Organization
 
         result = await db.execute(
-            select(Organization).where(Organization.id == current_user.organization_id)
+            select(Organization).where(Organization.id == current_user.org_id)
         )
         org = result.scalar_one_or_none()
 
@@ -196,7 +196,7 @@ def require_org_owner():
 
         # Check if user has admin.* or is explicitly the owner
         user_perms = await _get_user_permissions(
-            current_user.id, current_user.organization_id, db
+            current_user.sub, current_user.org_id, db
         )
         if not _check_permission(user_perms, "admin.*"):
             raise HTTPException(

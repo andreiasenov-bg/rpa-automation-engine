@@ -40,7 +40,7 @@ async def get_activity_timeline(
     since = datetime.now(timezone.utc) - timedelta(days=days)
 
     conditions = [
-        AuditLog.organization_id == current_user.org,
+        AuditLog.organization_id == current_user.org_id,
         AuditLog.created_at >= since,
     ]
 
@@ -107,7 +107,7 @@ async def get_activity_summary(
         select(AuditLog.action, func.count().label("count"))
         .where(
             and_(
-                AuditLog.organization_id == current_user.org,
+                AuditLog.organization_id == current_user.org_id,
                 AuditLog.created_at >= since,
             )
         )

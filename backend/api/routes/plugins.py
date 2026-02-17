@@ -12,13 +12,13 @@ class PluginToggleRequest(BaseModel):
     enabled: bool
 
 
-@router.get("/plugins")
+@router.get("")
 async def list_plugins():
     """List all discovered plugins with their status."""
     return {"plugins": plugin_manager.list_plugins()}
 
 
-@router.get("/plugins/{name}")
+@router.get("/{name}")
 async def get_plugin(name: str):
     """Get detailed info about a specific plugin."""
     plugin = plugin_manager.get_plugin(name)
@@ -37,7 +37,7 @@ async def get_plugin(name: str):
     }
 
 
-@router.put("/plugins/{name}")
+@router.put("/{name}")
 async def toggle_plugin(name: str, body: PluginToggleRequest):
     """Enable or disable a plugin."""
     if body.enabled:
@@ -51,7 +51,7 @@ async def toggle_plugin(name: str, body: PluginToggleRequest):
     return {"name": name, "enabled": body.enabled}
 
 
-@router.post("/plugins/reload")
+@router.post("/reload")
 async def reload_plugins():
     """Re-discover and reload all plugins."""
     plugins = plugin_manager.discover_and_load()

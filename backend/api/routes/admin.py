@@ -58,7 +58,7 @@ async def admin_overview(
     db: AsyncSession = Depends(get_db),
 ):
     """Get organization overview with resource counts."""
-    org_id = current_user.org
+    org_id = current_user.org_id
     base = lambda Model: and_(Model.organization_id == org_id, Model.is_deleted == False)
 
     users_count = (await db.execute(select(func.count()).select_from(User).where(base(User)))).scalar() or 0
@@ -90,7 +90,7 @@ async def admin_overview(
         "organization": {
             "id": org.id if org else org_id,
             "name": org.name if org else "Unknown",
-            "plan": org.plan if org else "free",
+            "plan": org.subscription_plan if org else "free",
             "created_at": org.created_at.isoformat() if org and org.created_at else None,
         },
         "counts": {
@@ -113,7 +113,7 @@ async def update_org_settings(
 ):
     """Update organization settings (admin only)."""
     org = (await db.execute(
-        select(Organization).where(Organization.id == current_user.org)
+        select(Organization).where(Organization.id == current_user.org_id)
     )).scalar_one_or_none()
 
     if not org:
@@ -122,13 +122,13 @@ async def update_org_settings(
     if body.name is not None:
         org.name = body.name
     if body.plan is not None:
-        org.plan = body.plan
+        org.subscription_plan = body.plan
 
     await db.flush()
     return {
         "id": org.id,
         "name": org.name,
-        "plan": org.plan,
+        "plan": org.subscription_plan,
     }
 
 
@@ -143,7 +143,7 @@ async def list_roles(
     query = (
         select(Role)
         .where(
-            Role.organization_id == current_user.org,
+            Role.organization_id == current_user.org_id,
             Role.is_deleted == False,
         )
         .order_by(Role.name)
@@ -178,7 +178,7 @@ async def create_role(
     # Check for duplicate slug
     existing = (await db.execute(
         select(Role).where(
-            Role.organization_id == current_user.org,
+            Role.organization_id == current_user.org_id,
             Role.slug == body.slug,
             Role.is_deleted == False,
         )
@@ -189,7 +189,7 @@ async def create_role(
 
     role = Role(
         id=str(uuid.uuid4()),
-        organization_id=current_user.org,
+        organization_id=current_user.org_id,
         name=body.name,
         slug=body.slug,
     )
@@ -210,7 +210,7 @@ async def update_role(
     role = (await db.execute(
         select(Role).where(
             Role.id == role_id,
-            Role.organization_id == current_user.org,
+            Role.organization_id == current_user.org_id,
             Role.is_deleted == False,
         )
     )).scalar_one_or_none()
@@ -237,7 +237,7 @@ async def delete_role(
     role = (await db.execute(
         select(Role).where(
             Role.id == role_id,
-            Role.organization_id == current_user.org,
+            Role.organization_id == current_user.org_id,
             Role.is_deleted == False,
         )
     )).scalar_one_or_none()
@@ -264,7 +264,7 @@ async def list_permissions(
     query = (
         select(Permission)
         .where(
-            Permission.organization_id == current_user.org,
+            Permission.organization_id == current_user.org_id,
             Permission.is_deleted == False,
         )
         .order_by(Permission.code)

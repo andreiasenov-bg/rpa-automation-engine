@@ -35,7 +35,7 @@ async def list_audit_logs(
 ):
     """List audit logs with filtering and pagination."""
     conditions = [
-        AuditLog.organization_id == current_user.org,
+        AuditLog.organization_id == current_user.org_id,
         AuditLog.is_deleted == False,
     ]
 
@@ -114,7 +114,7 @@ async def audit_stats(
 ):
     """Get audit log statistics (action breakdown, resource type breakdown)."""
     base = and_(
-        AuditLog.organization_id == current_user.org,
+        AuditLog.organization_id == current_user.org_id,
         AuditLog.is_deleted == False,
     )
 
@@ -155,7 +155,7 @@ async def audit_resource_types(
     q = (
         select(AuditLog.resource_type)
         .where(
-            AuditLog.organization_id == current_user.org,
+            AuditLog.organization_id == current_user.org_id,
             AuditLog.is_deleted == False,
         )
         .distinct()
@@ -173,7 +173,7 @@ async def audit_actions(
     q = (
         select(AuditLog.action)
         .where(
-            AuditLog.organization_id == current_user.org,
+            AuditLog.organization_id == current_user.org_id,
             AuditLog.is_deleted == False,
         )
         .distinct()
