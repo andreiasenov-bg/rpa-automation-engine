@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     APP_VERSION: str = "1.0.0"
     API_V1_PREFIX: str = "/api/v1"
     DEBUG: bool = False
+    PROFILER_ENABLED: bool = True
     ENVIRONMENT: str = "development"  # development, staging, production
 
     # Server Settings
