@@ -155,9 +155,9 @@ def execute_workflow(
         except Exception as notify_exc:
             logger.warning(f"Failed to send failure notification: {notify_exc}")
 
-        # ── AI Auto-Diagnosis (non-blocking) ──
-        # Analyze the error with Claude and store diagnosis.
-        # If the error is auto-fixable (e.g. transient), retry automatically.
+        # ── AI Auto-Diagnosis + Real Auto-Fix ──
+        # Analyze the error with Claude, store diagnosis, and if fixable:
+        # generate a fixed definition, apply it, and re-run.
         try:
             loop.run_until_complete(
                 _ai_diagnose_and_maybe_fix(
@@ -215,6 +215,8 @@ async def _send_fail_notification(
     )
 
 
+# ─── AI Auto-Diagnosis + Real Auto-Fix ──────────────────────────
+
 async def _ai_diagnose_and_maybe_fix(
     execution_id: str,
     workflow_id: str,
@@ -223,18 +225,22 @@ async def _ai_diagnose_and_maybe_fix(
     definition: dict,
 ) -> None:
     """
-    AI-powered error diagnosis.
+    AI-powered error diagnosis AND auto-fix.
 
+    Pipeline:
     1. Calls ClaudeClient.analyze() to understand the failure
-    2. Stores diagnosis in execution_journal table
-    3. If auto-fixable (e.g. transient/rate-limit), triggers retry
-
-    This runs in the worker after failure and is non-blocking.
+    2. Stores diagnosis in execution_journal
+    3. If auto-fixable:
+       a) For transient errors (timeout, rate_limit, connection) → retry with same definition
+       b) For config errors (selector changed, URL changed, timeout too low) →
+          ask Claude to generate a FIXED definition, apply it to the workflow,
+          then re-run with the fixed version
+    4. Stores full fix history: problem, solution, before/after definition diff
     """
     from sqlalchemy import text as sa_text
     from db.session import AsyncSessionLocal
 
-    # Get workflow name
+    # ── Get workflow info ──
     workflow_name = workflow_id[:8]
     try:
         async with AsyncSessionLocal() as session:
@@ -247,7 +253,7 @@ async def _ai_diagnose_and_maybe_fix(
     except Exception:
         pass
 
-    # Get step-level errors from execution_states
+    # ── Get step-level errors from execution_states ──
     step_errors = []
     try:
         async with AsyncSessionLocal() as session:
@@ -267,7 +273,7 @@ async def _ai_diagnose_and_maybe_fix(
     except Exception:
         pass
 
-    # Build prompt for AI
+    # ── Step 1: Diagnose ──
     prompt = f"""You are an RPA workflow diagnostic AI. Analyze this execution failure.
 
 WORKFLOW: {workflow_name}
@@ -277,8 +283,8 @@ MAIN ERROR: {error_message[:500]}
 STEP-LEVEL ERRORS:
 {_json.dumps(step_errors, indent=2) if step_errors else "None captured."}
 
-WORKFLOW STEPS (first 5):
-{_json.dumps(definition.get('steps', [])[:5], indent=2, default=str)[:1500]}
+FULL WORKFLOW DEFINITION:
+{_json.dumps(definition, indent=2, default=str)[:3000]}
 
 Provide diagnosis as JSON:
 {{
@@ -287,12 +293,22 @@ Provide diagnosis as JSON:
   "severity": "low|medium|high|critical",
   "fix_suggestion": "Actionable fix (1 sentence)",
   "auto_fixable": true/false,
-  "auto_fix_action": "retry|update_config|null",
-  "confidence": 0.0-1.0
-}}"""
+  "auto_fix_action": "retry|fix_definition|null",
+  "confidence": 0.0-1.0,
+  "needs_definition_change": true/false,
+  "affected_steps": ["step-id-1"]
+}}
 
-    # Call ClaudeClient
+IMPORTANT:
+- Set "auto_fix_action": "fix_definition" when the issue is a bad selector, wrong URL,
+  timeout too low, or any config that can be programmatically corrected.
+- Set "auto_fix_action": "retry" ONLY for transient errors (connection reset, rate limit, 5xx).
+- Set "auto_fixable": false for auth errors (user must refresh credentials manually).
+- "needs_definition_change": true means the workflow definition JSON itself needs editing.
+- "affected_steps": list the step IDs that need modification."""
+
     diagnosis = None
+    ai_available = False
     try:
         from integrations.claude_client import get_claude_client
         ai = get_claude_client()
@@ -301,15 +317,15 @@ Provide diagnosis as JSON:
             diagnosis = ai.safe_extract_json(raw)
         elif isinstance(raw, dict):
             diagnosis = raw
+        ai_available = True
     except Exception as ai_err:
         logger.warning(f"ClaudeClient unavailable for diagnosis: {ai_err}")
-        # Fallback: rule-based diagnosis
         diagnosis = _rule_based_diagnosis(error_message)
 
     if not diagnosis:
         diagnosis = _rule_based_diagnosis(error_message)
 
-    # Store diagnosis in execution_journal
+    # ── Step 2: Store diagnosis in execution_journal ──
     try:
         async with AsyncSessionLocal() as session:
             await session.execute(sa_text("""
@@ -328,48 +344,299 @@ Provide diagnosis as JSON:
     except Exception as db_err:
         logger.warning(f"Could not store AI diagnosis: {db_err}")
 
-    # Auto-fix: if transient and auto-fixable, trigger retry
-    if diagnosis.get("auto_fixable") and diagnosis.get("auto_fix_action") == "retry":
-        try:
-            new_exec_id = str(uuid4())
-            async with AsyncSessionLocal() as session:
-                await session.execute(sa_text("""
-                    INSERT INTO executions
-                    (id, workflow_id, status, trigger_type, created_at)
-                    VALUES (:eid, :wid, 'pending', 'ai_retry', NOW())
-                """), {"eid": new_exec_id, "wid": workflow_id})
-                await session.commit()
+    # ── Step 3: Auto-fix based on diagnosis ──
+    if not diagnosis.get("auto_fixable"):
+        logger.info(f"Execution {execution_id}: not auto-fixable ({diagnosis.get('root_cause')})")
+        return
 
-            # Dispatch new execution
-            execute_workflow.delay(
-                execution_id=new_exec_id,
-                workflow_id=workflow_id,
-                organization_id=organization_id,
-                definition=definition,
-            )
+    fix_action = diagnosis.get("auto_fix_action", "retry")
 
-            # Log auto-fix
-            async with AsyncSessionLocal() as session:
-                await session.execute(sa_text("""
-                    INSERT INTO execution_journal
-                    (id, execution_id, event_type, message, severity, details, created_at)
-                    VALUES (gen_random_uuid(), :eid, 'ai_auto_fix', :msg, 'info',
-                            CAST(:details AS jsonb), NOW())
-                """), {
-                    "eid": execution_id,
-                    "msg": f"AI auto-retry triggered: {new_exec_id}",
-                    "details": _json.dumps({
-                        "action": "retry",
-                        "new_execution_id": new_exec_id,
-                        "reason": diagnosis.get("diagnosis", "Auto-retry after AI analysis"),
-                    }),
-                })
-                await session.commit()
+    if fix_action == "fix_definition" and ai_available:
+        # ── REAL AUTO-FIX: Ask Claude to generate a corrected definition ──
+        await _apply_ai_definition_fix(
+            execution_id=execution_id,
+            workflow_id=workflow_id,
+            organization_id=organization_id,
+            definition=definition,
+            diagnosis=diagnosis,
+            error_message=error_message,
+            step_errors=step_errors,
+            workflow_name=workflow_name,
+        )
+    elif fix_action == "retry":
+        # ── Simple retry with same definition ──
+        await _trigger_retry(
+            execution_id=execution_id,
+            workflow_id=workflow_id,
+            organization_id=organization_id,
+            definition=definition,
+            diagnosis=diagnosis,
+        )
+    else:
+        logger.info(f"Execution {execution_id}: unknown fix action '{fix_action}', skipping auto-fix")
 
-            logger.info(f"AI auto-retry: new execution {new_exec_id} from failed {execution_id}")
 
-        except Exception as retry_err:
-            logger.warning(f"AI auto-retry failed: {retry_err}")
+async def _apply_ai_definition_fix(
+    execution_id: str,
+    workflow_id: str,
+    organization_id: str,
+    definition: dict,
+    diagnosis: dict,
+    error_message: str,
+    step_errors: list,
+    workflow_name: str,
+) -> None:
+    """
+    Ask Claude to generate a corrected workflow definition, apply it, and re-run.
+    Stores full fix history: problem, solution, old definition, new definition.
+    """
+    from sqlalchemy import text as sa_text
+    from db.session import AsyncSessionLocal
+
+    logger.info(f"AI auto-fix: generating corrected definition for workflow {workflow_id}")
+
+    # ── Ask Claude for a fixed definition ──
+    fix_prompt = f"""You are an RPA workflow repair AI. A workflow failed and you need to fix its definition.
+
+WORKFLOW: {workflow_name}
+ERROR: {error_message[:500]}
+DIAGNOSIS: {diagnosis.get('diagnosis', 'Unknown')}
+ROOT CAUSE: {diagnosis.get('root_cause', 'unknown')}
+FIX SUGGESTION: {diagnosis.get('fix_suggestion', 'N/A')}
+AFFECTED STEPS: {_json.dumps(diagnosis.get('affected_steps', []))}
+
+STEP-LEVEL ERRORS:
+{_json.dumps(step_errors, indent=2) if step_errors else "None captured."}
+
+CURRENT WORKFLOW DEFINITION (this is the one that failed):
+{_json.dumps(definition, indent=2, default=str)[:4000]}
+
+YOUR TASK:
+Return a JSON object with:
+{{
+  "fixed_definition": {{ ... the COMPLETE corrected workflow definition ... }},
+  "changes_summary": "Brief description of what you changed and why",
+  "changes_detail": [
+    {{
+      "step_id": "step-1",
+      "field": "config.selectors[0].selector",
+      "old_value": "old CSS selector",
+      "new_value": "new CSS selector",
+      "reason": "Why this was changed"
+    }}
+  ]
+}}
+
+RULES:
+- Return the FULL definition with ALL steps, not just the changed ones.
+- Keep the overall structure (version, variables, steps array) identical.
+- Only modify the minimum needed to fix the error.
+- For selector errors: try more generic/robust selectors (prefer data attributes, IDs, or semantic selectors over fragile class-based ones).
+- For timeout errors: increase timeout values by 2x.
+- For URL changes: if you can infer the new URL pattern, update it; otherwise keep the old one.
+- For data/config errors: adjust the config based on the error message.
+- CRITICAL: Return valid JSON only. The "fixed_definition" must be a valid workflow definition."""
+
+    fixed_result = None
+    try:
+        from integrations.claude_client import get_claude_client
+        ai = get_claude_client()
+        raw = await ai.analyze(fix_prompt, output_format="json")
+        if isinstance(raw, str):
+            fixed_result = ai.safe_extract_json(raw)
+        elif isinstance(raw, dict):
+            fixed_result = raw
+    except Exception as fix_err:
+        logger.warning(f"AI could not generate fix: {fix_err}")
+        # Fall back to retry
+        await _trigger_retry(
+            execution_id=execution_id,
+            workflow_id=workflow_id,
+            organization_id=organization_id,
+            definition=definition,
+            diagnosis=diagnosis,
+        )
+        return
+
+    if not fixed_result or "fixed_definition" not in fixed_result:
+        logger.warning("AI returned invalid fix result, falling back to retry")
+        await _trigger_retry(
+            execution_id=execution_id,
+            workflow_id=workflow_id,
+            organization_id=organization_id,
+            definition=definition,
+            diagnosis=diagnosis,
+        )
+        return
+
+    new_definition = fixed_result["fixed_definition"]
+    changes_summary = fixed_result.get("changes_summary", "AI auto-fix applied")
+    changes_detail = fixed_result.get("changes_detail", [])
+
+    # Validate new definition has steps
+    if not isinstance(new_definition, dict) or "steps" not in new_definition:
+        logger.warning("AI returned definition without steps, falling back to retry")
+        await _trigger_retry(
+            execution_id=execution_id,
+            workflow_id=workflow_id,
+            organization_id=organization_id,
+            definition=definition,
+            diagnosis=diagnosis,
+        )
+        return
+
+    # ── Apply fix: Update workflow definition in DB ──
+    old_version = None
+    try:
+        async with AsyncSessionLocal() as session:
+            # Get current version
+            ver_row = (await session.execute(sa_text(
+                "SELECT version FROM workflows WHERE id = :wid"
+            ), {"wid": workflow_id})).fetchone()
+            old_version = ver_row[0] if ver_row else 1
+
+            # Update definition + bump version
+            await session.execute(sa_text("""
+                UPDATE workflows
+                SET definition = CAST(:def AS jsonb),
+                    version = :new_ver,
+                    updated_at = NOW()
+                WHERE id = :wid
+            """), {
+                "wid": workflow_id,
+                "def": _json.dumps(new_definition),
+                "new_ver": (old_version or 1) + 1,
+            })
+            await session.commit()
+        logger.info(f"Workflow {workflow_id} definition updated: v{old_version} → v{(old_version or 1) + 1}")
+    except Exception as db_err:
+        logger.error(f"Could not update workflow definition: {db_err}")
+        return
+
+    # ── Log fix history in execution_journal ──
+    fix_history = {
+        "action": "fix_definition",
+        "changes_summary": changes_summary,
+        "changes_detail": changes_detail,
+        "old_version": old_version,
+        "new_version": (old_version or 1) + 1,
+        "old_definition_snapshot": _json.dumps(definition, default=str)[:5000],
+        "diagnosis": diagnosis.get("diagnosis", ""),
+        "root_cause": diagnosis.get("root_cause", "unknown"),
+        "fix_suggestion": diagnosis.get("fix_suggestion", ""),
+        "error_message": error_message[:500],
+    }
+
+    try:
+        async with AsyncSessionLocal() as session:
+            await session.execute(sa_text("""
+                INSERT INTO execution_journal
+                (id, execution_id, event_type, message, severity, details, created_at)
+                VALUES (gen_random_uuid(), :eid, 'ai_auto_fix', :msg, 'info',
+                        CAST(:details AS jsonb), NOW())
+            """), {
+                "eid": execution_id,
+                "msg": f"AI auto-fix applied: {changes_summary[:300]}",
+                "details": _json.dumps(fix_history),
+            })
+            await session.commit()
+        logger.info(f"Fix history stored for execution {execution_id}")
+    except Exception as db_err:
+        logger.warning(f"Could not store fix history: {db_err}")
+
+    # ── Create new execution with fixed definition ──
+    new_exec_id = str(uuid4())
+    try:
+        async with AsyncSessionLocal() as session:
+            await session.execute(sa_text("""
+                INSERT INTO executions
+                (id, workflow_id, status, trigger_type, created_at)
+                VALUES (:eid, :wid, 'pending', 'ai_auto_fix', NOW())
+            """), {"eid": new_exec_id, "wid": workflow_id})
+            await session.commit()
+
+        # Dispatch with the FIXED definition
+        execute_workflow.delay(
+            execution_id=new_exec_id,
+            workflow_id=workflow_id,
+            organization_id=organization_id,
+            definition=new_definition,
+        )
+        logger.info(f"AI auto-fix: new execution {new_exec_id} with fixed definition (from failed {execution_id})")
+
+        # Log the re-run
+        async with AsyncSessionLocal() as session:
+            await session.execute(sa_text("""
+                INSERT INTO execution_journal
+                (id, execution_id, event_type, message, severity, details, created_at)
+                VALUES (gen_random_uuid(), :eid, 'ai_auto_fix_rerun', :msg, 'info',
+                        CAST(:details AS jsonb), NOW())
+            """), {
+                "eid": execution_id,
+                "msg": f"Re-running with fixed definition: {new_exec_id}",
+                "details": _json.dumps({
+                    "new_execution_id": new_exec_id,
+                    "trigger": "ai_auto_fix",
+                    "fixed_version": (old_version or 1) + 1,
+                }),
+            })
+            await session.commit()
+
+    except Exception as retry_err:
+        logger.warning(f"AI auto-fix re-run failed: {retry_err}")
+
+
+async def _trigger_retry(
+    execution_id: str,
+    workflow_id: str,
+    organization_id: str,
+    definition: dict,
+    diagnosis: dict,
+) -> None:
+    """Simple retry — re-run the workflow with the same definition."""
+    from sqlalchemy import text as sa_text
+    from db.session import AsyncSessionLocal
+
+    try:
+        new_exec_id = str(uuid4())
+        async with AsyncSessionLocal() as session:
+            await session.execute(sa_text("""
+                INSERT INTO executions
+                (id, workflow_id, status, trigger_type, created_at)
+                VALUES (:eid, :wid, 'pending', 'ai_retry', NOW())
+            """), {"eid": new_exec_id, "wid": workflow_id})
+            await session.commit()
+
+        # Dispatch new execution
+        execute_workflow.delay(
+            execution_id=new_exec_id,
+            workflow_id=workflow_id,
+            organization_id=organization_id,
+            definition=definition,
+        )
+
+        # Log retry
+        async with AsyncSessionLocal() as session:
+            await session.execute(sa_text("""
+                INSERT INTO execution_journal
+                (id, execution_id, event_type, message, severity, details, created_at)
+                VALUES (gen_random_uuid(), :eid, 'ai_auto_fix', :msg, 'info',
+                        CAST(:details AS jsonb), NOW())
+            """), {
+                "eid": execution_id,
+                "msg": f"AI auto-retry triggered: {new_exec_id}",
+                "details": _json.dumps({
+                    "action": "retry",
+                    "new_execution_id": new_exec_id,
+                    "reason": diagnosis.get("diagnosis", "Auto-retry after AI analysis"),
+                }),
+            })
+            await session.commit()
+
+        logger.info(f"AI auto-retry: new execution {new_exec_id} from failed {execution_id}")
+
+    except Exception as retry_err:
+        logger.warning(f"AI auto-retry failed: {retry_err}")
 
 
 def _rule_based_diagnosis(error_message: str) -> dict:
@@ -383,8 +650,22 @@ def _rule_based_diagnosis(error_message: str) -> dict:
             "severity": "medium",
             "fix_suggestion": "Increase timeout settings or check if target service is responding slowly.",
             "auto_fixable": True,
-            "auto_fix_action": "retry",
+            "auto_fix_action": "fix_definition",
+            "needs_definition_change": True,
+            "affected_steps": [],
             "confidence": 0.8,
+        }
+    elif any(kw in error_lower for kw in ["selector", "element not found", "no such element", "css"]):
+        return {
+            "diagnosis": "Web scraping selector failed — the target website structure may have changed.",
+            "root_cause": "site_changed",
+            "severity": "high",
+            "fix_suggestion": "Update CSS selectors to match the current site structure.",
+            "auto_fixable": True,
+            "auto_fix_action": "fix_definition",
+            "needs_definition_change": True,
+            "affected_steps": [],
+            "confidence": 0.75,
         }
     elif any(kw in error_lower for kw in ["connection", "connect", "refused", "reset"]):
         return {
@@ -394,6 +675,8 @@ def _rule_based_diagnosis(error_message: str) -> dict:
             "fix_suggestion": "Check network connectivity and target service availability.",
             "auto_fixable": True,
             "auto_fix_action": "retry",
+            "needs_definition_change": False,
+            "affected_steps": [],
             "confidence": 0.7,
         }
     elif any(kw in error_lower for kw in ["401", "403", "unauthorized", "forbidden", "auth"]):
@@ -404,6 +687,8 @@ def _rule_based_diagnosis(error_message: str) -> dict:
             "fix_suggestion": "Check and refresh API credentials in the Credentials page.",
             "auto_fixable": False,
             "auto_fix_action": None,
+            "needs_definition_change": False,
+            "affected_steps": [],
             "confidence": 0.85,
         }
     elif any(kw in error_lower for kw in ["429", "rate limit", "too many requests", "throttl"]):
@@ -414,17 +699,9 @@ def _rule_based_diagnosis(error_message: str) -> dict:
             "fix_suggestion": "Wait a few minutes and retry. Consider adding delays between requests.",
             "auto_fixable": True,
             "auto_fix_action": "retry",
+            "needs_definition_change": False,
+            "affected_steps": [],
             "confidence": 0.9,
-        }
-    elif any(kw in error_lower for kw in ["selector", "element not found", "no such element", "css"]):
-        return {
-            "diagnosis": "Web scraping selector failed — the target website structure may have changed.",
-            "root_cause": "site_changed",
-            "severity": "high",
-            "fix_suggestion": "Update CSS selectors to match the current site structure.",
-            "auto_fixable": False,
-            "auto_fix_action": None,
-            "confidence": 0.75,
         }
     elif any(kw in error_lower for kw in ["404", "not found"]):
         return {
@@ -432,8 +709,10 @@ def _rule_based_diagnosis(error_message: str) -> dict:
             "root_cause": "config_error",
             "severity": "high",
             "fix_suggestion": "Verify the target URL is still valid and update if needed.",
-            "auto_fixable": False,
-            "auto_fix_action": None,
+            "auto_fixable": True,
+            "auto_fix_action": "fix_definition",
+            "needs_definition_change": True,
+            "affected_steps": [],
             "confidence": 0.8,
         }
     elif any(kw in error_lower for kw in ["500", "internal server error", "502", "503"]):
@@ -444,6 +723,8 @@ def _rule_based_diagnosis(error_message: str) -> dict:
             "fix_suggestion": "The target service has issues. Retry later.",
             "auto_fixable": True,
             "auto_fix_action": "retry",
+            "needs_definition_change": False,
+            "affected_steps": [],
             "confidence": 0.7,
         }
     else:
@@ -454,6 +735,8 @@ def _rule_based_diagnosis(error_message: str) -> dict:
             "fix_suggestion": "Check the execution logs for detailed error information.",
             "auto_fixable": False,
             "auto_fix_action": None,
+            "needs_definition_change": False,
+            "affected_steps": [],
             "confidence": 0.3,
         }
 
