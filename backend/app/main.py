@@ -95,9 +95,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[startup] Recovery scan skipped: {e}")
 
+    # Start in-process schedule poller (replaces Celery beat dependency)
+    _schedule_poller_stop = _start_schedule_poller()
+    print("[startup] Schedule poller thread started (60s interval)")
+
     print(f"[startup] {settings.APP_NAME} v{settings.APP_VERSION} started ({settings.ENVIRONMENT})")
     yield
     # Shutdown
+    _schedule_poller_stop.set()
     await integration_registry.stop_health_monitor()
     if claude.is_connected:
         await claude.disconnect()
@@ -154,6 +159,126 @@ def create_app() -> FastAPI:
     return app
 
 
+def _start_schedule_poller() -> "threading.Event":
+    """Launch a daemon thread that polls schedules every 60 seconds.
+
+    This runs inside the FastAPI/uvicorn process — no Celery beat needed.
+    Returns a threading.Event that can be set to stop the poller.
+    """
+    import threading
+    import asyncio
+    import logging
+    import time
+
+    stop_event = threading.Event()
+    logger = logging.getLogger("schedule-poller")
+
+    def _poller_loop():
+        """Background thread: poll schedules every 60s."""
+        logger.info("[schedule-poller] Background thread started")
+        # Wait a few seconds for app to fully start
+        time.sleep(5)
+
+        while not stop_event.is_set():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                result = loop.run_until_complete(_poll_and_dispatch_schedules())
+                if result.get("dispatched", 0) > 0:
+                    logger.info(f"[schedule-poller] {result}")
+            except Exception as e:
+                logger.error(f"[schedule-poller] Error: {e}", exc_info=True)
+            finally:
+                loop.close()
+
+            # Wait 60 seconds (interruptible)
+            stop_event.wait(timeout=60)
+
+        logger.info("[schedule-poller] Background thread stopped")
+
+    async def _poll_and_dispatch_schedules() -> dict:
+        """Find due schedules and launch workflow executions."""
+        from datetime import datetime, timezone, timedelta
+        from uuid import uuid4
+        from sqlalchemy import select, and_
+        from db.session import AsyncSessionLocal
+        from db.models.schedule import Schedule
+        from db.models.workflow import Workflow
+        from db.models.execution import Execution
+        from worker.run_workflow import launch_workflow_thread
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        dispatched = 0
+
+        async with AsyncSessionLocal() as session:
+            stmt = (
+                select(Schedule)
+                .where(Schedule.is_enabled == True)       # noqa: E712
+                .where(Schedule.is_deleted == False)       # noqa: E712
+                .where(Schedule.next_run_at != None)       # noqa: E711
+                .where(Schedule.next_run_at <= now)
+            )
+            result = await session.execute(stmt)
+            due_schedules = result.scalars().all()
+
+            for schedule in due_schedules:
+                try:
+                    wf_result = await session.execute(
+                        select(Workflow).where(Workflow.id == schedule.workflow_id)
+                    )
+                    workflow = wf_result.scalar_one_or_none()
+                    if not workflow or not workflow.is_enabled:
+                        continue
+
+                    execution_id = str(uuid4())
+                    execution = Execution(
+                        id=execution_id,
+                        organization_id=schedule.organization_id,
+                        workflow_id=schedule.workflow_id,
+                        trigger_type="schedule",
+                        status="pending",
+                    )
+                    session.add(execution)
+
+                    # Compute next_run_at
+                    try:
+                        from croniter import croniter
+                        from zoneinfo import ZoneInfo
+                        tz_obj = ZoneInfo(schedule.timezone)
+                        now_local = datetime.now(tz_obj)
+                        cron = croniter(schedule.cron_expression, now_local)
+                        next_local = cron.get_next(datetime)
+                        schedule.next_run_at = next_local.astimezone(
+                            ZoneInfo("UTC")
+                        ).replace(tzinfo=None)
+                    except Exception:
+                        schedule.next_run_at = now + timedelta(seconds=60)
+
+                    await session.commit()
+
+                    launch_workflow_thread(
+                        execution_id=execution_id,
+                        workflow_id=str(schedule.workflow_id),
+                        organization_id=str(schedule.organization_id),
+                        definition=workflow.definition or {},
+                        trigger_payload={"schedule_id": str(schedule.id)},
+                    )
+                    dispatched += 1
+                    logger.info(
+                        f"[schedule-poller] Dispatched '{schedule.name}' "
+                        f"→ {execution_id}, next: {schedule.next_run_at}"
+                    )
+                except Exception as e:
+                    logger.error(f"[schedule-poller] {schedule.id}: {e}", exc_info=True)
+                    await session.rollback()
+
+        return {"dispatched": dispatched}
+
+    t = threading.Thread(target=_poller_loop, daemon=True, name="schedule-poller")
+    t.start()
+    return stop_event
+
+
 async def _handle_trigger_event(event, engine) -> str:
     """Bridge between TriggerManager and WorkflowEngine.
 
@@ -208,9 +333,9 @@ async def _handle_trigger_event(event, engine) -> str:
             session.add(execution)
             await session.commit()
 
-            # Dispatch to Celery worker
-            from worker.tasks.workflow import execute_workflow
-            execute_workflow.delay(
+            # Run directly in background thread (reliable, no Celery needed)
+            from worker.run_workflow import launch_workflow_thread
+            launch_workflow_thread(
                 execution_id=execution_id,
                 workflow_id=event.workflow_id,
                 organization_id=event.organization_id,
