@@ -69,12 +69,25 @@ class ScheduleResponse(BaseModel):
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _compute_next_run(cron_expression: str, tz: str = "UTC") -> Optional[datetime]:
-    """Compute the next run timestamp from a cron expression.
-
-    Uses croniter if available, otherwise returns None.
-    """
+def _ensure_croniter():
+    """Install croniter if not available."""
     try:
+        import croniter  # noqa: F401
+    except ImportError:
+        import subprocess
+        logger.info("croniter not found, installing...")
+        subprocess.check_call(
+            ["pip", "install", "--no-cache-dir", "-q", "croniter"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        logger.info("croniter installed successfully")
+
+
+def _compute_next_run(cron_expression: str, tz: str = "UTC") -> Optional[datetime]:
+    """Compute the next run timestamp from a cron expression."""
+    try:
+        _ensure_croniter()
         from croniter import croniter
         import pytz
 
@@ -82,7 +95,8 @@ def _compute_next_run(cron_expression: str, tz: str = "UTC") -> Optional[datetim
         now = datetime.now(tz_obj)
         cron = croniter(cron_expression, now)
         return cron.get_next(datetime).astimezone(timezone.utc)
-    except Exception:
+    except Exception as e:
+        logger.error(f"Failed to compute next run: {e}")
         return None
 
 
@@ -367,3 +381,38 @@ async def toggle_schedule(
     wf_name = wf_result.scalar_one_or_none()
 
     return _to_response(schedule, workflow_name=wf_name)
+
+
+@router.post("/recalculate-all")
+async def recalculate_all_schedules(
+    current_user: TokenPayload = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Recalculate next_run_at for all enabled schedules.
+
+    Useful after installing croniter or fixing schedule computation.
+    """
+    org_id = current_user.org_id
+
+    result = await db.execute(
+        select(Schedule).where(
+            and_(
+                Schedule.organization_id == org_id,
+                Schedule.is_enabled == True,
+                Schedule.is_deleted == False,
+            )
+        )
+    )
+    schedules = result.scalars().all()
+
+    updated = 0
+    for schedule in schedules:
+        next_run = _compute_next_run(schedule.cron_expression, schedule.timezone)
+        if next_run:
+            schedule.next_run_at = next_run
+            updated += 1
+            logger.info(f"Schedule '{schedule.name}' next_run_at: {next_run}")
+
+    await db.flush()
+
+    return {"updated": updated, "total": len(schedules)}

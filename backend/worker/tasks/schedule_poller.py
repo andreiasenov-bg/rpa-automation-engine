@@ -130,9 +130,25 @@ async def _poll_and_dispatch() -> dict:
     return {"dispatched": dispatched, "errors": errors}
 
 
+def _ensure_croniter():
+    """Install croniter if not available."""
+    try:
+        import croniter  # noqa: F401
+    except ImportError:
+        import subprocess
+        logger.info("croniter not found, installing...")
+        subprocess.check_call(
+            ["pip", "install", "--no-cache-dir", "-q", "croniter"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        logger.info("croniter installed successfully")
+
+
 def _compute_next_run(cron_expression: str, tz: str = "UTC"):
     """Compute the next run time from a cron expression."""
     try:
+        _ensure_croniter()
         from croniter import croniter
         import pytz
 
