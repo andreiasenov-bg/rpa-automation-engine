@@ -108,7 +108,7 @@ services:
       --loglevel=info
 
   deployer:
-    image: python:3.11-slim
+    build: { context: ".", dockerfile: "scripts/Dockerfile.deployer" }
     container_name: rpa-deployer
     working_dir: /repo
     ports:
