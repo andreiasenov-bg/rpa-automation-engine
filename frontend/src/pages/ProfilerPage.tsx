@@ -38,51 +38,37 @@ interface SummaryData {
   endpoints: EndpointStat[];
 }
 
-function durationColor(ms: number) {
-  if (ms < 100) return 'text-emerald-400';
-  if (ms < 500) return 'text-amber-400';
-  return 'text-red-400';
-}
-
-function durationBg(ms: number) {
-  if (ms < 100) return 'bg-emerald-500/20';
-  if (ms < 500) return 'bg-amber-500/20';
-  return 'bg-red-500/20';
-}
-
-function methodBadge(method: string) {
-  const colors: Record<string, string> = {
-    GET: 'bg-blue-500/20 text-blue-400',
-    POST: 'bg-emerald-500/20 text-emerald-400',
-    PUT: 'bg-amber-500/20 text-amber-400',
-    DELETE: 'bg-red-500/20 text-red-400',
-    PATCH: 'bg-purple-500/20 text-purple-400',
-  };
-  return colors[method] || 'bg-slate-500/20 text-slate-400';
-}
+type SortField = 'duration' | 'calls' | 'memory' | 'errors';
 
 export default function ProfilerPage() {
   const { t } = useLocale();
   const [summary, setSummary] = useState<SummaryData | null>(null);
   const [requests, setRequests] = useState<ProfilerRequest[]>([]);
+  const [enabled, setEnabled] = useState(true);
+  const [activeTab, setActiveTab] = useState<'endpoints' | 'requests'>('endpoints');
+  const [sortBy, setSortBy] = useState<SortField>('duration');
   const [loading, setLoading] = useState(true);
-  const [sortBy, setSortBy] = useState<'avg_duration' | 'count' | 'avg_memory' | 'error_count'>('avg_duration');
-  const [tab, setTab] = useState<'endpoints' | 'requests'>('endpoints');
+  const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
-      const [summaryData, requestsData] = await Promise.all([
+      setError(null);
+      const [summaryRes, configRes] = await Promise.all([
         profilerApi.getSummary(),
-        profilerApi.getRequests(50),
+        profilerApi.getConfig(),
       ]);
-      setSummary(summaryData);
-      setRequests(requestsData.requests || []);
-    } catch (e) {
-      console.error('Profiler fetch error:', e);
+      setSummary(summaryRes.data);
+      setEnabled(configRes.data.enabled);
+      if (activeTab === 'requests') {
+        const reqRes = await profilerApi.getRequests(1, 50);
+        setRequests(reqRes.data.items || reqRes.data);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to load profiler data');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [activeTab]);
 
   useEffect(() => {
     fetchData();
@@ -91,230 +77,329 @@ export default function ProfilerPage() {
   }, [fetchData]);
 
   const handleToggle = async () => {
-    if (!summary) return;
-    await profilerApi.setConfig(!summary.enabled);
-    fetchData();
+    try {
+      await profilerApi.setConfig({ enabled: !enabled });
+      setEnabled(!enabled);
+    } catch (err) {
+      console.error('Failed to toggle profiler', err);
+    }
   };
 
   const handleReset = async () => {
-    await profilerApi.reset();
-    fetchData();
+    try {
+      await profilerApi.reset();
+      await fetchData();
+    } catch (err) {
+      console.error('Failed to reset profiler', err);
+    }
+  };
+
+  const formatDuration = (ms: number) => {
+    if (ms < 1) return `${(ms * 1000).toFixed(0)} µs`;
+    if (ms < 1000) return `${ms.toFixed(1)} ms`;
+    return `${(ms / 1000).toFixed(2)} s`;
+  };
+
+  const formatMemory = (kb: number) => {
+    if (kb < 1024) return `${kb.toFixed(1)} KB`;
+    return `${(kb / 1024).toFixed(2)} MB`;
+  };
+
+  const getDurationColor = (ms: number) => {
+    if (ms < 100) return 'text-emerald-600';
+    if (ms < 500) return 'text-amber-600';
+    return 'text-red-600';
+  };
+
+  const getStatusColor = (code: number) => {
+    if (code < 300) return 'text-emerald-600';
+    if (code < 400) return 'text-amber-600';
+    return 'text-red-600';
   };
 
   const sortedEndpoints = summary?.endpoints?.slice().sort((a, b) => {
-    return (b[sortBy] as number) - (a[sortBy] as number);
+    switch (sortBy) {
+      case 'duration': return b.avg_duration - a.avg_duration;
+      case 'calls': return b.count - a.count;
+      case 'memory': return b.avg_memory - a.avg_memory;
+      case 'errors': return b.error_count - a.error_count;
+      default: return 0;
+    }
   }) || [];
 
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <RefreshCw className="w-8 h-8 text-indigo-400 animate-spin" />
+        <RefreshCw className="w-8 h-8 animate-spin text-indigo-500" />
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
+      {/* Breadcrumb */}
+      <div className="flex items-center gap-2 text-sm text-slate-500">
+        <a href="/" className="hover:text-slate-700">🏠</a>
+        <span>/</span>
+        <span className="text-slate-700 font-medium">Profiler</span>
+      </div>
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <Cpu className="w-7 h-7 text-indigo-400" />
+          <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center">
+            <Cpu className="w-5 h-5 text-indigo-600" />
+          </div>
           <div>
-            <h1 className="text-2xl font-bold text-white">Cloud Profiler</h1>
-            <p className="text-sm text-slate-400">CPU, memory & response time profiling</p>
+            <h1 className="text-2xl font-bold text-slate-800">Cloud Profiler</h1>
+            <p className="text-sm text-slate-500">CPU, memory & response time profiling</p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <button onClick={handleToggle}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleToggle}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-              summary?.enabled ? 'bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/30' : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
-            }`}>
-            {summary?.enabled ? <ToggleRight className="w-4 h-4" /> : <ToggleLeft className="w-4 h-4" />}
-            {summary?.enabled ? 'Enabled' : 'Disabled'}
+              enabled
+                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
+                : 'bg-slate-100 text-slate-500 border border-slate-200 hover:bg-slate-200'
+            }`}
+          >
+            {enabled ? <ToggleRight className="w-4 h-4" /> : <ToggleLeft className="w-4 h-4" />}
+            {enabled ? 'Enabled' : 'Disabled'}
           </button>
-          <button onClick={handleReset}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-red-600/20 text-red-400 hover:bg-red-600/30 transition-colors">
-            <Trash2 className="w-4 h-4" /> Reset
+          <button
+            onClick={handleReset}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 transition-colors"
+          >
+            <Trash2 className="w-4 h-4" />
+            Reset
           </button>
-          <button onClick={fetchData}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors">
-            <RefreshCw className="w-4 h-4" /> Refresh
+          <button
+            onClick={() => { setLoading(true); fetchData(); }}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 transition-colors"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Refresh
           </button>
         </div>
       </div>
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-red-700 text-sm flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4" />
+          {error}
+        </div>
+      )}
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-5">
-          <div className="flex items-center gap-2 mb-1">
-            <Zap className="w-4 h-4 text-blue-400" />
-            <span className="text-xs text-slate-400 uppercase tracking-wide">Total Requests</span>
+      <div className="grid grid-cols-4 gap-4">
+        <div className="bg-white rounded-xl border border-slate-200 p-5 hover:shadow-sm transition-shadow">
+          <div className="flex items-center gap-2 text-sm text-slate-500 mb-2">
+            <Zap className="w-4 h-4 text-indigo-500" />
+            TOTAL REQUESTS
           </div>
-          <p className="text-2xl font-bold text-white">{summary?.total_requests?.toLocaleString() || 0}</p>
+          <div className="text-3xl font-bold text-slate-800">{summary?.total_requests || 0}</div>
         </div>
-        <div className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-5">
-          <div className="flex items-center gap-2 mb-1">
-            <Clock className="w-4 h-4 text-amber-400" />
-            <span className="text-xs text-slate-400 uppercase tracking-wide">Avg Response</span>
+        <div className="bg-white rounded-xl border border-slate-200 p-5 hover:shadow-sm transition-shadow">
+          <div className="flex items-center gap-2 text-sm text-slate-500 mb-2">
+            <Clock className="w-4 h-4 text-amber-500" />
+            AVG RESPONSE
           </div>
-          <p className={`text-2xl font-bold ${durationColor(summary?.avg_duration_ms || 0)}`}>
-            {summary?.avg_duration_ms || 0} ms
-          </p>
+          <div className={`text-3xl font-bold ${getDurationColor(summary?.avg_duration_ms || 0)}`}>
+            {formatDuration(summary?.avg_duration_ms || 0)}
+          </div>
         </div>
-        <div className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-5">
-          <div className="flex items-center gap-2 mb-1">
-            <MemoryStick className="w-4 h-4 text-purple-400" />
-            <span className="text-xs text-slate-400 uppercase tracking-wide">Peak Memory</span>
+        <div className="bg-white rounded-xl border border-slate-200 p-5 hover:shadow-sm transition-shadow">
+          <div className="flex items-center gap-2 text-sm text-slate-500 mb-2">
+            <MemoryStick className="w-4 h-4 text-violet-500" />
+            PEAK MEMORY
           </div>
-          <p className="text-2xl font-bold text-purple-400">
-            {summary?.peak_memory_kb ? `${(summary.peak_memory_kb / 1024).toFixed(1)} MB` : '0 KB'}
-          </p>
+          <div className="text-3xl font-bold text-slate-800">{formatMemory(summary?.peak_memory_kb || 0)}</div>
         </div>
-        <div className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-5">
-          <div className="flex items-center gap-2 mb-1">
-            <AlertTriangle className="w-4 h-4 text-red-400" />
-            <span className="text-xs text-slate-400 uppercase tracking-wide">Error Rate</span>
+        <div className="bg-white rounded-xl border border-slate-200 p-5 hover:shadow-sm transition-shadow">
+          <div className="flex items-center gap-2 text-sm text-slate-500 mb-2">
+            <AlertTriangle className="w-4 h-4 text-red-500" />
+            ERROR RATE
           </div>
-          <p className={`text-2xl font-bold ${(summary?.error_rate || 0) > 5 ? 'text-red-400' : 'text-emerald-400'}`}>
-            {summary?.error_rate || 0}%
-          </p>
+          <div className={`text-3xl font-bold ${(summary?.error_rate || 0) > 10 ? 'text-red-600' : (summary?.error_rate || 0) > 5 ? 'text-amber-600' : 'text-emerald-600'}`}>
+            {(summary?.error_rate || 0).toFixed(1)}%
+          </div>
         </div>
       </div>
 
-      {/* Tab Switcher */}
-      <div className="flex gap-1 bg-slate-800/50 rounded-lg p-1 w-fit">
-        <button onClick={() => setTab('endpoints')}
-          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${tab === 'endpoints' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+      {/* Tabs */}
+      <div className="flex gap-1 bg-slate-100 rounded-lg p-1 w-fit">
+        <button
+          onClick={() => setActiveTab('endpoints')}
+          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+            activeTab === 'endpoints'
+              ? 'bg-white text-slate-800 shadow-sm'
+              : 'text-slate-500 hover:text-slate-700'
+          }`}
+        >
           Endpoints
         </button>
-        <button onClick={() => setTab('requests')}
-          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${tab === 'requests' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+        <button
+          onClick={() => setActiveTab('requests')}
+          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+            activeTab === 'requests'
+              ? 'bg-white text-slate-800 shadow-sm'
+              : 'text-slate-500 hover:text-slate-700'
+          }`}
+        >
           Recent Requests
         </button>
       </div>
 
       {/* Endpoints Table */}
-      {tab === 'endpoints' && (
-        <div className="bg-slate-800/50 border border-slate-700/50 rounded-xl overflow-hidden">
-          <div className="px-5 py-3 border-b border-slate-700/50 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-white">Endpoint Performance</h3>
-            <div className="flex gap-2">
-              {(['avg_duration', 'count', 'avg_memory', 'error_count'] as const).map(key => (
-                <button key={key} onClick={() => setSortBy(key)}
-                  className={`flex items-center gap-1 px-3 py-1 rounded-md text-xs transition-colors ${sortBy === key ? 'bg-indigo-600/30 text-indigo-300' : 'text-slate-500 hover:text-slate-300'}`}>
+      {activeTab === 'endpoints' && (
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+            <h3 className="font-semibold text-slate-800">Endpoint Performance</h3>
+            <div className="flex gap-1">
+              {(['duration', 'calls', 'memory', 'errors'] as SortField[]).map((field) => (
+                <button
+                  key={field}
+                  onClick={() => setSortBy(field)}
+                  className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                    sortBy === field
+                      ? 'bg-indigo-50 text-indigo-700'
+                      : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
                   <ArrowUpDown className="w-3 h-3" />
-                  {key === 'avg_duration' ? 'Duration' : key === 'count' ? 'Calls' : key === 'avg_memory' ? 'Memory' : 'Errors'}
+                  {field.charAt(0).toUpperCase() + field.slice(1)}
                 </button>
               ))}
             </div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-slate-500 text-xs uppercase tracking-wider border-b border-slate-700/50">
-                  <th className="text-left px-5 py-3">Endpoint</th>
-                  <th className="text-right px-3 py-3">Calls</th>
-                  <th className="text-right px-3 py-3">Avg Duration</th>
-                  <th className="text-right px-3 py-3">Max Duration</th>
-                  <th className="text-right px-3 py-3">Avg Memory</th>
-                  <th className="text-right px-3 py-3">Avg CPU</th>
-                  <th className="text-right px-3 py-3">Errors</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedEndpoints.map((ep, i) => (
-                  <tr key={i} className="border-b border-slate-700/30 hover:bg-slate-700/20">
-                    <td className="px-5 py-3">
-                      <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold mr-2 ${methodBadge(ep.method)}`}>
+          <table className="w-full">
+            <thead>
+              <tr className="bg-slate-50 text-xs text-slate-500 uppercase tracking-wider">
+                <th className="text-left px-5 py-3 font-medium">Endpoint</th>
+                <th className="text-center px-3 py-3 font-medium">Calls</th>
+                <th className="text-right px-3 py-3 font-medium">Avg Duration</th>
+                <th className="text-right px-3 py-3 font-medium">Max Duration</th>
+                <th className="text-right px-3 py-3 font-medium">Avg Memory</th>
+                <th className="text-right px-3 py-3 font-medium">Avg CPU</th>
+                <th className="text-center px-5 py-3 font-medium">Errors</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {sortedEndpoints.map((ep, i) => (
+                <tr key={i} className="hover:bg-slate-50 transition-colors">
+                  <td className="px-5 py-3">
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2 py-0.5 rounded text-xs font-bold ${
+                        ep.method === 'GET' ? 'bg-blue-50 text-blue-600' :
+                        ep.method === 'POST' ? 'bg-green-50 text-green-600' :
+                        ep.method === 'PUT' ? 'bg-amber-50 text-amber-600' :
+                        ep.method === 'DELETE' ? 'bg-red-50 text-red-600' :
+                        'bg-slate-50 text-slate-600'
+                      }`}>
                         {ep.method}
                       </span>
-                      <span className="text-slate-200 font-mono text-xs">{ep.endpoint}</span>
-                    </td>
-                    <td className="text-right px-3 py-3 text-slate-300">{ep.count}</td>
-                    <td className="text-right px-3 py-3">
-                      <span className={`px-2 py-0.5 rounded ${durationBg(ep.avg_duration)} ${durationColor(ep.avg_duration)} text-xs font-medium`}>
-                        {ep.avg_duration} ms
+                      <span className="text-sm text-slate-700 font-mono">{ep.endpoint}</span>
+                    </div>
+                  </td>
+                  <td className="text-center px-3 py-3 text-sm text-slate-600">{ep.count}</td>
+                  <td className={`text-right px-3 py-3 text-sm font-medium ${getDurationColor(ep.avg_duration)}`}>
+                    {formatDuration(ep.avg_duration)}
+                  </td>
+                  <td className={`text-right px-3 py-3 text-sm ${getDurationColor(ep.max_duration)}`}>
+                    {formatDuration(ep.max_duration)}
+                  </td>
+                  <td className="text-right px-3 py-3 text-sm text-slate-600">
+                    {formatMemory(ep.avg_memory)}
+                  </td>
+                  <td className="text-right px-3 py-3 text-sm text-slate-600">
+                    {ep.avg_cpu > 0 ? `${ep.avg_cpu.toFixed(1)} ms` : '—'}
+                  </td>
+                  <td className="text-center px-5 py-3">
+                    {ep.error_count > 0 ? (
+                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-600">
+                        {ep.error_count}
                       </span>
-                    </td>
-                    <td className="text-right px-3 py-3">
-                      <span className={`${durationColor(ep.max_duration)} text-xs`}>{ep.max_duration} ms</span>
-                    </td>
-                    <td className="text-right px-3 py-3 text-purple-400 text-xs">{ep.avg_memory} KB</td>
-                    <td className="text-right px-3 py-3 text-blue-400 text-xs">{ep.avg_cpu} ms</td>
-                    <td className="text-right px-3 py-3">
-                      {ep.error_count > 0 ? (
-                        <span className="text-red-400 text-xs font-medium">{ep.error_count} ({ep.error_rate}%)</span>
-                      ) : (
-                        <span className="text-slate-600 text-xs">0</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-                {sortedEndpoints.length === 0 && (
-                  <tr>
-                    <td colSpan={7} className="text-center py-12 text-slate-500">
-                      No profiling data yet. Make some API requests to see data here.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+                    ) : (
+                      <span className="text-sm text-slate-300">0</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {sortedEndpoints.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="text-center py-12 text-slate-400">
+                    No profiling data yet. Make some API calls to see results.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       )}
 
-      {/* Recent Requests */}
-      {tab === 'requests' && (
-        <div className="bg-slate-800/50 border border-slate-700/50 rounded-xl overflow-hidden">
-          <div className="px-5 py-3 border-b border-slate-700/50">
-            <h3 className="text-sm font-semibold text-white">Recent Requests</h3>
+      {/* Recent Requests Table */}
+      {activeTab === 'requests' && (
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-100">
+            <h3 className="font-semibold text-slate-800">Recent Requests</h3>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-slate-500 text-xs uppercase tracking-wider border-b border-slate-700/50">
-                  <th className="text-left px-5 py-3">Time</th>
-                  <th className="text-left px-3 py-3">Endpoint</th>
-                  <th className="text-right px-3 py-3">Status</th>
-                  <th className="text-right px-3 py-3">Duration</th>
-                  <th className="text-right px-3 py-3">CPU</th>
-                  <th className="text-right px-3 py-3">Memory</th>
-                </tr>
-              </thead>
-              <tbody>
-                {requests.map((req, i) => (
-                  <tr key={i} className="border-b border-slate-700/30 hover:bg-slate-700/20">
-                    <td className="px-5 py-2.5 text-slate-500 text-xs font-mono">
-                      {new Date(req.timestamp).toLocaleTimeString()}
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold mr-2 ${methodBadge(req.method)}`}>
+          <table className="w-full">
+            <thead>
+              <tr className="bg-slate-50 text-xs text-slate-500 uppercase tracking-wider">
+                <th className="text-left px-5 py-3 font-medium">Endpoint</th>
+                <th className="text-center px-3 py-3 font-medium">Status</th>
+                <th className="text-right px-3 py-3 font-medium">Duration</th>
+                <th className="text-right px-3 py-3 font-medium">CPU</th>
+                <th className="text-right px-3 py-3 font-medium">Memory</th>
+                <th className="text-right px-5 py-3 font-medium">Time</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {requests.map((req, i) => (
+                <tr key={req.id || i} className="hover:bg-slate-50 transition-colors">
+                  <td className="px-5 py-3">
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2 py-0.5 rounded text-xs font-bold ${
+                        req.method === 'GET' ? 'bg-blue-50 text-blue-600' :
+                        req.method === 'POST' ? 'bg-green-50 text-green-600' :
+                        req.method === 'PUT' ? 'bg-amber-50 text-amber-600' :
+                        req.method === 'DELETE' ? 'bg-red-50 text-red-600' :
+                        'bg-slate-50 text-slate-600'
+                      }`}>
                         {req.method}
                       </span>
-                      <span className="text-slate-300 font-mono text-xs">{req.path}</span>
-                    </td>
-                    <td className="text-right px-3 py-2.5">
-                      <span className={`text-xs font-medium ${req.status_code < 400 ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {req.status_code}
-                      </span>
-                    </td>
-                    <td className="text-right px-3 py-2.5">
-                      <span className={`${durationColor(req.duration_ms)} text-xs font-medium`}>{req.duration_ms} ms</span>
-                    </td>
-                    <td className="text-right px-3 py-2.5 text-blue-400 text-xs">{req.cpu_ms} ms</td>
-                    <td className="text-right px-3 py-2.5 text-purple-400 text-xs">{req.memory_kb} KB</td>
-                  </tr>
-                ))}
-                {requests.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="text-center py-12 text-slate-500">
-                      No requests recorded yet.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+                      <span className="text-sm text-slate-700 font-mono">{req.path}</span>
+                    </div>
+                  </td>
+                  <td className="text-center px-3 py-3">
+                    <span className={`text-sm font-medium ${getStatusColor(req.status_code)}`}>
+                      {req.status_code}
+                    </span>
+                  </td>
+                  <td className={`text-right px-3 py-3 text-sm font-medium ${getDurationColor(req.duration_ms)}`}>
+                    {formatDuration(req.duration_ms)}
+                  </td>
+                  <td className="text-right px-3 py-3 text-sm text-slate-600">
+                    {req.cpu_ms > 0 ? `${req.cpu_ms.toFixed(1)} ms` : '—'}
+                  </td>
+                  <td className="text-right px-3 py-3 text-sm text-slate-600">
+                    {formatMemory(req.memory_kb)}
+                  </td>
+                  <td className="text-right px-5 py-3 text-sm text-slate-400">
+                    {new Date(req.timestamp).toLocaleTimeString()}
+                  </td>
+                </tr>
+              ))}
+              {requests.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="text-center py-12 text-slate-400">
+                    No recent requests recorded.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
