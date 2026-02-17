@@ -500,10 +500,10 @@ async def poll_schedules_now(
 
         await db.flush()
 
-        # Dispatch to Celery
+        # Run directly in background thread (bypasses Celery for reliability)
         try:
-            from worker.tasks.workflow import execute_workflow
-            execute_workflow.delay(
+            from worker.run_workflow import launch_workflow_thread
+            launch_workflow_thread(
                 execution_id=execution_id,
                 workflow_id=str(schedule.workflow_id),
                 organization_id=str(org_id),
@@ -512,7 +512,7 @@ async def poll_schedules_now(
                 trigger_payload={"schedule_id": str(schedule.id)},
             )
         except Exception as e:
-            logger.error(f"Failed to dispatch execution: {e}")
+            logger.error(f"Failed to launch execution: {e}")
 
         dispatched.append({
             "execution_id": execution_id,

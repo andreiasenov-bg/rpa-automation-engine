@@ -132,10 +132,11 @@ async def _poll_and_dispatch() -> dict:
 
                 await session.commit()
 
-                # Dispatch to Celery worker
-                from worker.tasks.workflow import execute_workflow
+                # Run workflow directly (same process, new event loop
+                # in a background thread) — avoids Celery dispatch issues
+                from worker.run_workflow import launch_workflow_thread
 
-                execute_workflow.delay(
+                launch_workflow_thread(
                     execution_id=execution_id,
                     workflow_id=str(schedule.workflow_id),
                     organization_id=str(schedule.organization_id),
