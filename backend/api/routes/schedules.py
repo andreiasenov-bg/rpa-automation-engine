@@ -70,16 +70,20 @@ class ScheduleResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 def _compute_next_run(cron_expression: str, tz: str = "UTC") -> Optional[datetime]:
-    """Compute the next run timestamp from a cron expression."""
+    """Compute the next run timestamp from a cron expression.
+
+    Returns a **naive UTC** datetime for TIMESTAMP WITHOUT TIME ZONE columns.
+    """
     try:
         from croniter import croniter
-        import pytz
+        from zoneinfo import ZoneInfo
 
-        tz_obj = pytz.timezone(tz)
-        now = datetime.now(tz_obj)
-        cron = croniter(cron_expression, now)
-        # Return naive UTC datetime — asyncpg requires naive for TIMESTAMP columns
-        return cron.get_next(datetime).astimezone(timezone.utc).replace(tzinfo=None)
+        tz_obj = ZoneInfo(tz)
+        now_local = datetime.now(tz_obj)
+        cron = croniter(cron_expression, now_local)
+        next_local = cron.get_next(datetime)
+        # Convert to UTC and strip tzinfo → naive UTC
+        return next_local.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
     except ImportError:
         logger.warning("croniter not installed — cannot compute next_run_at")
         return None
@@ -408,3 +412,118 @@ async def recalculate_all_schedules(
     # No refresh needed — response doesn't access ORM attributes
 
     return {"updated": updated, "total": len(schedules)}
+
+
+@router.post("/poll-now")
+async def poll_schedules_now(
+    current_user: TokenPayload = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Manually trigger the schedule poller for the current org.
+
+    Useful for debugging — shows which schedules are due and dispatches them
+    immediately without waiting for Celery Beat.
+    """
+    from datetime import timedelta
+    from zoneinfo import ZoneInfo
+    from uuid import uuid4
+    from db.models.workflow import Workflow
+    from db.models.execution import Execution
+
+    org_id = current_user.org_id
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    # Show debug info about all schedules for this org
+    all_result = await db.execute(
+        select(Schedule).where(
+            and_(
+                Schedule.organization_id == org_id,
+                Schedule.is_deleted == False,
+            )
+        )
+    )
+    all_schedules = all_result.scalars().all()
+
+    debug_info = []
+    for s in all_schedules:
+        is_due = (
+            s.is_enabled
+            and s.next_run_at is not None
+            and s.next_run_at <= now
+        )
+        debug_info.append({
+            "id": s.id,
+            "name": s.name,
+            "cron": s.cron_expression,
+            "timezone": s.timezone,
+            "is_enabled": s.is_enabled,
+            "next_run_at": s.next_run_at.isoformat() if s.next_run_at else None,
+            "now_utc": now.isoformat(),
+            "is_due": is_due,
+        })
+
+    # Find due schedules
+    due_result = await db.execute(
+        select(Schedule).where(
+            and_(
+                Schedule.organization_id == org_id,
+                Schedule.is_enabled == True,
+                Schedule.is_deleted == False,
+                Schedule.next_run_at != None,
+                Schedule.next_run_at <= now,
+            )
+        )
+    )
+    due_schedules = due_result.scalars().all()
+
+    dispatched = []
+    for schedule in due_schedules:
+        wf_result = await db.execute(
+            select(Workflow).where(Workflow.id == schedule.workflow_id)
+        )
+        workflow = wf_result.scalar_one_or_none()
+        if not workflow or not workflow.is_enabled:
+            continue
+
+        execution_id = str(uuid4())
+        execution = Execution(
+            id=execution_id,
+            organization_id=org_id,
+            workflow_id=schedule.workflow_id,
+            trigger_type="schedule",
+            status="pending",
+        )
+        db.add(execution)
+
+        next_run = _compute_next_run(schedule.cron_expression, schedule.timezone)
+        schedule.next_run_at = next_run if next_run else now + timedelta(seconds=60)
+
+        await db.flush()
+
+        # Dispatch to Celery
+        try:
+            from worker.tasks.workflow import execute_workflow
+            execute_workflow.delay(
+                execution_id=execution_id,
+                workflow_id=str(schedule.workflow_id),
+                organization_id=str(org_id),
+                definition=workflow.definition or {},
+                variables={},
+                trigger_payload={"schedule_id": str(schedule.id)},
+            )
+        except Exception as e:
+            logger.error(f"Failed to dispatch execution: {e}")
+
+        dispatched.append({
+            "execution_id": execution_id,
+            "schedule_name": schedule.name,
+            "workflow_name": workflow.name,
+            "next_run_at": schedule.next_run_at.isoformat() if schedule.next_run_at else None,
+        })
+
+    return {
+        "now_utc": now.isoformat(),
+        "all_schedules": debug_info,
+        "due_count": len(due_schedules),
+        "dispatched": dispatched,
+    }

@@ -208,12 +208,13 @@ async def publish_workflow(
             next_run = None
             try:
                 from croniter import croniter
-                import pytz
-                local_tz = pytz.timezone(tz)
+                from zoneinfo import ZoneInfo
                 from datetime import datetime as _dt
+                local_tz = ZoneInfo(tz)
                 now_local = _dt.now(local_tz)
                 cron = croniter(cron_expr, now_local)
-                next_run = cron.get_next(_dt).astimezone(pytz.utc).replace(tzinfo=None)
+                next_local = cron.get_next(_dt)
+                next_run = next_local.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
             except Exception:
                 pass
 

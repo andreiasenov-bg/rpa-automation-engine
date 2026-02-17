@@ -3,6 +3,10 @@
 This task runs every minute via Celery Beat, checks for enabled schedules
 whose next_run_at <= now(), and dispatches workflow executions for them.
 After dispatching, it updates next_run_at to the next occurrence.
+
+Important: All datetime comparisons use NAIVE UTC to match the database
+column type (TIMESTAMP WITHOUT TIME ZONE).  ``_compute_next_run`` also
+returns naive UTC datetimes.
 """
 
 import asyncio
@@ -15,24 +19,34 @@ from worker.celery_app import celery_app
 logger = logging.getLogger(__name__)
 
 
+def _utcnow_naive() -> datetime:
+    """Return the current UTC time as a **naive** datetime.
+
+    PostgreSQL ``TIMESTAMP WITHOUT TIME ZONE`` columns store naive
+    timestamps, so all comparisons must also be naive-UTC.
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 @celery_app.task(
     name="worker.tasks.schedule_poller.poll_schedules",
     bind=True,
-    max_retries=1,
-    default_retry_delay=30,
+    max_retries=2,
+    default_retry_delay=15,
     queue="triggers",
 )
 def poll_schedules(self):
     """Check for due schedules and trigger workflow executions."""
-    logger.info("Polling schedules for due executions...")
+    logger.info("[schedule-poller] Polling schedules for due executions...")
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
         result = loop.run_until_complete(_poll_and_dispatch())
+        logger.info(f"[schedule-poller] Done — {result}")
         return result
     except Exception as exc:
-        logger.error(f"Schedule polling failed: {exc}")
+        logger.error(f"[schedule-poller] Polling failed: {exc}", exc_info=True)
         raise self.retry(exc=exc)
     finally:
         loop.close()
@@ -40,32 +54,40 @@ def poll_schedules(self):
 
 async def _poll_and_dispatch() -> dict:
     """Find due schedules and dispatch workflow executions."""
-    from sqlalchemy import select, update
+    from sqlalchemy import select
     from db.session import AsyncSessionLocal
     from db.models.schedule import Schedule
     from db.models.workflow import Workflow
     from db.models.execution import Execution
 
-    now = datetime.now(timezone.utc)
+    now = _utcnow_naive()
     dispatched = 0
     errors = 0
 
+    logger.info(f"[schedule-poller] Current UTC (naive): {now.isoformat()}")
+
     async with AsyncSessionLocal() as session:
-        # Find all enabled schedules where next_run_at <= now
+        # Find all enabled, non-deleted schedules where next_run_at <= now
         stmt = (
             select(Schedule)
-            .where(Schedule.is_enabled == True)
-            .where(Schedule.next_run_at != None)
+            .where(Schedule.is_enabled == True)       # noqa: E712
+            .where(Schedule.is_deleted == False)       # noqa: E712
+            .where(Schedule.next_run_at != None)       # noqa: E711
             .where(Schedule.next_run_at <= now)
         )
         result = await session.execute(stmt)
         due_schedules = result.scalars().all()
 
         if not due_schedules:
-            logger.info("No due schedules found.")
+            logger.debug("[schedule-poller] No due schedules found.")
             return {"dispatched": 0, "errors": 0}
 
-        logger.info(f"Found {len(due_schedules)} due schedule(s)")
+        logger.info(
+            f"[schedule-poller] Found {len(due_schedules)} due schedule(s): "
+            + ", ".join(
+                f"'{s.name}' (next_run_at={s.next_run_at})" for s in due_schedules
+            )
+        )
 
         for schedule in due_schedules:
             try:
@@ -76,8 +98,8 @@ async def _poll_and_dispatch() -> dict:
 
                 if not workflow or not workflow.is_enabled:
                     logger.warning(
-                        f"Skipping schedule {schedule.id}: workflow "
-                        f"{schedule.workflow_id} not found or disabled"
+                        f"[schedule-poller] Skipping schedule {schedule.id}: "
+                        f"workflow {schedule.workflow_id} not found or disabled"
                     )
                     continue
 
@@ -92,11 +114,21 @@ async def _poll_and_dispatch() -> dict:
                 )
                 session.add(execution)
 
-                # Compute next_run_at
+                # Compute next_run_at — if it fails, keep the OLD value
+                # (prevents schedule from being lost forever)
                 next_run = _compute_next_run(
                     schedule.cron_expression, schedule.timezone
                 )
-                schedule.next_run_at = next_run
+                if next_run is not None:
+                    schedule.next_run_at = next_run
+                else:
+                    # Fallback: add 60 seconds so poller retries next minute
+                    logger.warning(
+                        f"[schedule-poller] _compute_next_run returned None "
+                        f"for schedule '{schedule.name}' — setting retry in 60s"
+                    )
+                    from datetime import timedelta
+                    schedule.next_run_at = now + timedelta(seconds=60)
 
                 await session.commit()
 
@@ -114,15 +146,16 @@ async def _poll_and_dispatch() -> dict:
 
                 dispatched += 1
                 logger.info(
-                    f"Dispatched execution {execution_id} for schedule "
-                    f"'{schedule.name}' (workflow: {workflow.name}). "
-                    f"Next run: {next_run}"
+                    f"[schedule-poller] Dispatched execution {execution_id} "
+                    f"for schedule '{schedule.name}' "
+                    f"(workflow: {workflow.name}). Next run: {next_run}"
                 )
 
             except Exception as e:
                 errors += 1
                 logger.error(
-                    f"Error dispatching schedule {schedule.id}: {e}",
+                    f"[schedule-poller] Error dispatching schedule "
+                    f"{schedule.id}: {e}",
                     exc_info=True,
                 )
                 await session.rollback()
@@ -131,19 +164,29 @@ async def _poll_and_dispatch() -> dict:
 
 
 def _compute_next_run(cron_expression: str, tz: str = "UTC"):
-    """Compute the next run time from a cron expression."""
+    """Compute the next run time from a cron expression.
+
+    Returns a **naive UTC** datetime suitable for storing in a
+    ``TIMESTAMP WITHOUT TIME ZONE`` column.
+    """
     try:
         from croniter import croniter
-        import pytz
+        from zoneinfo import ZoneInfo
 
-        tz_obj = pytz.timezone(tz)
-        now = datetime.now(tz_obj)
-        cron = croniter(cron_expression, now)
-        # Return naive UTC datetime — asyncpg requires naive for TIMESTAMP columns
-        return cron.get_next(datetime).astimezone(pytz.utc).replace(tzinfo=None)
-    except ImportError:
-        logger.warning("croniter not installed — cannot compute next_run_at")
+        tz_obj = ZoneInfo(tz)
+        now_local = datetime.now(tz_obj)
+        cron = croniter(cron_expression, now_local)
+        next_local = cron.get_next(datetime)
+        # Convert to UTC and strip tzinfo → naive UTC
+        next_utc = next_local.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+        logger.debug(
+            f"[schedule-poller] Next run for '{cron_expression}' "
+            f"tz={tz}: {next_utc} UTC"
+        )
+        return next_utc
+    except ImportError as exc:
+        logger.error(f"[schedule-poller] croniter/zoneinfo not available: {exc}")
         return None
     except Exception as e:
-        logger.error(f"Failed to compute next run: {e}")
+        logger.error(f"[schedule-poller] Failed to compute next run: {e}")
         return None
