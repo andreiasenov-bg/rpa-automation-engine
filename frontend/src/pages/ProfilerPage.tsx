@@ -57,11 +57,11 @@ export default function ProfilerPage() {
         profilerApi.getSummary(),
         profilerApi.getConfig(),
       ]);
-      setSummary(summaryRes.data);
-      setEnabled(configRes.data.enabled);
+      setSummary(summaryRes);
+      setEnabled(configRes.enabled);
       if (activeTab === 'requests') {
         const reqRes = await profilerApi.getRequests(1, 50);
-        setRequests(reqRes.data.items || reqRes.data);
+        setRequests(reqRes.items || reqRes);
       }
     } catch (err: any) {
       setError(err.message || 'Failed to load profiler data');
