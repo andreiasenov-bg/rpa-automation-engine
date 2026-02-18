@@ -75,14 +75,14 @@ async def list_executions(
     )
 
 
-@router.get("/{execution_id}", response_model=ExecutionResponse)
+@router.get("/{execution_id}")
 async def get_execution(
     execution_id: str,
     current_user: TokenPayload = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
-) -> ExecutionResponse:
+):
     """
-    Get execution details by ID.
+    Get execution details by ID, including step progress from execution_states.
     """
     svc = ExecutionService(db)
     ex = await svc.get_by_id_and_org(execution_id, current_user.org_id)
@@ -93,7 +93,66 @@ async def get_execution(
             detail="Execution not found",
         )
 
-    return _execution_to_response(ex)
+    resp = _execution_to_response(ex).model_dump()
+
+    # Enrich with step data from execution_states
+    try:
+        from db.models.execution_state import ExecutionStateModel
+        result = await db.execute(
+            select(ExecutionStateModel)
+            .where(ExecutionStateModel.execution_id == execution_id)
+        )
+        state = result.scalars().first()
+
+        if state and state.state_data:
+            data = state.state_data
+            step_outputs = data.get("step_outputs", {})
+            completed = set(data.get("completed_steps", []))
+            failed = set(data.get("failed_steps", []))
+            skipped = set(data.get("skipped_steps", []))
+            error_map = {}
+            for err_entry in data.get("error_log", []):
+                if isinstance(err_entry, dict) and err_entry.get("step_id"):
+                    error_map[err_entry["step_id"]] = err_entry.get("error")
+
+            steps_list = []
+            all_step_ids = sorted(set(step_outputs.keys()) | completed | failed | skipped)
+            for step_id in all_step_ids:
+                st = "completed" if step_id in completed else "failed" if step_id in failed else "skipped" if step_id in skipped else "unknown"
+                steps_list.append({
+                    "id": step_id,
+                    "step_id": step_id,
+                    "name": step_id,
+                    "type": "step",
+                    "status": st,
+                    "output": step_outputs.get(step_id),
+                    "error": error_map.get(step_id),
+                })
+
+            # Also check "steps" key (alternative engine format)
+            raw_steps = data.get("steps", {})
+            existing_ids = {s["id"] for s in steps_list}
+            for step_id, step_data in sorted(raw_steps.items()):
+                if isinstance(step_data, dict) and step_id not in existing_ids:
+                    steps_list.append({
+                        "id": step_id,
+                        "step_id": step_id,
+                        "name": step_data.get("name", step_id),
+                        "type": step_data.get("type", "step"),
+                        "status": step_data.get("status", "unknown"),
+                        "output": step_data.get("output"),
+                        "error": step_data.get("error"),
+                        "duration_ms": step_data.get("duration_ms"),
+                    })
+
+            resp["steps"] = steps_list
+            resp["step_results"] = steps_list
+    except Exception as e:
+        logger.warning(f"Failed to enrich execution with step data: {e}")
+        resp["steps"] = []
+        resp["step_results"] = []
+
+    return resp
 
 
 @router.get("/{execution_id}/logs", response_model=List[ExecutionLogResponse])

@@ -462,20 +462,34 @@ async def get_workflow_detail(
             import json as _json
             sd = state_row[0] if isinstance(state_row[0], dict) else _json.loads(state_row[0])
             total_items = 0
-            # Use the richest step (last step with data array)
+            # Use the richest step (last step with largest data array)
+            # Support both "steps" format and "step_outputs" (checkpoint) format
             steps = sd.get("steps", {})
+            step_outputs = sd.get("step_outputs", {})
+            # Merge: build unified {step_id: output} map
+            all_outputs = {}
             if isinstance(steps, dict):
-                for sid in sorted(steps.keys(), reverse=True):
-                    si = steps[sid]
-                    if not isinstance(si, dict):
-                        continue
-                    out = si.get("output")
-                    if isinstance(out, dict) and "data" in out and isinstance(out["data"], list) and out["data"]:
-                        total_items = len(out["data"])
-                        break
-                    elif isinstance(out, list) and out and isinstance(out[0], dict):
-                        total_items = len(out)
-                        break
+                for sid, si in steps.items():
+                    if isinstance(si, dict):
+                        all_outputs[sid] = si.get("output")
+            if isinstance(step_outputs, dict):
+                for sid, out in step_outputs.items():
+                    if sid not in all_outputs:
+                        all_outputs[sid] = out
+
+            best_count = 0
+            for sid in sorted(all_outputs.keys(), reverse=True):
+                out = all_outputs[sid]
+                if isinstance(out, dict):
+                    # Check all list-valued keys (data, products, items, results, rows, etc.)
+                    for key, val in out.items():
+                        if isinstance(val, list) and len(val) > best_count:
+                            if val and isinstance(val[0], dict):
+                                best_count = len(val)
+                elif isinstance(out, list) and len(out) > best_count:
+                    if out and isinstance(out[0], dict):
+                        best_count = len(out)
+            total_items = best_count
 
             results_summary = {
                 "saved_at": completed_row[4].isoformat() if completed_row[4] else (completed_row[3].isoformat() if completed_row[3] else None),

@@ -53,7 +53,10 @@ Workflow Definition Schema (stored in Workflow.definition JSON):
 
 import asyncio
 import logging
+import sys
 import time
+
+sys.setrecursionlimit(5000)
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -193,12 +196,14 @@ class _DotDict(dict):
         self[name] = value
 
 
-def _make_dot_dict(obj):
+def _make_dot_dict(obj, _depth=0, _max_depth=50):
     """Recursively convert dicts to _DotDict for eval-friendly access."""
+    if _depth >= _max_depth:
+        return obj
     if isinstance(obj, dict) and not isinstance(obj, _DotDict):
-        return _DotDict({k: _make_dot_dict(v) for k, v in obj.items()})
+        return _DotDict({k: _make_dot_dict(v, _depth + 1, _max_depth) for k, v in obj.items()})
     elif isinstance(obj, list):
-        return [_make_dot_dict(item) for item in obj]
+        return [_make_dot_dict(item, _depth + 1, _max_depth) for item in obj]
     return obj
 
 
@@ -318,7 +323,9 @@ class ExpressionEvaluator:
                 resolved[key] = ExpressionEvaluator.resolve_config(value, context)
             elif isinstance(value, list):
                 resolved[key] = [
-                    ExpressionEvaluator.evaluate(v, context) if isinstance(v, str) else v
+                    ExpressionEvaluator.evaluate(v, context) if isinstance(v, str)
+                    else ExpressionEvaluator.resolve_config(v, context) if isinstance(v, dict)
+                    else v
                     for v in value
                 ]
             else:
