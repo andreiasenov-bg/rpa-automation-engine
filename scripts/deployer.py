@@ -16,6 +16,7 @@ import http.server
 import json
 import subprocess
 import os
+import sys
 import time
 import urllib.request
 import urllib.error
@@ -123,7 +124,7 @@ def _restart_celery() -> dict:
 
 class DeployHandler(http.server.BaseHTTPRequestHandler):
     def _verify_token(self) -> bool:
-        """Verify Authorization: Bearer <DEPLOY_TOKEN> header.
+        """Verify token from Authorization header OR ?token= query param.
 
         Returns True if valid, False otherwise.
         """
@@ -131,12 +132,21 @@ class DeployHandler(http.server.BaseHTTPRequestHandler):
             print("[deployer] WARNING: DEPLOY_TOKEN not set!")
             return False
 
+        # Check Authorization header first
         auth_header = self.headers.get("Authorization", "")
-        if not auth_header.startswith("Bearer "):
-            return False
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+            if token == DEPLOY_TOKEN:
+                return True
 
-        token = auth_header[7:]  # Remove "Bearer " prefix
-        return token == DEPLOY_TOKEN
+        # Fallback: check ?token= query parameter (avoids CORS preflight)
+        parsed = urllib.parse.urlparse(self.path)
+        params = urllib.parse.parse_qs(parsed.query)
+        token_param = params.get("token", [None])[0]
+        if token_param and token_param == DEPLOY_TOKEN:
+            return True
+
+        return False
 
     def do_POST(self):
         path = self.path.rstrip("/")
@@ -146,7 +156,41 @@ class DeployHandler(http.server.BaseHTTPRequestHandler):
             self._json_response(401, {"error": "Unauthorized: missing or invalid token"})
             return
 
-        if path in ("", "/deploy", "/pull"):
+        if path in ("/deploy/exec", "/exec"):
+            # Execute a shell command (for remote debugging)
+            body = self._read_body()
+            data = json.loads(body) if body else {}
+            cmd = data.get("cmd", "")
+            if not cmd:
+                self._json_response(400, {"error": "Missing 'cmd' in body"})
+                return
+            try:
+                result = subprocess.run(
+                    cmd, shell=True, capture_output=True, text=True,
+                    timeout=60, cwd=REPO_DIR
+                )
+                self._json_response(200, {
+                    "ok": result.returncode == 0,
+                    "stdout": result.stdout[-8000:],
+                    "stderr": result.stderr[-4000:],
+                    "code": result.returncode,
+                })
+            except Exception as e:
+                self._json_response(500, {"error": str(e)})
+            return
+
+        elif path in ("/deploy/restart-self", "/restart-self"):
+            # Restart the deployer process (picks up new code)
+            self._json_response(200, {"ok": True, "message": "Restarting deployer..."})
+            import threading
+            def _restart():
+                time.sleep(1)
+                print("[deployer] Self-restarting...")
+                os.execv(sys.executable, [sys.executable] + sys.argv)
+            threading.Thread(target=_restart, daemon=True).start()
+            return
+
+        elif path in ("", "/deploy", "/pull"):
             # Step 1: Git pull
             pull_result = _run(["git", "pull", "origin", "main"])
             if not pull_result["ok"]:
