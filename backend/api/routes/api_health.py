@@ -30,8 +30,8 @@ async def _check_database() -> dict[str, Any]:
     """Check PostgreSQL connectivity."""
     start = time.monotonic()
     try:
-        from app.database import async_session_factory
-        async with async_session_factory() as session:
+        from db.database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
             from sqlalchemy import text
             await session.execute(text("SELECT 1"))
         duration = round((time.monotonic() - start) * 1000, 2)
@@ -70,7 +70,7 @@ def _check_celery() -> dict[str, Any]:
     """Check Celery worker availability."""
     start = time.monotonic()
     try:
-        from tasks import celery_app
+        from worker.celery_app import celery_app
         inspector = celery_app.control.inspect(timeout=3)
         ping = inspector.ping()
         duration = round((time.monotonic() - start) * 1000, 2)
