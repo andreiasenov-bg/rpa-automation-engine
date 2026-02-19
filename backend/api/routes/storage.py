@@ -226,23 +226,32 @@ async def download_latest_results(
     # ── Extract only the richest data set (last step with a data array) ──
     all_items = []
     steps_info = state_data.get("steps", {})
-    sorted_steps = sorted(steps_info.keys())  # step-1, step-2, ...
+    sorted_steps = sorted(steps_info.keys())
+    DATA_KEYS = ("data", "products", "items", "results", "records", "rows")
     for step_id in reversed(sorted_steps):
         step_info = steps_info[step_id]
         if not isinstance(step_info, dict):
             continue
         output = step_info.get("output")
-        if isinstance(output, dict) and "data" in output and isinstance(output["data"], list) and output["data"]:
-            all_items = output["data"]
-            break
+        if isinstance(output, dict):
+            for dk in DATA_KEYS:
+                if dk in output and isinstance(output[dk], list) and output[dk] and isinstance(output[dk][0], dict):
+                    all_items = output[dk]
+                    break
+            if all_items:
+                break
         elif isinstance(output, list) and output and isinstance(output[0], dict):
             all_items = output
             break
 
     # ── Define clean column order and human-readable headers ──
     COLUMN_CONFIG = [
+        ("rank",            "Rank",             8),
+        ("title",           "Title",            50),
+        ("price",           "Price",            14),
+        ("rating",          "Rating",           10),
+        ("reviews",         "Reviews",          12),
         ("ean",             "EAN/GTIN",         16),
-        ("title",           "Model",            45),
         ("quantity",        "Quantity",          12),
         ("asin",            "ASIN",             14),
         ("deal_price",      "Amazon Price (€)", 18),
@@ -261,7 +270,7 @@ async def download_latest_results(
     ]
 
     # Filter columns: keep if exists in data OR is a placeholder column (quantity)
-    ALWAYS_SHOW = {"ean", "title", "quantity", "asin"}  # Core columns always present
+    ALWAYS_SHOW = {"title", "asin"}  # Core columns always present
     if all_items:
         existing_keys = set()
         for item in all_items:
@@ -495,7 +504,7 @@ async def get_workflow_detail(
                 "saved_at": completed_row[4].isoformat() if completed_row[4] else (completed_row[3].isoformat() if completed_row[3] else None),
                 "execution_id": str(completed_row[0]),
                 "total_items": total_items,
-                "file_size": 0,  # Size will be calculated on download
+                "file_size": len(_json.dumps(sd).encode("utf-8")) if sd else 0,
             }
 
     return {
