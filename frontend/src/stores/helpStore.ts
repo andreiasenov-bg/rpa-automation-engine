@@ -50,7 +50,8 @@ export const useHelpStore = create<HelpState>((set, get) => ({
   },
 
   stopOnboarding: () => {
-    set({ showOnboarding: false, currentStep: 0 });
+      localStorage.setItem(getUserKey(), 'true');
+    set({ onboardingCompleted: true, showOnboarding: false, currentStep: 0 });
   },
 
   hideTooltip: (id: string) => {

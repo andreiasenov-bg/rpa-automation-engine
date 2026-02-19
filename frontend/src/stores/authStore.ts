@@ -29,6 +29,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       localStorage.setItem('refresh_token', tokens.refresh_token);
 
       const user = await authApi.me();
+      localStorage.setItem('user_id', user.id);
       set({ user, isAuthenticated: true, isLoading: false });
     } catch (err: any) {
       const message = err.response?.data?.detail || 'Login failed';
@@ -50,6 +51,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       localStorage.setItem('refresh_token', tokens.refresh_token);
 
       const user = await authApi.me();
+      localStorage.setItem('user_id', user.id);
       set({ user, isAuthenticated: true, isLoading: false });
     } catch (err: any) {
       const message = err.response?.data?.detail || 'Registration failed';
@@ -61,6 +63,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   logout: () => {
     localStorage.removeItem('access_token');
     localStorage.removeItem('refresh_token');
+    localStorage.removeItem('user_id');
     set({ user: null, isAuthenticated: false, error: null });
   },
 
@@ -74,10 +77,12 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ isLoading: true });
     try {
       const user = await authApi.me();
+      localStorage.setItem('user_id', user.id);
       set({ user, isAuthenticated: true, isLoading: false });
     } catch {
       localStorage.removeItem('access_token');
       localStorage.removeItem('refresh_token');
+    localStorage.removeItem('user_id');
       set({ user: null, isAuthenticated: false, isLoading: false });
     }
   },
