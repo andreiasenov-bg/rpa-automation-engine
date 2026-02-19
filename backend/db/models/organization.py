@@ -35,53 +35,53 @@ class Organization(BaseModel):
         "User",
         back_populates="organization",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="noload",
     )
     roles: Mapped[list["Role"]] = relationship(
         "Role",
         back_populates="organization",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="noload",
     )
     workflows: Mapped[list["Workflow"]] = relationship(
         "Workflow",
         back_populates="organization",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="noload",
     )
     executions: Mapped[list["Execution"]] = relationship(
         "Execution",
         back_populates="organization",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="noload",
     )
     agents: Mapped[list["Agent"]] = relationship(
         "Agent",
         back_populates="organization",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="noload",
     )
     credentials: Mapped[list["Credential"]] = relationship(
         "Credential",
         back_populates="organization",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="noload",
     )
     schedules: Mapped[list["Schedule"]] = relationship(
         "Schedule",
         back_populates="organization",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="noload",
     )
     audit_logs: Mapped[list["AuditLog"]] = relationship(
         "AuditLog",
         back_populates="organization",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="noload",
     )
     triggers: Mapped[list["Trigger"]] = relationship(
         "Trigger",
         back_populates="organization",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="noload",
     )

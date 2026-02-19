@@ -62,17 +62,17 @@ class Execution(BaseModel):
 
     # Relationships
     organization: Mapped["Organization"] = relationship(
-        "Organization", back_populates="executions", lazy="selectin"
+        "Organization", back_populates="executions", lazy="select"
     )
     workflow: Mapped["Workflow"] = relationship(
         "Workflow", back_populates="executions", lazy="selectin"
     )
     agent: Mapped[Optional["Agent"]] = relationship(
-        "Agent", back_populates="executions", lazy="selectin"
+        "Agent", back_populates="executions", lazy="select"
     )
     logs: Mapped[list["ExecutionLog"]] = relationship(
         "ExecutionLog",
         back_populates="execution",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="noload",
     )

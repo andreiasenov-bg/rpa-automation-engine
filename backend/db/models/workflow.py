@@ -61,23 +61,23 @@ class Workflow(BaseModel):
         "WorkflowStep",
         back_populates="workflow",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="noload",
     )
     executions: Mapped[list["Execution"]] = relationship(
         "Execution",
         back_populates="workflow",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="noload",
     )
     schedules: Mapped[list["Schedule"]] = relationship(
         "Schedule",
         back_populates="workflow",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="noload",
     )
     triggers: Mapped[list["Trigger"]] = relationship(
         "Trigger",
         back_populates="workflow",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="noload",
     )
