@@ -52,7 +52,7 @@ jobs:
       - name: Build frontend
         run: |
           cd frontend
-          npm run build
+          npx vite build
 
   deploy:
     needs: lint-and-test
