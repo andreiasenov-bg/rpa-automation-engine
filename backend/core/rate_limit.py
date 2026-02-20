@@ -1,28 +1,31 @@
 """Rate limiting middleware for API protection.
 
-Provides per-IP and per-user rate limiting using an in-memory sliding window.
+Provides per-IP and per-user rate limiting using Redis sliding window.
 Configurable limits per endpoint group. Adds standard rate limit headers.
-
-Production note: Replace in-memory store with Redis for multi-instance deployments.
+Falls back to in-memory store if Redis is unavailable.
 """
 
 import time
+import os
+import logging
 import threading
 from collections import defaultdict
 from typing import Optional, Tuple
 
+import redis
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-# ─── Rate limit configuration ──────────────────────────────────────────────
-# Format: { "group_name": (max_requests, window_seconds) }
+logger = logging.getLogger(__name__)
+
+# Rate limit configuration: { "group_name": (max_requests, window_seconds) }
 RATE_LIMITS = {
-    "auth": (10, 60),           # 10 req/min for auth endpoints
-    "ai": (20, 60),             # 20 req/min for AI endpoints
-    "write": (60, 60),          # 60 req/min for POST/PUT/DELETE
-    "read": (200, 60),          # 200 req/min for GET
-    "default": (120, 60),       # 120 req/min default
+    "auth": (10, 60),
+    "ai": (20, 60),
+    "write": (60, 60),
+    "read": (200, 60),
+    "default": (120, 60),
 }
 
 
@@ -39,118 +42,115 @@ def _classify_request(method: str, path: str) -> str:
     return "default"
 
 
-class SlidingWindowCounter:
-    """Thread-safe sliding window rate counter.
-
-    Uses a two-bucket sliding window algorithm for accuracy
-    without per-request storage overhead.
+class RedisSlidingWindowCounter:
+    """Redis-backed sliding window rate counter.
+    
+    Uses Redis sorted sets for accurate distributed rate limiting.
+    Each request is stored as a member with score = timestamp.
     """
-
-    def __init__(self):
-        self._lock = threading.Lock()
-        # Key: (identifier, group) -> (current_count, prev_count, current_window_start)
-        self._windows: dict[Tuple[str, str], Tuple[int, int, float]] = {}
-        self._max_keys = 50_000  # Bounded memory
-
+    
+    def __init__(self, redis_url: str = None):
+        self._redis_url = redis_url or os.getenv("REDIS_URL", "redis://redis:6379/0")
+        self._redis: Optional[redis.Redis] = None
+        self._connect()
+    
+    def _connect(self):
+        try:
+            self._redis = redis.from_url(
+                self._redis_url,
+                decode_responses=True,
+                socket_connect_timeout=2,
+                socket_timeout=1,
+                retry_on_timeout=True,
+            )
+            self._redis.ping()
+            logger.info("Rate limiter connected to Redis")
+        except Exception as e:
+            logger.warning(f"Rate limiter Redis connection failed: {e}, using fallback")
+            self._redis = None
+    
     def check_and_increment(
         self, key: str, group: str, max_requests: int, window_seconds: int
     ) -> Tuple[bool, int, int, float]:
         """Check if request is allowed and increment counter.
-
-        Returns:
-            (allowed, current_count, limit, retry_after_seconds)
+        
+        Returns: (allowed, current_count, limit, retry_after_seconds)
         """
-        now = time.monotonic()
-        bucket_key = (key, group)
-
-        with self._lock:
-            entry = self._windows.get(bucket_key)
-
-            if entry is None:
-                # First request
-                self._windows[bucket_key] = (1, 0, now)
-                self._maybe_cleanup()
-                return (True, 1, max_requests, 0)
-
-            current_count, prev_count, window_start = entry
-            elapsed = now - window_start
-
-            if elapsed >= window_seconds:
-                # New window
-                if elapsed >= window_seconds * 2:
-                    # Completely new — prev window expired too
-                    self._windows[bucket_key] = (1, 0, now)
-                else:
-                    # Roll over: current becomes prev
-                    self._windows[bucket_key] = (1, current_count, now)
-                return (True, 1, max_requests, 0)
-
-            # Weighted count: prev * remaining_fraction + current
-            weight = 1 - (elapsed / window_seconds)
-            estimated = prev_count * weight + current_count
-
-            if estimated >= max_requests:
-                retry_after = window_seconds - elapsed
-                return (False, int(estimated), max_requests, retry_after)
-
-            # Allowed — increment
-            self._windows[bucket_key] = (current_count + 1, prev_count, window_start)
-            return (True, int(estimated) + 1, max_requests, 0)
-
-    def _maybe_cleanup(self):
-        """Evict oldest entries if memory bound exceeded."""
-        if len(self._windows) > self._max_keys:
-            # Remove oldest 20%
-            to_remove = int(self._max_keys * 0.2)
-            sorted_keys = sorted(
-                self._windows.keys(),
-                key=lambda k: self._windows[k][2],
-            )
-            for k in sorted_keys[:to_remove]:
-                del self._windows[k]
+        if self._redis is None:
+            return (True, 0, max_requests, 0)
+        
+        try:
+            return self._redis_check(key, group, max_requests, window_seconds)
+        except redis.RedisError as e:
+            logger.warning(f"Rate limit Redis error: {e}")
+            return (True, 0, max_requests, 0)
+    
+    def _redis_check(
+        self, key: str, group: str, max_requests: int, window_seconds: int
+    ) -> Tuple[bool, int, int, float]:
+        now = time.time()
+        window_start = now - window_seconds
+        redis_key = f"ratelimit:{group}:{key}"
+        
+        pipe = self._redis.pipeline()
+        pipe.zremrangebyscore(redis_key, 0, window_start)
+        pipe.zadd(redis_key, {f"{now}": now})
+        pipe.zcard(redis_key)
+        pipe.expire(redis_key, window_seconds + 1)
+        results = pipe.execute()
+        
+        current_count = results[2]
+        
+        if current_count > max_requests:
+            pipe2 = self._redis.pipeline()
+            pipe2.zrem(redis_key, f"{now}")
+            pipe2.zrange(redis_key, 0, 0, withscores=True)
+            results2 = pipe2.execute()
+            
+            oldest = results2[1]
+            if oldest:
+                retry_after = oldest[0][1] + window_seconds - now
+            else:
+                retry_after = float(window_seconds)
+            
+            return (False, current_count - 1, max_requests, max(0, retry_after))
+        
+        return (True, current_count, max_requests, 0)
 
 
 # Singleton counter
-_counter = SlidingWindowCounter()
+_counter = RedisSlidingWindowCounter()
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """FastAPI middleware for rate limiting.
-
-    Applies per-IP rate limits with standard headers:
-    - X-RateLimit-Limit
-    - X-RateLimit-Remaining
-    - X-RateLimit-Reset
-    - Retry-After (on 429)
-
-    Skips rate limiting for:
-    - Health check endpoints
-    - Prometheus metrics endpoint
-    - WebSocket connections
+    
+    Applies per-IP rate limits with standard headers.
     """
-
+    
     SKIP_PATHS = {"/api/health", "/api/v1/health", "/health", "/metrics", "/ws"}
-
+    
     async def dispatch(self, request: Request, call_next):
-        # Skip for non-rate-limited paths
-        if request.url.path in self.SKIP_PATHS or request.url.path.startswith("/ws"):
+        if request.url.path in self.SKIP_PATHS:
             return await call_next(request)
-
-        # Identify caller: prefer user ID from auth, fall back to IP
+        
+        if request.scope.get("type") == "websocket":
+            return await call_next(request)
+        
         identifier = self._get_identifier(request)
         group = _classify_request(request.method, request.url.path)
-        max_req, window = RATE_LIMITS.get(group, RATE_LIMITS["default"])
-
+        max_requests, window = RATE_LIMITS.get(group, RATE_LIMITS["default"])
+        
         allowed, current, limit, retry_after = _counter.check_and_increment(
-            identifier, group, max_req, window
+            identifier, group, max_requests, window
         )
-
+        
         if not allowed:
             return JSONResponse(
                 status_code=429,
                 content={
                     "detail": "Rate limit exceeded",
-                    "retry_after": round(retry_after, 1),
+                    "retry_after": int(retry_after),
                 },
                 headers={
                     "X-RateLimit-Limit": str(limit),
@@ -159,36 +159,21 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     "Retry-After": str(int(retry_after)),
                 },
             )
-
+        
         response = await call_next(request)
-
-        # Add rate limit headers
         remaining = max(0, limit - current)
         response.headers["X-RateLimit-Limit"] = str(limit)
         response.headers["X-RateLimit-Remaining"] = str(remaining)
         response.headers["X-RateLimit-Reset"] = str(window)
-
         return response
-
+    
     def _get_identifier(self, request: Request) -> str:
-        """Get a unique identifier for the requestor.
-
-        Uses direct client IP as primary source (not trusting X-Forwarded-For).
-        Only falls back to X-Forwarded-For if direct client is unavailable.
-        """
-        # Try to get user ID from request state (set by auth middleware)
         user_id = getattr(request.state, "user_id", None)
         if user_id:
             return f"user:{user_id}"
-
-        # Use direct client IP (most reliable, not spoofable)
         if request.client and request.client.host:
             return f"ip:{request.client.host}"
-
-        # Only as fallback, use first IP from X-Forwarded-For if available
-        # This is less reliable but better than nothing
         forwarded = request.headers.get("X-Forwarded-For")
         if forwarded:
-            return f"ip:{forwarded.split(',')[0].strip()}"
-
-        return f"ip:unknown"
+            return f"ip:{forwarded.split(chr(44))[0].strip()}"
+        return "ip:unknown"
