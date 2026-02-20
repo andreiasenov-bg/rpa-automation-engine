@@ -1,6 +1,5 @@
 """Tests for activity timeline helpers."""
 
-import pytest
 from api.routes.activity import (
     _format_description,
     _action_icon,

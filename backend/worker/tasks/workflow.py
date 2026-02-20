@@ -12,7 +12,7 @@ import asyncio
 import json as _json
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from uuid import uuid4
 
 from worker.celery_app import celery_app

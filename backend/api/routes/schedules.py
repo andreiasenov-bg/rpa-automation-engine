@@ -425,7 +425,6 @@ async def poll_schedules_now(
     immediately without waiting for Celery Beat.
     """
     from datetime import timedelta
-    from zoneinfo import ZoneInfo
     from uuid import uuid4
     from db.models.workflow import Workflow
     from db.models.execution import Execution
@@ -469,7 +468,7 @@ async def poll_schedules_now(
                 Schedule.organization_id == org_id,
                 Schedule.is_enabled == True,
                 Schedule.is_deleted == False,
-                Schedule.next_run_at != None,
+                Schedule.next_run_at is not None,
                 Schedule.next_run_at <= now,
             )
         )

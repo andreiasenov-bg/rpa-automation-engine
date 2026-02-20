@@ -1,7 +1,6 @@
 """Common schemas used across the API."""
 
 from pydantic import BaseModel, Field
-from typing import Optional
 
 
 class PaginationParams(BaseModel):

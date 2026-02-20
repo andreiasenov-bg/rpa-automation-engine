@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, desc, case, text
+from sqlalchemy import select, func, and_, desc
 
 from core.security import TokenPayload
 from app.dependencies import get_db, get_current_active_user

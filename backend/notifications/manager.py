@@ -5,7 +5,7 @@ organization preferences and notification rules.
 """
 
 import logging
-from typing import Any, Optional
+from typing import Optional
 
 from notifications.channels import (
     BaseChannel,

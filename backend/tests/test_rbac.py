@@ -1,6 +1,5 @@
 """Tests for RBAC permission checking logic."""
 
-import pytest
 from core.rbac import _check_permission
 
 

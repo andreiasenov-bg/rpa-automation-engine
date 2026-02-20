@@ -5,7 +5,7 @@ Credential *values* are never returned unless explicitly requested
 via GET /{credential_id} (which is audit-logged).
 """
 
-from typing import Optional, List
+from typing import Optional
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, status, Depends, Query

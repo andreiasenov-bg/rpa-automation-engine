@@ -13,10 +13,7 @@ Runs automatically after deploys and daily as preventive maintenance.
 import asyncio
 import importlib
 import logging
-import os
-import sys
 from datetime import datetime, timezone, timedelta
-from typing import Optional
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import select, func, text

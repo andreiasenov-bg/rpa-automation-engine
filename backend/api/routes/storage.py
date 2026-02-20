@@ -9,11 +9,9 @@ Endpoints:
 """
 
 import mimetypes
-from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, status, Depends, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 from fastapi.responses import FileResponse
-from typing import Optional
 
 from app.dependencies import get_db, get_current_active_user
 from core.security import TokenPayload

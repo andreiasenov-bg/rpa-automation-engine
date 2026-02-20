@@ -9,7 +9,7 @@ import hmac
 import secrets
 from typing import Optional
 
-from triggers.base import BaseTriggerHandler, TriggerEvent, TriggerResult, TriggerTypeEnum
+from triggers.base import BaseTriggerHandler, TriggerResult, TriggerTypeEnum
 
 
 class WebhookTriggerHandler(BaseTriggerHandler):

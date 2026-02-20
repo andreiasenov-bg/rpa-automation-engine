@@ -3,7 +3,6 @@
 from fastapi import APIRouter, HTTPException, status, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, desc, case
-from typing import Optional
 from datetime import datetime, timedelta
 import logging
 
@@ -338,7 +337,7 @@ async def export_daily_summary(
     org_id = current_user.org_id
     cutoff = datetime.utcnow() - timedelta(days=days)
 
-    from sqlalchemy import func as sql_func, cast, Date
+    from sqlalchemy import func as sql_func
 
     day_expr = sql_func.date_trunc("day", Execution.created_at)
 

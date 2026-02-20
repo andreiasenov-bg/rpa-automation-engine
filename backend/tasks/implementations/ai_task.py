@@ -12,7 +12,7 @@ Provides multiple AI task types for workflows:
 - ai_conversation: Multi-turn conversation with memory
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from tasks.base_task import BaseTask, TaskResult
 from integrations.claude_client import get_claude_client

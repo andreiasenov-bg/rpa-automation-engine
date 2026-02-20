@@ -5,7 +5,6 @@ The NotificationManager dispatches to the appropriate channel(s).
 """
 
 import asyncio
-import json
 import logging
 import smtplib
 from abc import ABC, abstractmethod

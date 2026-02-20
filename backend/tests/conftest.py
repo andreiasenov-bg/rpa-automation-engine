@@ -8,12 +8,10 @@ Provides:
 - Auth helpers (JWT tokens)
 """
 
-import asyncio
 import os
 from typing import AsyncGenerator
 from uuid import uuid4
 
-import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -27,7 +25,7 @@ os.environ.setdefault("ENCRYPTION_KEY", "test-encryption-key-not-for-production"
 os.environ.setdefault("ENVIRONMENT", "testing")
 os.environ.setdefault("LOG_FORMAT", "colored")
 
-from db.base import Base, BaseModel  # noqa: E402
+from db.base import Base  # noqa: E402
 from core.security import create_access_token  # noqa: E402
 
 

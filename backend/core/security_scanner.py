@@ -10,8 +10,6 @@ Provides comprehensive scanning for:
 Designed as a startup check to prevent secrets from being committed to the repository.
 """
 
-import logging
-import os
 import re
 from dataclasses import dataclass
 from pathlib import Path

@@ -1,11 +1,9 @@
 """Tests for workflow retry strategies."""
 
-import asyncio
 import pytest
 from workflow.retry_strategies import (
     RetryStrategy,
     RetryPolicy,
-    RetryAttempt,
     RETRY_PRESETS,
     execute_with_retry,
 )

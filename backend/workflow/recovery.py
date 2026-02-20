@@ -16,11 +16,11 @@ This ensures zero data loss and seamless continuation.
 
 import asyncio
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 import structlog
 
-from workflow.checkpoint import CheckpointManager, CheckpointType, ExecutionState
+from workflow.checkpoint import CheckpointManager, CheckpointType
 
 logger = structlog.get_logger(__name__)
 

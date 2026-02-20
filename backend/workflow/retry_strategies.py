@@ -21,7 +21,7 @@ import random
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional, Callable, AsyncIterator
+from typing import Optional, Callable
 
 
 class RetryPolicy(str, Enum):

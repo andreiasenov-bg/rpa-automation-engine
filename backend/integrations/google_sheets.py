@@ -11,15 +11,12 @@ Features:
 """
 
 import asyncio
-import json
 import os
-import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 import structlog
 from google.auth.service_account import Credentials
-from google.oauth2.credentials import Credentials as OAuth2Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 

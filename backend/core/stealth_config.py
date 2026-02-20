@@ -5,7 +5,7 @@ and behavioral mimicry. Used by browser_task.py and other scrapers.
 """
 
 import random
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 # Expanded realistic User-Agent pool (Chrome on Win/Mac/Linux)
 USER_AGENTS: List[str] = [

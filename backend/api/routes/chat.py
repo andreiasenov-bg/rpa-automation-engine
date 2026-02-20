@@ -10,9 +10,8 @@ Stage 1+2: Action buttons in responses + execute actions from chat.
 import os
 import uuid
 from typing import Optional
-from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from core.security import get_current_user, TokenPayload
@@ -380,7 +379,7 @@ Available workflow templates (you can mention these by name):
 
                 answer = answer.strip()
 
-        except Exception as e:
+        except Exception:
             import traceback
             traceback.print_exc()
             answer = ""

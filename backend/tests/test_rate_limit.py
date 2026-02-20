@@ -1,10 +1,7 @@
 """Tests for rate limiting middleware."""
 
-import time
 import threading
-from unittest.mock import MagicMock, AsyncMock, patch
 
-import pytest
 
 from core.rate_limit import (
     SlidingWindowCounter,

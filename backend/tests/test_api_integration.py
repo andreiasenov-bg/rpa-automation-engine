@@ -5,7 +5,6 @@ Uses an in-memory SQLite database for speed and isolation.
 """
 
 import pytest
-import pytest_asyncio
 from uuid import uuid4
 
 

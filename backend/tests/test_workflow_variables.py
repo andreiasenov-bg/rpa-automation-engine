@@ -6,8 +6,6 @@ from api.routes.workflow_variables import (
     VariableDefinition,
     VariableSchemaRequest,
     StepMappingEntry,
-    StepMappingsRequest,
-    ExecutionVariablesRequest,
     VarType,
     _validate_type,
 )

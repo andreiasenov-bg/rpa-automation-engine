@@ -6,7 +6,7 @@ Endpoints for interacting with Claude AI directly and managing AI configuration.
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from integrations.claude_client import get_claude_client
@@ -147,7 +147,7 @@ async def ai_ask(request: AIAskRequest):
             }
         }
 
-    except ValueError as e:
+    except ValueError:
         try:
             response = await client.ask(
                 prompt=prompt,
@@ -292,7 +292,6 @@ async def generate_workflow(request: GenerateWorkflowRequest):
     language description. Returns a workflow name, description, and steps array
     ready for creating a workflow.
     """
-    from core.security import get_current_user
     client = await get_claude_client()
     if not client.is_configured:
         raise HTTPException(status_code=503, detail="Claude AI not configured. Set ANTHROPIC_API_KEY.")

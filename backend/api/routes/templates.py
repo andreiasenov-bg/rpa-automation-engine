@@ -12,7 +12,6 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy import select, func, desc, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_db, get_current_active_user
@@ -26,7 +25,7 @@ logger = logging.getLogger(__name__)
 # ━━━ Import comprehensive template library (25+ templates) ━━━━━━━━━━━━━━━━
 
 from api.routes.template_library import BUILTIN_TEMPLATES
-from api.routes.template_parameters import TEMPLATE_PARAMETERS, get_template_parameters
+from api.routes.template_parameters import get_template_parameters
 
 
 # ━━━ Helpers ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -25,7 +25,6 @@ Example plugin (local):
 import importlib
 import importlib.metadata
 import logging
-import os
 import sys
 from pathlib import Path
 from typing import Any, Optional

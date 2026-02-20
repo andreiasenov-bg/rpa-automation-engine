@@ -1,9 +1,8 @@
 """Workflow CRUD endpoints — list, create, get, update, delete, execute, publish, archive, version history."""
 
 import copy
-from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, status, Depends, Query
+from fastapi import APIRouter, HTTPException, status, Depends, Query
 from sqlalchemy import select, desc, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 import logging
@@ -15,7 +14,6 @@ from api.schemas.workflow import (
     WorkflowResponse,
     WorkflowListResponse,
 )
-from api.schemas.execution import ExecutionResponse
 from api.schemas.common import PaginationParams
 from app.dependencies import get_db, get_current_active_user
 from services.workflow_service import WorkflowService
@@ -272,11 +270,8 @@ async def trigger_workflow_execution(
     import threading
     import asyncio
     import traceback as tb_mod
-    from datetime import datetime, timezone
     from uuid import uuid4
-    from db.session import AsyncSessionLocal
     from db.models.execution import Execution as ExecModel
-    from sqlalchemy import update as sa_update
 
     try:
         svc = WorkflowService(db)
@@ -471,7 +466,6 @@ async def test_workflow_execution(
     """
     import traceback
     import time
-    from datetime import datetime, timezone
 
     svc = WorkflowService(db)
     wf = await svc.get_by_id_and_org(workflow_id, current_user.org_id)
@@ -495,7 +489,7 @@ async def test_workflow_execution(
         from workflow.checkpoint import CheckpointManager
         from tasks.registry import get_task_registry
         result["stages"].append({"stage": "imports", "status": "ok"})
-    except Exception as e:
+    except Exception:
         result["stages"].append({"stage": "imports", "status": "failed", "error": traceback.format_exc()})
         return result
 
@@ -509,7 +503,7 @@ async def test_workflow_execution(
             "available_types": available,
             "needed_types": list(set(s.get("type", "unknown") for s in steps)),
         })
-    except Exception as e:
+    except Exception:
         result["stages"].append({"stage": "registry", "status": "failed", "error": traceback.format_exc()})
         return result
 
@@ -527,7 +521,7 @@ async def test_workflow_execution(
             )
             await session.rollback()
         result["stages"].append({"stage": "db_update", "status": "ok"})
-    except Exception as e:
+    except Exception:
         result["stages"].append({"stage": "db_update", "status": "failed", "error": traceback.format_exc()})
         return result
 
@@ -565,7 +559,7 @@ async def test_workflow_execution(
             "step_results": step_results,
         })
 
-    except Exception as e:
+    except Exception:
         result["stages"].append({
             "stage": "engine_run",
             "status": "failed",

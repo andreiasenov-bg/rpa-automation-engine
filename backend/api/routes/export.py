@@ -12,12 +12,11 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select, desc, func, and_
+from sqlalchemy import select, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_active_user, get_db
 from db.models.execution import Execution
-from db.models.execution_log import ExecutionLog
 from db.models.workflow import Workflow
 from db.models.audit_log import AuditLog
 from db.models.user import User
@@ -224,7 +223,7 @@ async def export_analytics(
     current_user=Depends(get_current_active_user),
 ):
     """Export analytics summary as CSV or JSON."""
-    from sqlalchemy import case, cast, Float
+    from sqlalchemy import case
 
     # Workflow performance metrics
     query = (

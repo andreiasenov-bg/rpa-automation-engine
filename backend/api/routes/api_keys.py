@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_active_user, get_db
-from core.api_keys import generate_api_key, mask_api_key
+from core.api_keys import generate_api_key
 from db.models.api_key import APIKey
 
 router = APIRouter()

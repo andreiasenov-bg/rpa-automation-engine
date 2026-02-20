@@ -251,7 +251,7 @@ def _start_schedule_poller() -> "threading.Event":
         """Find due schedules and launch workflow executions."""
         from datetime import datetime, timezone, timedelta
         from uuid import uuid4
-        from sqlalchemy import select, and_
+        from sqlalchemy import select
         from db.session import AsyncSessionLocal
         from db.models.schedule import Schedule
         from db.models.workflow import Workflow

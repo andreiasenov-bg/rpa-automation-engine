@@ -12,7 +12,6 @@ Usage:
 """
 
 import logging
-from typing import Optional
 
 from fastapi import Depends, HTTPException, status
 from sqlalchemy import select
@@ -32,7 +31,6 @@ async def _get_user_permissions(user_id: str, org_id: str, db: AsyncSession) -> 
     """
     from db.models.user import User
     from db.models.role import Role
-    from db.models.permission import Permission
 
     # Load user → roles → permissions in one query
     result = await db.execute(

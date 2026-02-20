@@ -20,7 +20,6 @@ async def seed():
     from db.models.role import Role
     from db.models.permission import Permission
     from core.security import hash_password
-    from core.utils import generate_slug
     from sqlalchemy import select, insert
 
     # Initialize DB tables

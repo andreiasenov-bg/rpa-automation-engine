@@ -8,7 +8,7 @@ pagination, and organization scoping (multi-tenant).
 from typing import Any, Generic, Optional, Sequence, Type, TypeVar
 from uuid import uuid4
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.base import BaseModel

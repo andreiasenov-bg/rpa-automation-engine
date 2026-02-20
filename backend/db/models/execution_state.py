@@ -7,10 +7,9 @@ These tables are the backbone of the resume-from-crash capability:
 - execution_journal: Detailed event log for every execution action
 """
 
-import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, Text, JSON
+from sqlalchemy import Column, DateTime, Index, Integer, String, Text, JSON
 
 # Use JSON for SQLite compat, JSONB for PostgreSQL
 try:

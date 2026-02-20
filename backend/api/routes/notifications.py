@@ -6,10 +6,9 @@ Provides in-app notification feed from execution events + AI diagnosis + fix his
 
 import json as _json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel, Field
-from typing import Optional
 
 from app.dependencies import get_current_active_user, get_db, TokenPayload
 from sqlalchemy.ext.asyncio import AsyncSession

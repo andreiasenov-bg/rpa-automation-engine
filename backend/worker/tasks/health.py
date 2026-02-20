@@ -76,7 +76,7 @@ def check_agent_heartbeats():
 
 async def _check_heartbeats() -> dict:
     """Query Agent model for stale heartbeats and mark agents as disconnected."""
-    from sqlalchemy import select, update, and_
+    from sqlalchemy import select, and_
     from db.worker_session import worker_session
     from db.models.agent import Agent
     from core.constants import AgentStatus
@@ -91,7 +91,7 @@ async def _check_heartbeats() -> dict:
                 and_(
                     Agent.status == AgentStatus.ACTIVE.value,
                     Agent.is_deleted == False,
-                    Agent.last_heartbeat_at != None,
+                    Agent.last_heartbeat_at is not None,
                     Agent.last_heartbeat_at < cutoff,
                 )
             )

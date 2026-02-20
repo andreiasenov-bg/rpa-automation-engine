@@ -11,10 +11,9 @@ Each key is scoped to an organization and can have specific permissions.
 import hashlib
 import logging
 import secrets
-from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import Request, HTTPException, Security
+from fastapi import HTTPException, Security
 from fastapi.security import APIKeyHeader, APIKeyQuery
 from sqlalchemy import select, update, or_
 from sqlalchemy.sql import func

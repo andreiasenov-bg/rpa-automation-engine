@@ -236,7 +236,7 @@ class ProfilerMiddleware(BaseHTTPMiddleware):
             response: Response = await call_next(request)
             status_code = response.status_code
             return response
-        except Exception as exc:
+        except Exception:
             status_code = 500
             raise
         finally:

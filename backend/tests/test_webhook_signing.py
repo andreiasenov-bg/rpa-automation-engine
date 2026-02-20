@@ -1,7 +1,6 @@
 """Tests for webhook HMAC signing and verification."""
 
 import time
-import pytest
 from core.webhook_signing import (
     sign_webhook_payload,
     verify_webhook_signature,

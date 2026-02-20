@@ -8,12 +8,10 @@ Falls back to in-memory store if Redis is unavailable.
 import time
 import os
 import logging
-import threading
-from collections import defaultdict
 from typing import Optional, Tuple
 
 import redis
-from fastapi import Request, Response
+from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 

@@ -1,7 +1,6 @@
 """Tests for the service layer (repository pattern)."""
 
 import pytest
-from uuid import uuid4
 
 from services.auth_service import AuthService
 

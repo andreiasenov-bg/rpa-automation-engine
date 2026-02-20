@@ -15,7 +15,6 @@ import asyncio
 import json
 import re
 import time
-import uuid
 from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Callable, Dict, List, Optional
 
@@ -1009,7 +1008,7 @@ Respond with a JSON object matching the schema. Use null for missing values. JSO
             temperature=0.1,
         )
 
-        return safe_extract_json(response, {"error": f"Failed to parse", "raw": response})
+        return safe_extract_json(response, {"error": "Failed to parse", "raw": response})
 
     # ─── Status ────────────────────────────────────────────────────
 

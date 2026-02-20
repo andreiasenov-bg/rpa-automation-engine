@@ -61,7 +61,6 @@ async def _run_cleanup() -> dict:
         ExecutionCheckpointModel,
         ExecutionJournalModel,
     )
-    from db.models.audit_log import AuditLog
 
     now = datetime.now(timezone.utc)
     stats = {
@@ -115,7 +114,7 @@ async def _run_cleanup() -> dict:
                 select(Execution.id).where(
                     and_(
                         Execution.status.in_(["completed", "failed", "cancelled"]),
-                        Execution.completed_at != None,
+                        Execution.completed_at is not None,
                         Execution.completed_at < checkpoint_cutoff.replace(tzinfo=None),
                     )
                 )
