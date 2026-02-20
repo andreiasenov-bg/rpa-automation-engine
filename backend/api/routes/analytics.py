@@ -52,29 +52,20 @@ async def get_execution_overview(
         Execution.created_at >= cutoff_date,
     )
 
-    # Total executions
-    total_exec = await db.scalar(
-        select(func.count(Execution.id)).where(base_where)
-    ) or 0
-
-    # Completed executions
-    completed_exec = await db.scalar(
-        select(func.count(Execution.id)).where(
-            and_(base_where, Execution.status == "completed")
-        )
-    ) or 0
-
-    # Failed executions
-    failed_exec = await db.scalar(
-        select(func.count(Execution.id)).where(
-            and_(base_where, Execution.status == "failed")
-        )
-    ) or 0
-
-    # Average duration
-    avg_duration = await db.scalar(
-        select(func.avg(Execution.duration_ms)).where(base_where)
+    # Single optimized query with conditional aggregation
+    result = await db.execute(
+        select(
+            func.count(Execution.id).label("total"),
+            func.count(case((Execution.status == "completed", 1))).label("completed"),
+            func.count(case((Execution.status == "failed", 1))).label("failed"),
+            func.avg(Execution.duration_ms).label("avg_duration"),
+        ).where(base_where)
     )
+    row = result.one()
+    total_exec = row.total or 0
+    completed_exec = row.completed or 0
+    failed_exec = row.failed or 0
+    avg_duration = row.avg_duration
 
     # Calculate success rate
     success_rate = 0.0

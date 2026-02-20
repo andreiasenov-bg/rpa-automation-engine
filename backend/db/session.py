@@ -10,6 +10,11 @@ engine = create_async_engine(
     settings.DATABASE_URL,
     echo=settings.SQLALCHEMY_ECHO,
     future=True,
+    pool_size=20,
+    max_overflow=30,
+    pool_recycle=1800,
+    pool_pre_ping=True,
+    pool_timeout=10,
 )
 
 # Create async session factory

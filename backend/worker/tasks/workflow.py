@@ -16,6 +16,9 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from worker.celery_app import celery_app
+import sys
+if "/app" not in sys.path:
+    sys.path.insert(0, "/app")
 
 logger = logging.getLogger(__name__)
 

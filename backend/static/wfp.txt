@@ -37,9 +37,7 @@ import {
   ChevronUp,
   AlertTriangle,
   ClipboardCheck,
-  Table2,
 } from 'lucide-react';
-import PriceHistoryPanel from '../components/PriceHistoryPanel';
 import { storageApi } from '@/api/storage';
 import { workflowApi } from '@/api/workflows';
 import { executionApi } from '@/api/executions';
@@ -558,45 +556,6 @@ export default function WorkflowDetailPage() {
             )}
           </div>
 
-
-          {/* Data Preview Table */}
-          {detail?.results_summary?.preview && detail.results_summary.preview.length > 0 && (
-            <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 overflow-hidden">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-2">
-                  <Table2 className="w-4 h-4 text-blue-500" /> Data Preview
-                  <span className="text-xs font-normal text-slate-400">({detail.results_summary.total_items} records)</span>
-                </h3>
-              </div>
-              <div className="overflow-x-auto max-h-[500px] overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700">
-                <table className="min-w-full text-xs">
-                  <thead className="bg-slate-50 dark:bg-slate-900 sticky top-0 z-10">
-                    <tr>
-                      {detail.results_summary.columns.map((col: string) => (
-                        <th key={col} className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wider border-b border-slate-200 dark:border-slate-700 whitespace-nowrap">
-                          {col.replace(/_/g, ' ')}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                    {detail.results_summary.preview.map((row: any, idx: number) => (
-                      <tr key={idx} className={idx % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50/50 dark:bg-slate-800/50'}>
-                        {detail.results_summary.columns.map((col: string) => (
-                          <td key={col} className="px-3 py-2 text-slate-700 dark:text-slate-300 whitespace-nowrap max-w-[300px] truncate" title={String(row[col] ?? '')}>
-                            {String(row[col] ?? '-')}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-              {/* Price Analytics */}
-              <PriceHistoryPanel workflowId={id!} />
           {/* Execution history */}
           <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
             <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-200 mb-4">

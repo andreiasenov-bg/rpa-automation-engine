@@ -72,6 +72,17 @@ async def lifespan(app: FastAPI):
 
     await init_db()
 
+    # Warm up connection pool to avoid cold start latency
+    try:
+        from db.session import AsyncSessionLocal
+        from sqlalchemy import text
+        for i in range(5):
+            async with AsyncSessionLocal() as session:
+                await session.execute(text('SELECT 1'))
+        print('[startup] Connection pool warmed up (5 connections)')
+    except Exception as e:
+        print(f'[startup] Pool warmup warning: {e}')
+
     # Initialize Notification Manager
     notif_mgr = get_notification_manager()
     # Channels are configured via environment or admin API later

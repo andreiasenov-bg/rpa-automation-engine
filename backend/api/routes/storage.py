@@ -500,11 +500,28 @@ async def get_workflow_detail(
                         best_count = len(out)
             total_items = best_count
 
+            # -- Extract preview data for table display --
+            best_items = []
+            for sid in sorted(all_outputs.keys(), reverse=True):
+                out = all_outputs[sid]
+                if isinstance(out, dict):
+                    for key, val in out.items():
+                        if isinstance(val, list) and len(val) >= best_count and val and isinstance(val[0], dict):
+                            best_items = val
+                            break
+                elif isinstance(out, list) and len(out) >= best_count and out and isinstance(out[0], dict):
+                    best_items = out
+                if best_items:
+                    break
+            preview_items = best_items[:50] if best_items else []
+            columns = list(preview_items[0].keys()) if preview_items else []
             results_summary = {
                 "saved_at": completed_row[4].isoformat() if completed_row[4] else (completed_row[3].isoformat() if completed_row[3] else None),
                 "execution_id": str(completed_row[0]),
                 "total_items": total_items,
                 "file_size": len(_json.dumps(sd).encode("utf-8")) if sd else 0,
+                "columns": columns,
+                "preview": preview_items,
             }
 
     return {

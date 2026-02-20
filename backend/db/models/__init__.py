@@ -19,6 +19,7 @@ from db.models.audit_log import AuditLog
 from db.models.trigger import Trigger
 from db.models.execution_state import ExecutionStateModel, ExecutionCheckpointModel, ExecutionJournalModel
 from db.models.api_key import APIKey
+from db.models.price_history import PriceHistory
 
 __all__ = [
     "Organization",
@@ -40,4 +41,5 @@ __all__ = [
     "ExecutionCheckpointModel",
     "ExecutionJournalModel",
     "APIKey",
+    "PriceHistory",
 ]

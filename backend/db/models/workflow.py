@@ -49,13 +49,13 @@ class Workflow(BaseModel):
 
     # Relationships
     organization: Mapped["Organization"] = relationship(
-        "Organization", back_populates="workflows", lazy="selectin"
+        "Organization", back_populates="workflows", lazy="noload"
     )
     created_by: Mapped[Optional["User"]] = relationship(
         "User",
         foreign_keys=[created_by_id],
         back_populates="created_workflows",
-        lazy="selectin",
+        lazy="noload",
     )
     steps: Mapped[list["WorkflowStep"]] = relationship(
         "WorkflowStep",

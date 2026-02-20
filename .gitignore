@@ -78,3 +78,5 @@ k8s/secrets.yaml
 # Playwright test artifacts
 frontend/test-results/
 frontend/playwright-report/
+backend/storage/workflows/
+*.bak

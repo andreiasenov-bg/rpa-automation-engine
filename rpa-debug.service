@@ -1,0 +1,12 @@
+[Unit]
+Description=Run debug script once
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/rpa-engine/host_debug.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -8,6 +8,10 @@ This module sets up the Celery app with:
 - Auto-discovery of task modules
 """
 
+import sys
+if "/app" not in sys.path:
+    sys.path.insert(0, "/app")
+
 from celery import Celery
 from celery.schedules import crontab
 

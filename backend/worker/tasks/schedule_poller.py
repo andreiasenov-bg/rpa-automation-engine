@@ -15,6 +15,9 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from worker.celery_app import celery_app
+import sys
+if "/app" not in sys.path:
+    sys.path.insert(0, "/app")
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +58,9 @@ def poll_schedules(self):
 async def _poll_and_dispatch() -> dict:
     """Find due schedules and dispatch workflow executions."""
     from sqlalchemy import select
+    import sys
+    if "/app" not in sys.path:
+        sys.path.insert(0, "/app")
     from db.session import AsyncSessionLocal
     from db.models.schedule import Schedule
     from db.models.workflow import Workflow

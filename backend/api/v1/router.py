@@ -33,6 +33,7 @@ from api.routes import user_roles
 from api.routes import workflow_variables
 from api.routes import chat
 from api.routes import storage
+from api.routes import price_history
 from api.routes import integrations as integrations_routes
 from api.routes import triggers
 from api.routes import notifications
@@ -236,3 +237,4 @@ api_v1_router.include_router(
 
 # System Health Check (post-deploy + daily)
 api_v1_router.include_router(system_check.router)
+api_v1_router.include_router(price_history.router)

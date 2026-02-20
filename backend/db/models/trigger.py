@@ -68,11 +68,11 @@ class Trigger(BaseModel):
 
     # Relationships
     organization: Mapped["Organization"] = relationship(
-        "Organization", back_populates="triggers", lazy="selectin"
+        "Organization", back_populates="triggers", lazy="noload"
     )
     workflow: Mapped["Workflow"] = relationship(
-        "Workflow", back_populates="triggers", lazy="selectin"
+        "Workflow", back_populates="triggers", lazy="noload"
     )
     created_by: Mapped[Optional["User"]] = relationship(
-        "User", lazy="selectin"
+        "User", lazy="noload"
     )
