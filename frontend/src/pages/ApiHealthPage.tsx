@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Activity, RefreshCw, CheckCircle2, XCircle, AlertTriangle, Clock, Database, Server, Wifi, Cog } from 'lucide-react';
 import { apiHealthApi } from '@/api/apiHealth';
+import { systemHealthApi, InfrastructureHealth } from '@/api/systemHealth';
+import { GitBranch, Container, HardDrive, RefreshCcw } from 'lucide-react';
 import { useLocale } from '@/i18n';
 
 interface ServiceStatus {
@@ -59,6 +61,7 @@ export default function ApiHealthPage() {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [checking, setChecking] = useState(false);
+  const [infra, setInfra] = useState<InfrastructureHealth | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
@@ -68,6 +71,7 @@ export default function ApiHealthPage() {
         apiHealthApi.getHistory(120),
       ]);
       setHealth(statusData);
+      systemHealthApi.getInfraHealth().then(setInfra).catch(() => {});
       setAlerts(alertsData.alerts || []);
       setHistory(historyData.history || []);
     } catch (e) {
