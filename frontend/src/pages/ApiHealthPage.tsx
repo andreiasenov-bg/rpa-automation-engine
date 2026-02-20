@@ -71,8 +71,8 @@ export default function ApiHealthPage() {
         apiHealthApi.getHistory(),
       ]);
       setHealth(statusRes);
-      setAlerts(alertsRes);
-      setHistory(historyRes);
+      setAlerts(alertsRes.alerts || alertsRes || []);
+      setHistory(historyRes.history || historyRes || []);
       systemHealthApi.getInfraHealth().then(setInfra).catch(() => {});
     } catch (e) {
       console.error(e);
