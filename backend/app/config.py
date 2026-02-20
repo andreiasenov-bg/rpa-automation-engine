@@ -35,8 +35,8 @@ class Settings(BaseSettings):
     # MUST be set in environment for production; defaults only safe for development
     SECRET_KEY: str = ""
     ENCRYPTION_KEY: str = ""
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 hours
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30  # 30 minutes
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     # Claude AI Settings
     # Accepts either ANTHROPIC_API_KEY or CHAT_API_KEY (for backward compat)
