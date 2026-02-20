@@ -611,7 +611,7 @@ export default function WorkflowEditorPage() {
               Publish
             </button>
           )}
-          {workflow?.status === 'published' && (
+          {workflow && (
             <button
               onClick={() => setShowRunDialog(true)}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition"

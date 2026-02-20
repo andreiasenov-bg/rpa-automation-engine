@@ -56,3 +56,16 @@ export default class ErrorBoundary extends Component<Props, State> {
     return this.props.children;
   }
 }
+
+
+// Route-aware wrapper that resets error boundary on navigation
+import { useLocation } from 'react-router-dom';
+
+export function RouteErrorBoundary({ children }: { children: React.ReactNode }) {
+  const location = useLocation();
+  return (
+    <ErrorBoundary key={location.pathname}>
+      {children}
+    </ErrorBoundary>
+  );
+}

@@ -38,6 +38,7 @@ const ProfilerPage = lazy(() => import('@/pages/ProfilerPage'));
 const ApiHealthPage = lazy(() => import('@/pages/ApiHealthPage'));
 
 import ErrorBoundary from '@/components/ErrorBoundary';
+import { RouteErrorBoundary } from '@/components/ErrorBoundary';
 import ToastContainer from '@/components/ToastContainer';
 
 const queryClient = new QueryClient({
@@ -70,6 +71,7 @@ function AppRoutes() {
 
   return (
     <Routes>
+            <Route element={<RouteErrorBoundary><Outlet /></RouteErrorBoundary>}>
       {/* Public routes */}
       <Route path="/login" element={isAuthenticated ? <Navigate to="/" replace /> : <LoginPage />} />
       <Route path="/register" element={isAuthenticated ? <Navigate to="/" replace /> : <RegisterPage />} />
@@ -109,7 +111,8 @@ function AppRoutes() {
 
       {/* Catch-all */}
       <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    </Route>
+          </Routes>
   );
 }
 
