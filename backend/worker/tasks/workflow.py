@@ -32,7 +32,7 @@ async def _update_execution_status(
     duration_ms: int = None,
 ):
     """Update execution record directly via async session."""
-    from db.session import AsyncSessionLocal
+    from db.worker_session import worker_session
     from db.models.execution import Execution
     from sqlalchemy import update
 
@@ -47,7 +47,7 @@ async def _update_execution_status(
         values["completed_at"] = datetime.utcnow()
 
     try:
-        async with AsyncSessionLocal() as session:
+        async with worker_session() as session:
             await session.execute(
                 update(Execution)
                 .where(Execution.id == execution_id)
@@ -192,14 +192,14 @@ async def _send_fail_notification(
 ) -> None:
     """Send notification to all configured channels when a workflow fails."""
     from sqlalchemy import select
-    from db.session import AsyncSessionLocal
+    from db.worker_session import worker_session
     from db.models.workflow import Workflow
     from notifications.manager import get_notification_manager
 
     # Get workflow name
     workflow_name = workflow_id[:8]
     try:
-        async with AsyncSessionLocal() as session:
+        async with worker_session() as session:
             result = await session.execute(
                 select(Workflow.name).where(Workflow.id == workflow_id)
             )
@@ -241,12 +241,12 @@ async def _ai_diagnose_and_maybe_fix(
     4. Stores full fix history: problem, solution, before/after definition diff
     """
     from sqlalchemy import text as sa_text
-    from db.session import AsyncSessionLocal
+    from db.worker_session import worker_session
 
     # ── Get workflow info ──
     workflow_name = workflow_id[:8]
     try:
-        async with AsyncSessionLocal() as session:
+        async with worker_session() as session:
             result = await session.execute(sa_text(
                 "SELECT name FROM workflows WHERE id = :wid"
             ), {"wid": workflow_id})
@@ -259,7 +259,7 @@ async def _ai_diagnose_and_maybe_fix(
     # ── Get step-level errors from execution_states ──
     step_errors = []
     try:
-        async with AsyncSessionLocal() as session:
+        async with worker_session() as session:
             state_row = (await session.execute(sa_text(
                 "SELECT state_data FROM execution_states WHERE execution_id = :eid LIMIT 1"
             ), {"eid": execution_id})).fetchone()
@@ -330,7 +330,7 @@ IMPORTANT:
 
     # ── Step 2: Store diagnosis in execution_journal ──
     try:
-        async with AsyncSessionLocal() as session:
+        async with worker_session() as session:
             await session.execute(sa_text("""
                 INSERT INTO execution_journal
                 (id, execution_id, event_type, message, severity, details, created_at)
@@ -394,7 +394,7 @@ async def _apply_ai_definition_fix(
     Stores full fix history: problem, solution, old definition, new definition.
     """
     from sqlalchemy import text as sa_text
-    from db.session import AsyncSessionLocal
+    from db.worker_session import worker_session
 
     logger.info(f"AI auto-fix: generating corrected definition for workflow {workflow_id}")
 
@@ -491,7 +491,7 @@ RULES:
     # ── Apply fix: Update workflow definition in DB ──
     old_version = None
     try:
-        async with AsyncSessionLocal() as session:
+        async with worker_session() as session:
             # Get current version
             ver_row = (await session.execute(sa_text(
                 "SELECT version FROM workflows WHERE id = :wid"
@@ -531,7 +531,7 @@ RULES:
     }
 
     try:
-        async with AsyncSessionLocal() as session:
+        async with worker_session() as session:
             await session.execute(sa_text("""
                 INSERT INTO execution_journal
                 (id, execution_id, event_type, message, severity, details, created_at)
@@ -550,7 +550,7 @@ RULES:
     # ── Create new execution with fixed definition ──
     new_exec_id = str(uuid4())
     try:
-        async with AsyncSessionLocal() as session:
+        async with worker_session() as session:
             await session.execute(sa_text("""
                 INSERT INTO executions
                 (id, workflow_id, status, trigger_type, created_at)
@@ -568,7 +568,7 @@ RULES:
         logger.info(f"AI auto-fix: new execution {new_exec_id} with fixed definition (from failed {execution_id})")
 
         # Log the re-run
-        async with AsyncSessionLocal() as session:
+        async with worker_session() as session:
             await session.execute(sa_text("""
                 INSERT INTO execution_journal
                 (id, execution_id, event_type, message, severity, details, created_at)
@@ -598,11 +598,11 @@ async def _trigger_retry(
 ) -> None:
     """Simple retry — re-run the workflow with the same definition."""
     from sqlalchemy import text as sa_text
-    from db.session import AsyncSessionLocal
+    from db.worker_session import worker_session
 
     try:
         new_exec_id = str(uuid4())
-        async with AsyncSessionLocal() as session:
+        async with worker_session() as session:
             await session.execute(sa_text("""
                 INSERT INTO executions
                 (id, workflow_id, status, trigger_type, created_at)
@@ -619,7 +619,7 @@ async def _trigger_retry(
         )
 
         # Log retry
-        async with AsyncSessionLocal() as session:
+        async with worker_session() as session:
             await session.execute(sa_text("""
                 INSERT INTO execution_journal
                 (id, execution_id, event_type, message, severity, details, created_at)
@@ -832,7 +832,7 @@ def resume_workflow(self, execution_id: str, saved_state: dict):
 async def _resume_workflow(execution_id: str, saved_state: dict) -> dict:
     """Async workflow resume logic."""
     from sqlalchemy import select
-    from db.session import AsyncSessionLocal
+    from db.worker_session import worker_session
     from db.models.workflow import Workflow
     from workflow.engine import WorkflowEngine, ExecutionContext
     from workflow.checkpoint import CheckpointManager
@@ -849,7 +849,7 @@ async def _resume_workflow(execution_id: str, saved_state: dict) -> dict:
     resume_context = ExecutionContext.from_dict(saved_state)
 
     # Load workflow definition from DB
-    async with AsyncSessionLocal() as session:
+    async with worker_session() as session:
         result = await session.execute(
             select(Workflow).where(Workflow.id == resume_context.workflow_id)
         )

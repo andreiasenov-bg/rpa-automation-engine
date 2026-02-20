@@ -77,14 +77,14 @@ def check_agent_heartbeats():
 async def _check_heartbeats() -> dict:
     """Query Agent model for stale heartbeats and mark agents as disconnected."""
     from sqlalchemy import select, update, and_
-    from db.session import AsyncSessionLocal
+    from db.worker_session import worker_session
     from db.models.agent import Agent
     from core.constants import AgentStatus
 
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=HEARTBEAT_TIMEOUT_MINUTES)
     stats = {"checked": 0, "disconnected": 0}
 
-    async with AsyncSessionLocal() as session:
+    async with worker_session() as session:
         # Find active agents whose heartbeat is stale
         result = await session.execute(
             select(Agent).where(

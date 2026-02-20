@@ -21,6 +21,7 @@ x-backend-common:
     REDIS_PORT: '6379'
     ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@rpa-engine.com}
     ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD environment variable is required}
+    PYTHONPATH: /app
   depends_on: &id002
     postgres:
       condition: service_healthy
@@ -94,6 +95,7 @@ services:
       CHAT_MODEL: ${CHAT_MODEL:-claude-sonnet-4-20250514}
       ANTHROPIC_API_KEY: ${CHAT_API_KEY:-}
       CLAUDE_MODEL: ${CHAT_MODEL:-claude-sonnet-4-20250514}
+      PYTHONPATH: /app
     depends_on: *id002
     volumes: *id003
     container_name: rpa-backend
@@ -138,6 +140,7 @@ services:
       CELERY_CONCURRENCY: '4'
       ANTHROPIC_API_KEY: ${CHAT_API_KEY:-}
       CLAUDE_MODEL: ${CHAT_MODEL:-claude-sonnet-4-20250514}
+      PYTHONPATH: /app
     depends_on: *id002
     volumes: *id003
     container_name: rpa-celery-worker
@@ -167,6 +170,7 @@ services:
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@rpa-engine.com}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD environment variable is required}
       APP_ROLE: beat
+      PYTHONPATH: /app
     depends_on: *id002
     volumes: *id003
     container_name: rpa-celery-beat
@@ -216,7 +220,7 @@ services:
       IGNORE_STARTUP_PARAMETERS: extra_float_digits,search_path
       AUTH_TYPE: scram-sha-256
       ADMIN_USERS: rpa_user
-      LISTEN_PORT: "6432"
+      LISTEN_PORT: '6432'
       LOG_CONNECTIONS: '1'
       LOG_DISCONNECTIONS: '1'
     depends_on:

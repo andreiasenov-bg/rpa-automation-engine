@@ -61,7 +61,7 @@ async def _poll_and_dispatch() -> dict:
     import sys
     if "/app" not in sys.path:
         sys.path.insert(0, "/app")
-    from db.session import AsyncSessionLocal
+    from db.worker_session import worker_session
     from db.models.schedule import Schedule
     from db.models.workflow import Workflow
     from db.models.execution import Execution
@@ -72,7 +72,7 @@ async def _poll_and_dispatch() -> dict:
 
     logger.info(f"[schedule-poller] Current UTC (naive): {now.isoformat()}")
 
-    async with AsyncSessionLocal() as session:
+    async with worker_session() as session:
         # Find all enabled, non-deleted schedules where next_run_at <= now
         stmt = (
             select(Schedule)

@@ -53,7 +53,7 @@ def cleanup_old_data():
 async def _run_cleanup() -> dict:
     """Async cleanup logic with DB access."""
     from sqlalchemy import delete, select, and_
-    from db.session import AsyncSessionLocal
+    from db.worker_session import worker_session
     from db.models.execution_log import ExecutionLog
     from db.models.execution import Execution
     from db.models.execution_state import (
@@ -72,7 +72,7 @@ async def _run_cleanup() -> dict:
         "execution_states_purged": 0,
     }
 
-    async with AsyncSessionLocal() as session:
+    async with worker_session() as session:
         try:
             # 1. Delete execution logs older than retention period
             log_cutoff = now - timedelta(days=EXECUTION_LOG_RETENTION_DAYS)
