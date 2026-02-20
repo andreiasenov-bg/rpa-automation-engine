@@ -1,0 +1,5 @@
+[Unit]
+Description=RPA Engine Auto-Sync
+After=network-online.target docker.service
+Wants=network-online.trgp
+olCCP /OPT/RPA-ENGINE/SCRIPTS/RPA-AUTO-SYNC.SERVICE /ETC/SYSTEMD/SYSTEM/
