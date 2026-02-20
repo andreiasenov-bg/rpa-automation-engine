@@ -248,7 +248,62 @@ services:
         condition: service_healthy
     restart: unless-stopped
     command: celery --broker=redis://redis:6379/0 flower --port=5555 --url_prefix=flower
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: rpa-prometheus
+    ports:
+    - 127.0.0.1:9090:9090
+    volumes:
+    - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    - prometheus_data:/prometheus
+    command:
+    - --config.file=/etc/prometheus/prometheus.yml
+    - --storage.tsdb.retention.time=15d
+    - --web.enable-lifecycle
+    restart: unless-stopped
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: rpa-grafana
+    ports:
+    - 127.0.0.1:3001:3000
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      GF_SERVER_ROOT_URL: https://rpa.o-connect.com/grafana/
+      GF_SERVER_SERVE_FROM_SUB_PATH: 'true'
+    volumes:
+    - grafana_data:/var/lib/grafana
+    depends_on:
+    - prometheus
+    restart: unless-stopped
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: rpa-cadvisor
+    ports:
+    - 127.0.0.1:8081:8080
+    volumes:
+    - /:/rootfs:ro
+    - /var/run:/var/run:ro
+    - /sys:/sys:ro
+    - /var/lib/docker/:/var/lib/docker:ro
+    - /dev/disk/:/dev/disk:ro
+    privileged: true
+    devices:
+    - /dev/kmsg
+    restart: unless-stopped
+  node-exporter:
+    image: prom/node-exporter:v1.7.0
+    container_name: rpa-node-exporter
+    ports:
+    - 127.0.0.1:9100:9100
+    command:
+    - --path.rootfs=/host
+    volumes:
+    - /:/host:ro,rslave
+    restart: unless-stopped
 volumes:
   postgres_data: null
   redis_data: null
   frontend_node_modules: null
+  prometheus_data: null
+  grafana_data: null
