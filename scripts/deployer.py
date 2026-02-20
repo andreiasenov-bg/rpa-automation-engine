@@ -21,6 +21,7 @@ import time
 import urllib.request
 import urllib.error
 import urllib.parse
+import shutil
 
 PORT = 9000
 REPO_DIR = "/repo"
@@ -120,6 +121,98 @@ def _restart_celery() -> dict:
         else:
             print(f"[deployer] {service} restart FAILED: {r.get('stderr', r.get('error', '?'))}")
     return results
+
+
+
+def _check_infrastructure_health() -> dict:
+    """Gather host-level health: auto-sync, github, docker, disk."""
+    import time as _time
+    from datetime import datetime as _dt, timezone as _tz
+    result = {}
+
+    # 1. Auto-Sync process check
+    try:
+        r = subprocess.run(
+            ["docker", "run", "--rm", "--pid=host", "alpine",
+             "sh", "-c", "ps aux | grep auto-sync.sh | grep -v grep"],
+            capture_output=True, text=True, timeout=10)
+        lines_out = [l for l in r.stdout.strip().split(chr(10)) if l.strip()]
+        is_running = len(lines_out) > 0
+        pid = 0
+        if is_running:
+            parts = lines_out[0].split()
+            pid = int(parts[0]) if parts else 0
+        result["auto_sync"] = {
+            "status": "ok" if is_running else "down",
+            "state": "active" if is_running else "inactive",
+            "pid": pid,
+        }
+    except Exception as e:
+        result["auto_sync"] = {"status": "down", "error": str(e)}
+
+    # 2. GitHub connectivity
+    try:
+        start = _time.time()
+        r = subprocess.run(
+            ["git", "-C", REPO_DIR, "ls-remote", "-q", "--exit-code", "origin", "HEAD"],
+            capture_output=True, text=True, timeout=10)
+        ms = round((_time.time() - start) * 1000)
+        log = subprocess.run(
+            ["git", "-C", REPO_DIR, "log", "-1", "--format=%H|%s|%ci"],
+            capture_output=True, text=True, timeout=5)
+        parts = log.stdout.strip().split("|", 2) if log.stdout.strip() else []
+        result["github"] = {
+            "status": "ok" if r.returncode == 0 else "down",
+            "response_ms": ms,
+            "last_commit": parts[0][:8] if parts else "N/A",
+            "last_message": parts[1] if len(parts) > 1 else "N/A",
+            "last_commit_time": parts[2] if len(parts) > 2 else "N/A",
+        }
+    except Exception as e:
+        result["github"] = {"status": "down", "error": str(e)}
+
+    # 3. Docker containers
+    try:
+        start = _time.time()
+        r = subprocess.run(
+            ["docker", "ps", "-a", "--format", "{{.Names}}|{{.Status}}|{{.State}}"],
+            capture_output=True, text=True, timeout=10)
+        ms = round((_time.time() - start) * 1000)
+        containers = []
+        all_running = True
+        for line in r.stdout.strip().split(chr(10)):
+            if not line:
+                continue
+            p = line.split("|", 2)
+            c = {"name": p[0], "status": p[1] if len(p) > 1 else "?",
+                 "state": p[2] if len(p) > 2 else "?"}
+            containers.append(c)
+            if c["state"] != "running":
+                all_running = False
+        result["docker"] = {
+            "status": "ok" if all_running else "degraded",
+            "containers": containers, "total": len(containers),
+            "all_healthy": all_running, "response_ms": ms,
+        }
+    except Exception as e:
+        result["docker"] = {"status": "down", "error": str(e)}
+
+    # 4. Disk space
+    try:
+        usage = shutil.disk_usage(REPO_DIR)
+        pct = round(usage.used / usage.total * 100, 1)
+        result["disk"] = {
+            "status": "ok" if pct < 85 else "degraded" if pct < 95 else "down",
+            "total_gb": round(usage.total / (1024**3), 1),
+            "used_gb": round(usage.used / (1024**3), 1),
+            "free_gb": round(usage.free / (1024**3), 1),
+            "used_pct": pct,
+        }
+    except Exception as e:
+        result["disk"] = {"status": "down", "error": str(e)}
+
+    result["timestamp"] = _dt.now(_tz.utc).isoformat()
+    return result
 
 
 class DeployHandler(http.server.BaseHTTPRequestHandler):
@@ -344,6 +437,14 @@ class DeployHandler(http.server.BaseHTTPRequestHandler):
                 self._json_response(200, {"ok": True, "path": dir_path, "entries": entries})
             except Exception as e:
                 self._json_response(500, {"error": str(e)})
+
+
+        elif path in ("/infrastructure-health", "/deploy/infrastructure-health"):
+            if not self._verify_token():
+                self._json_response(401, {"error": "Unauthorized"})
+                return
+            health = _check_infrastructure_health()
+            self._json_response(200, health)
 
         else:
             self._json_response(404, {"error": f"Unknown path: {path}"})
