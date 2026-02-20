@@ -215,6 +215,81 @@ export default function ApiHealthPage() {
         </div>
       )}
 
+
+      {/* Infrastructure & Sync */}
+      {infra && (
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <Container className="w-5 h-5 text-indigo-400" />
+            <h2 className="text-lg font-semibold text-white">Infrastructure & Sync</h2>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            {/* Auto-Sync */}
+            <div className={`${infra.auto_sync.status === 'ok' ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-red-500/10 border-red-500/30'} border rounded-xl p-5`}>
+              <div className="flex items-center justify-between mb-3">
+                <RefreshCcw className={`w-5 h-5 ${infra.auto_sync.status === 'ok' ? 'text-emerald-400' : 'text-red-400'}`} />
+                <div className="flex items-center gap-2">
+                  <div className={`w-2.5 h-2.5 rounded-full ${infra.auto_sync.status === 'ok' ? 'bg-emerald-400' : 'bg-red-400 animate-pulse'}`} />
+                  <span className={`text-xs font-semibold uppercase ${infra.auto_sync.status === 'ok' ? 'text-emerald-400' : 'text-red-400'}`}>{infra.auto_sync.state}</span>
+                </div>
+              </div>
+              <h3 className="text-white font-semibold text-sm mb-1">Auto-Sync</h3>
+              {infra.auto_sync.pid > 0 && <p className="text-xs text-slate-400">PID {infra.auto_sync.pid}</p>}
+              {infra.auto_sync.error && <p className="mt-2 text-xs text-red-400 bg-red-500/10 rounded px-2 py-1">{infra.auto_sync.error}</p>}
+            </div>
+
+            {/* GitHub */}
+            <div className={`${infra.github.status === 'ok' ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-red-500/10 border-red-500/30'} border rounded-xl p-5`}>
+              <div className="flex items-center justify-between mb-3">
+                <GitBranch className={`w-5 h-5 ${infra.github.status === 'ok' ? 'text-emerald-400' : 'text-red-400'}`} />
+                <div className="flex items-center gap-2">
+                  <div className={`w-2.5 h-2.5 rounded-full ${infra.github.status === 'ok' ? 'bg-emerald-400' : 'bg-red-400 animate-pulse'}`} />
+                  <span className={`text-xs font-semibold uppercase ${infra.github.status === 'ok' ? 'text-emerald-400' : 'text-red-400'}`}>{infra.github.status}</span>
+                </div>
+              </div>
+              <h3 className="text-white font-semibold text-sm mb-1">GitHub</h3>
+              <div className="flex items-center gap-1 text-xs text-slate-400"><Clock className="w-3 h-3" /><span>{infra.github.response_ms} ms</span></div>
+              <p className="text-xs text-slate-500 mt-1 truncate" title={infra.github.last_message}><code className="text-indigo-300">{infra.github.last_commit}</code> {infra.github.last_message}</p>
+              <p className="text-[10px] text-slate-600 mt-0.5">{infra.github.last_commit_time}</p>
+            </div>
+
+            {/* Docker Containers */}
+            <div className={`${infra.docker.status === 'ok' ? 'bg-emerald-500/10 border-emerald-500/30' : infra.docker.status === 'degraded' ? 'bg-amber-500/10 border-amber-500/30' : 'bg-red-500/10 border-red-500/30'} border rounded-xl p-5`}>
+              <div className="flex items-center justify-between mb-3">
+                <Server className={`w-5 h-5 ${infra.docker.status === 'ok' ? 'text-emerald-400' : infra.docker.status === 'degraded' ? 'text-amber-400' : 'text-red-400'}`} />
+                <span className={`text-xs font-semibold ${infra.docker.status === 'ok' ? 'text-emerald-400' : 'text-amber-400'}`}>{infra.docker.containers.filter(c => c.state === 'running').length}/{infra.docker.total}</span>
+              </div>
+              <h3 className="text-white font-semibold text-sm mb-2">Docker Containers</h3>
+              <div className="space-y-1 max-h-32 overflow-y-auto">
+                {infra.docker.containers.map((c, i) => (
+                  <div key={i} className="flex items-center gap-2 text-xs">
+                    <div className={`w-1.5 h-1.5 rounded-full ${c.state === 'running' ? 'bg-emerald-400' : 'bg-red-400'}`} />
+                    <span className="text-slate-400 truncate flex-1" title={c.name}>{c.name.replace('rpa-', '')}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Disk Space */}
+            <div className={`${infra.disk.status === 'ok' ? 'bg-emerald-500/10 border-emerald-500/30' : infra.disk.status === 'degraded' ? 'bg-amber-500/10 border-amber-500/30' : 'bg-red-500/10 border-red-500/30'} border rounded-xl p-5`}>
+              <div className="flex items-center justify-between mb-3">
+                <HardDrive className={`w-5 h-5 ${infra.disk.status === 'ok' ? 'text-emerald-400' : infra.disk.status === 'degraded' ? 'text-amber-400' : 'text-red-400'}`} />
+                <span className={`text-xs font-semibold ${infra.disk.status === 'ok' ? 'text-emerald-400' : 'text-amber-400'}`}>{infra.disk.used_pct}%</span>
+              </div>
+              <h3 className="text-white font-semibold text-sm mb-2">Disk Space</h3>
+              <div className="w-full h-2 bg-slate-700 rounded-full overflow-hidden mb-2">
+                <div className={`h-full rounded-full transition-all ${infra.disk.used_pct < 85 ? 'bg-emerald-400' : infra.disk.used_pct < 95 ? 'bg-amber-400' : 'bg-red-400'}`} style={{ width: infra.disk.used_pct + '%' }} />
+              </div>
+              <div className="flex justify-between text-xs text-slate-400">
+                <span>{infra.disk.used_gb} GB used</span>
+                <span>{infra.disk.free_gb} GB free</span>
+              </div>
+              <p className="text-[10px] text-slate-600 mt-1">Total: {infra.disk.total_gb} GB</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Alerts */}
       <div className="bg-slate-800/50 border border-slate-700/50 rounded-xl overflow-hidden">
         <div className="px-5 py-3 border-b border-slate-700/50 flex items-center gap-2">
