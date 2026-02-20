@@ -1094,6 +1094,12 @@ class BrowserClickTask(BaseTask):
             )
 
         except Exception as e:
+            if optional:
+                logger.info("Optional browser_click failed gracefully", selector=selector, error=str(e))
+                return TaskResult(
+                    success=True,
+                    output={"clicked": False, "selector": selector, "skipped_reason": str(e)},
+                )
             return TaskResult(success=False, error=f"Browser click failed: {str(e)}")
 
     @classmethod
