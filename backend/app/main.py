@@ -74,10 +74,10 @@ async def lifespan(app: FastAPI):
 
     # Warm up connection pool to avoid cold start latency
     try:
-        from db.session import AsyncSessionLocal
+        from db.worker_session import worker_session
         from sqlalchemy import text
         for i in range(5):
-            async with AsyncSessionLocal() as session:
+            async with worker_session() as session:
                 await session.execute(text('SELECT 1'))
         print('[startup] Connection pool warmed up (5 connections)')
     except Exception as e:
@@ -252,7 +252,7 @@ def _start_schedule_poller() -> "threading.Event":
         from datetime import datetime, timezone, timedelta
         from uuid import uuid4
         from sqlalchemy import select
-        from db.session import AsyncSessionLocal
+        from db.worker_session import worker_session
         from db.models.schedule import Schedule
         from db.models.workflow import Workflow
         from db.models.execution import Execution
@@ -261,7 +261,7 @@ def _start_schedule_poller() -> "threading.Event":
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         dispatched = 0
 
-        async with AsyncSessionLocal() as session:
+        async with worker_session() as session:
             stmt = (
                 select(Schedule)
                 .where(Schedule.is_enabled == True)       # noqa: E712
@@ -353,7 +353,7 @@ async def _handle_trigger_event(event, engine) -> str:
 
     try:
         # Load workflow definition from DB
-        async with AsyncSessionLocal() as session:
+        async with worker_session() as session:
             from db.models.workflow import Workflow
             from db.models.execution import Execution
 

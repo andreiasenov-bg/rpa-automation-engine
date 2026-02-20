@@ -81,7 +81,7 @@ async def _check_heartbeats() -> dict:
     from db.models.agent import Agent
     from core.constants import AgentStatus
 
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=HEARTBEAT_TIMEOUT_MINUTES)
+    cutoff = datetime.utcnow() - timedelta(minutes=HEARTBEAT_TIMEOUT_MINUTES)
     stats = {"checked": 0, "disconnected": 0}
 
     async with worker_session() as session:
@@ -91,7 +91,7 @@ async def _check_heartbeats() -> dict:
                 and_(
                     Agent.status == AgentStatus.ACTIVE.value,
                     Agent.is_deleted == False,
-                    Agent.last_heartbeat_at is not None,
+                    Agent.last_heartbeat_at.isnot(None),
                     Agent.last_heartbeat_at < cutoff,
                 )
             )
