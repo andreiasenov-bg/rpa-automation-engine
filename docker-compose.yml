@@ -1,9 +1,10 @@
+name: rpa-engine
 x-backend-common:
   build: &id001
     context: ./backend
     dockerfile: Dockerfile
   environment:
-    DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-rpa_user}:${POSTGRES_PASSWORD:-rpa_secret_dev}@postgres:5432/${POSTGRES_DB:-rpa_engine}
+    DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-rpa_user}:${POSTGRES_PASSWORD:-rpa_secret_dev}@pgbouncer:6432/${POSTGRES_DB:-rpa_engine}?prepared_statement_cache_size=0
     REDIS_URL: redis://redis:6379/0
     CELERY_BROKER_URL: redis://redis:6379/0
     CELERY_RESULT_BACKEND: redis://redis:6379/1
@@ -24,6 +25,8 @@ x-backend-common:
     postgres:
       condition: service_healthy
     redis:
+      condition: service_healthy
+    pgbouncer:
       condition: service_healthy
   volumes: &id003
   - ./backend:/app
@@ -67,7 +70,7 @@ services:
   backend:
     build: *id001
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-rpa_user}:${POSTGRES_PASSWORD:-rpa_secret_dev}@postgres:5432/${POSTGRES_DB:-rpa_engine}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-rpa_user}:${POSTGRES_PASSWORD:-rpa_secret_dev}@pgbouncer:6432/${POSTGRES_DB:-rpa_engine}?prepared_statement_cache_size=0
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
@@ -114,7 +117,7 @@ services:
   celery-worker:
     build: *id001
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-rpa_user}:${POSTGRES_PASSWORD:-rpa_secret_dev}@postgres:5432/${POSTGRES_DB:-rpa_engine}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-rpa_user}:${POSTGRES_PASSWORD:-rpa_secret_dev}@pgbouncer:6432/${POSTGRES_DB:-rpa_engine}?prepared_statement_cache_size=0
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
@@ -146,7 +149,7 @@ services:
   celery-beat:
     build: *id001
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-rpa_user}:${POSTGRES_PASSWORD:-rpa_secret_dev}@postgres:5432/${POSTGRES_DB:-rpa_engine}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-rpa_user}:${POSTGRES_PASSWORD:-rpa_secret_dev}@pgbouncer:6432/${POSTGRES_DB:-rpa_engine}?prepared_statement_cache_size=0
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
@@ -196,6 +199,36 @@ services:
     - 3000:80
     depends_on:
     - backend
+    restart: unless-stopped
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: rpa-pgbouncer
+    ports:
+    - 127.0.0.1:6432:6432
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-rpa_user}:${POSTGRES_PASSWORD:-rpa_secret_dev}@postgres:5432/${POSTGRES_DB:-rpa_engine}
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: '200'
+      DEFAULT_POOL_SIZE: '20'
+      MIN_POOL_SIZE: '5'
+      RESERVE_POOL_SIZE: '5'
+      MAX_DB_CONNECTIONS: '50'
+      IGNORE_STARTUP_PARAMETERS: extra_float_digits,search_path
+      AUTH_TYPE: scram-sha-256
+      ADMIN_USERS: rpa_user
+      LISTEN_PORT: "6432"
+      LOG_CONNECTIONS: '1'
+      LOG_DISCONNECTIONS: '1'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - pg_isready -h localhost -p 6432 -U rpa_user -d rpa_engine || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
 volumes:
   postgres_data: null
