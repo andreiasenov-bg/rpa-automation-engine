@@ -30,7 +30,7 @@ jobs:
       - name: Lint backend (ruff)
         run: |
           cd backend
-          ruff check . --select E,F,W --ignore E501
+          ruff check --config ruff.toml .
 
       - name: Set up Node.js 20
         uses: actions/setup-node@v4

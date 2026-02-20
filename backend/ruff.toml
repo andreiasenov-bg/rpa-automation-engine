@@ -1,0 +1,5 @@
+exclude = ["alembic/", ".venv/", "venv/"]
+
+[lint]
+ignore = ["E402", "E501", "E712", "E731", "F401", "F821", "F841", "W291", "W292", "W293"]
+select = ["E", "F", "W"]
