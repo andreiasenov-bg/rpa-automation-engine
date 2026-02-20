@@ -746,6 +746,61 @@ class ClaudeClient:
 
         return text
 
+
+    async def ask_json(
+        self,
+        prompt: str,
+        schema: Dict[str, Any],
+        tool_name: str = "structured_output",
+        tool_description: str = "Return the result as structured JSON",
+        system: Optional[str] = None,
+        model: Optional[str] = None,
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Send a message and get a guaranteed JSON response via tool use.
+
+        Uses Anthropic tool_choice to force Claude to respond with
+        structured output matching the provided JSON schema.
+        """
+        tools = [{
+            "name": tool_name,
+            "description": tool_description,
+            "input_schema": schema,
+        }]
+        tool_choice = {"type": "tool", "name": tool_name}
+
+        messages = [{"role": "user", "content": prompt}]
+
+        response = await self._make_request(
+            messages=messages,
+            system=system,
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            tools=tools,
+            tool_choice=tool_choice,
+        )
+
+        # Extract tool_use block from response
+        content_blocks = response.get("content", [])
+        for block in content_blocks:
+            if block.get("type") == "tool_use" and block.get("name") == tool_name:
+                return block.get("input", {})
+
+        # Fallback: try to extract JSON from text blocks
+        for block in content_blocks:
+            if block.get("type") == "text":
+                try:
+                    return extract_json(block["text"])
+                except (ValueError, json.JSONDecodeError):
+                    pass
+
+        raise ValueError(
+            f"Claude did not return structured output. "
+            f"Response blocks: {[b.get('type') for b in content_blocks]}"
+        )
+
     async def analyze(
         self,
         data: str,

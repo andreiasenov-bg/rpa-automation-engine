@@ -85,20 +85,91 @@ async def ai_ask(request: AIAskRequest):
     if not client.is_configured:
         raise HTTPException(status_code=503, detail="Claude AI not configured. Set ANTHROPIC_API_KEY.")
 
+    # JSON Schema for workflow structured output
+    workflow_schema = {
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "description": "A descriptive name for the workflow"
+            },
+            "description": {
+                "type": "string",
+                "description": "What this workflow does"
+            },
+            "steps": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string", "description": "Unique step ID like step-1, step-2"},
+                        "name": {"type": "string", "description": "Human-readable step name"},
+                        "type": {
+                            "type": "string",
+                            "enum": ["web_scrape", "http_request", "custom_script",
+                                     "data_transform", "email_send", "file_write",
+                                     "database_query", "condition", "loop", "ai_ask"],
+                            "description": "Task type from the available types"
+                        },
+                        "config": {"type": "object", "description": "Type-specific configuration"},
+                        "depends_on": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "IDs of steps this depends on"
+                        }
+                    },
+                    "required": ["id", "name", "type", "config", "depends_on"]
+                },
+                "description": "Ordered list of workflow steps"
+            }
+        },
+        "required": ["name", "description", "steps"]
+    }
+
     try:
-        response = await client.ask(
-            prompt=request.prompt,
-            system=request.system_prompt,
-            model=request.model,
-            max_tokens=request.max_tokens,
-            temperature=request.temperature,
-            conversation_id=request.conversation_id,
+        workflow_def = await client.ask_json(
+            prompt=prompt,
+            schema=workflow_schema,
+            tool_name="generate_workflow",
+            tool_description="Generate a complete RPA workflow definition with steps",
+            system=system_prompt,
+            model=None,
+            max_tokens=4096,
+            temperature=0.3,
         )
-        return AIResponse(
-            success=True,
-            result=response,
-            metadata={"conversation_id": request.conversation_id},
-        )
+
+        return {
+            "success": True,
+            "workflow": {
+                "name": workflow_def.get("name", "AI Generated Workflow"),
+                "description": workflow_def.get("description", request.description),
+                "steps": workflow_def.get("steps", []),
+            }
+        }
+
+    except ValueError as e:
+        try:
+            response = await client.ask(
+                prompt=prompt,
+                system=system_prompt,
+                temperature=0.3,
+                max_tokens=4096,
+            )
+            from integrations.claude_client import extract_json
+            workflow_def = extract_json(response)
+            return {
+                "success": True,
+                "workflow": {
+                    "name": workflow_def.get("name", "AI Generated Workflow"),
+                    "description": workflow_def.get("description", request.description),
+                    "steps": workflow_def.get("steps", []),
+                }
+            }
+        except Exception as fallback_err:
+            return {
+                "success": False,
+                "error": f"AI could not generate valid workflow: {str(fallback_err)}",
+            }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
