@@ -32,27 +32,31 @@ interface HistoryEntry {
   services: ServiceStatus[];
 }
 
-function serviceIcon(name: string) {
-  switch (name) {
-    case 'Backend API': return Server;
-    case 'PostgreSQL': return Database;
-    case 'Redis': return Wifi;
-    case 'Celery Workers': return Cog;
-    default: return Server;
-  }
-}
+const iconMap: Record<string, any> = {
+  'Backend API': Server,
+  'PostgreSQL': Database,
+  'Redis': Wifi,
+  'Celery Workers': Cog,
+};
 
-function statusColor(status: string) {
-  if (status === 'ok') return { bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', text: 'text-emerald-400', dot: 'bg-emerald-400', glow: 'hover:shadow-emerald-500/20' };
-  if (status === 'degraded') return { bg: 'bg-amber-500/10', border: 'border-amber-500/30', text: 'text-amber-400', dot: 'bg-amber-400', glow: 'hover:shadow-amber-500/20' };
-  return { bg: 'bg-red-500/10', border: 'border-red-500/30', text: 'text-red-400', dot: 'bg-red-400', glow: 'hover:shadow-red-500/20' };
-}
+const iconColors: Record<string, string> = {
+  'Backend API': 'bg-indigo-500',
+  'PostgreSQL': 'bg-blue-500',
+  'Redis': 'bg-orange-500',
+  'Celery Workers': 'bg-purple-500',
+};
 
-function overallBanner(overall: string) {
-  if (overall === 'healthy') return { bg: 'bg-gradient-to-r from-emerald-900/40 via-emerald-800/20 to-emerald-900/40', border: 'border-emerald-500/20', text: 'text-emerald-400', label: 'All Systems Operational', Icon: CheckCircle2 };
-  if (overall === 'degraded') return { bg: 'bg-gradient-to-r from-amber-900/40 via-amber-800/20 to-amber-900/40', border: 'border-amber-500/20', text: 'text-amber-400', label: 'Degraded Performance', Icon: AlertTriangle };
-  return { bg: 'bg-gradient-to-r from-red-900/40 via-red-800/20 to-red-900/40', border: 'border-red-500/20', text: 'text-red-400', label: 'System Outage', Icon: XCircle };
-}
+const statusDot: Record<string, string> = {
+  ok: 'bg-emerald-500',
+  degraded: 'bg-amber-500',
+  down: 'bg-red-500',
+};
+
+const statusBadge: Record<string, string> = {
+  ok: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20',
+  degraded: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/20',
+  down: 'bg-red-50 text-red-700 border-red-200 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/20',
+};
 
 export default function ApiHealthPage() {
   const { t } = useLocale();
@@ -92,91 +96,84 @@ export default function ApiHealthPage() {
   if (!health) {
     return (
       <div className="flex items-center justify-center py-20">
-        <div className="text-center">
-          <RefreshCw className="w-8 h-8 text-indigo-400 animate-spin mx-auto mb-4" />
-          <p className="text-slate-400">Loading health data...</p>
-        </div>
+        <RefreshCw className="w-6 h-6 text-indigo-500 animate-spin" />
       </div>
     );
   }
 
-  const banner = overallBanner(health.overall);
-  const BannerIcon = banner.Icon;
   const diskPct = infra?.disk?.used_pct ?? 0;
-  const diskBarColor = diskPct > 85 ? 'from-red-500 to-red-400' : diskPct > 60 ? 'from-amber-500 to-amber-400' : 'from-emerald-500 via-emerald-400 to-teal-400';
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-indigo-500/10 rounded-lg border border-indigo-500/20">
-              <Activity className="w-6 h-6 text-indigo-400" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-white tracking-tight">API Health Monitor</h1>
-              <p className="text-sm text-slate-500">Real-time service health & diagnostics</p>
-            </div>
-          </div>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">API Health</h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400">Real-time service health & infrastructure status</p>
         </div>
         <button
           onClick={fetchData}
           disabled={loading}
-          className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-xl transition-all duration-300 hover:shadow-lg hover:shadow-indigo-500/25 active:scale-95 disabled:opacity-50"
+          className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
         >
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          Run Health Check
+          Run Check
         </button>
       </div>
 
-      {/* Overall Status Banner */}
-      <div className={`${banner.bg} border ${banner.border} rounded-2xl p-5 backdrop-blur-sm transition-all duration-500`}>
-        <div className="flex items-center gap-4">
-          <div className={`p-2 rounded-full ${banner.text} bg-current/10`}>
-            <BannerIcon className="w-6 h-6" />
-          </div>
+      {/* Overall Banner */}
+      {health.overall === 'healthy' ? (
+        <div className="flex items-center gap-3 px-4 py-3 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 rounded-xl">
+          <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
           <div>
-            <h2 className={`text-lg font-bold ${banner.text}`}>{banner.label}</h2>
-            <p className="text-sm text-slate-500">Last checked: {new Date(health.timestamp).toLocaleString()}</p>
+            <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-300">All Systems Operational</p>
+            <p className="text-xs text-emerald-600 dark:text-emerald-400/70">Last checked: {new Date(health.timestamp).toLocaleString()}</p>
           </div>
         </div>
-      </div>
+      ) : health.overall === 'degraded' ? (
+        <div className="flex items-center gap-3 px-4 py-3 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 rounded-xl">
+          <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+          <div>
+            <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">Degraded Performance</p>
+            <p className="text-xs text-amber-600 dark:text-amber-400/70">Last checked: {new Date(health.timestamp).toLocaleString()}</p>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center gap-3 px-4 py-3 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl">
+          <XCircle className="w-5 h-5 text-red-600 dark:text-red-400" />
+          <div>
+            <p className="text-sm font-semibold text-red-800 dark:text-red-300">System Outage</p>
+            <p className="text-xs text-red-600 dark:text-red-400/70">Last checked: {new Date(health.timestamp).toLocaleString()}</p>
+          </div>
+        </div>
+      )}
 
-      {/* Service Status Cards */}
+      {/* Service Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {health.services.map((svc) => {
-          const c = statusColor(svc.status);
-          const Icon = serviceIcon(svc.service);
+          const Icon = iconMap[svc.service] || Server;
+          const color = iconColors[svc.service] || 'bg-slate-500';
           return (
-            <div key={svc.service} className={`group relative ${c.bg} border ${c.border} rounded-2xl p-5 backdrop-blur-sm transition-all duration-300 hover:scale-[1.03] hover:shadow-xl ${c.glow} cursor-default overflow-hidden`}>
-              {/* Subtle gradient overlay */}
-              <div className="absolute inset-0 bg-gradient-to-br from-white/[0.03] to-transparent rounded-2xl pointer-events-none" />
-              <div className="relative">
-                <div className="flex items-center justify-between mb-4">
-                  <Icon className={`w-6 h-6 ${c.text} opacity-80`} />
-                  <div className="flex items-center gap-2">
-                    <div className={`w-2.5 h-2.5 rounded-full ${c.dot} shadow-lg animate-pulse`} />
-                    <span className={`text-xs font-bold uppercase tracking-widest ${c.text}`}>
-                      {svc.status === 'ok' ? 'OK' : svc.status.toUpperCase()}
-                    </span>
-                  </div>
+            <div key={svc.service} className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 hover:shadow-sm transition-shadow">
+              <div className="flex items-center justify-between mb-3">
+                <div className={`w-9 h-9 rounded-lg ${color} flex items-center justify-center`}>
+                  <Icon className="w-4.5 h-4.5 text-white" />
                 </div>
-                <h3 className="text-white font-semibold text-sm mb-1">{svc.service}</h3>
-                <div className="flex items-baseline gap-1 mb-2">
-                  <Clock className="w-3 h-3 text-slate-500" />
-                  <span className="text-xs text-slate-400">{svc.response_ms.toFixed(0)} ms</span>
-                </div>
-                {svc.details && Object.entries(svc.details).map(([k, v]) => (
-                  <p key={k} className="text-[11px] text-slate-500 leading-relaxed">
-                    <span className="text-slate-400">{k}:</span>{' '}
-                    <span className="font-medium text-slate-300">{String(v)}</span>
-                  </p>
-                ))}
-                {svc.error && (
-                  <p className="mt-2 text-xs text-red-400 bg-red-500/10 rounded-lg px-2.5 py-1.5 border border-red-500/20">{svc.error}</p>
-                )}
+                <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border ${statusBadge[svc.status] || statusBadge.down}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${statusDot[svc.status] || 'bg-red-500'}`} />
+                  {svc.status === 'ok' ? 'OK' : svc.status.toUpperCase()}
+                </span>
               </div>
+              <p className="text-sm font-semibold text-slate-900 dark:text-white">{svc.service}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{svc.response_ms.toFixed(0)} ms response</p>
+              {svc.details && Object.entries(svc.details).map(([k, v]) => (
+                <p key={k} className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
+                  {k}: <span className="text-slate-600 dark:text-slate-300">{String(v)}</span>
+                </p>
+              ))}
+              {svc.error && (
+                <p className="mt-2 text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-500/10 rounded-lg px-2 py-1">{svc.error}</p>
+              )}
             </div>
           );
         })}
@@ -184,166 +181,147 @@ export default function ApiHealthPage() {
 
       {/* Health Timeline */}
       {timelineData.length > 0 && (
-        <div className="bg-slate-800/40 border border-slate-700/40 rounded-2xl p-6 backdrop-blur-sm">
-          <div className="flex items-center gap-3 mb-4">
-            <Clock className="w-4 h-4 text-slate-500" />
-            <h3 className="text-sm font-semibold text-slate-300 tracking-wide uppercase">Health Timeline</h3>
-            <span className="text-xs text-slate-600 ml-auto">last {timelineData.length} checks</span>
+        <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Clock className="w-4 h-4 text-slate-400" />
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Health Timeline</h3>
+            </div>
+            <span className="text-xs text-slate-400">last {timelineData.length} checks</span>
           </div>
-          <div className="flex gap-1 items-end">
-            {timelineData.map((entry, i) => {
-              const c = statusColor(entry.status);
-              return (
-                <div
-                  key={i}
-                  className={`flex-1 min-w-[6px] h-10 rounded-full ${c.dot} transition-all duration-300 hover:h-14 hover:opacity-100 opacity-80 cursor-pointer group relative`}
-                  title={`${new Date(entry.time).toLocaleTimeString()} — ${entry.status}`}
-                >
-                  <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-slate-300 opacity-0 group-hover:opacity-100 transition-all duration-200 whitespace-nowrap pointer-events-none z-10 shadow-xl">
-                    {new Date(entry.time).toLocaleTimeString()}
-                  </div>
-                </div>
-              );
-            })}
+          <div className="flex gap-0.5 items-end h-8">
+            {timelineData.map((entry, i) => (
+              <div
+                key={i}
+                className={`flex-1 rounded-sm ${statusDot[entry.status]} opacity-70 hover:opacity-100 transition-opacity cursor-pointer`}
+                style={{ height: '100%' }}
+                title={`${new Date(entry.time).toLocaleTimeString()} — ${entry.status}`}
+              />
+            ))}
           </div>
-          <div className="flex justify-between mt-2">
-            <span className="text-[10px] text-slate-600">{timelineData.length > 0 ? new Date(timelineData[0].time).toLocaleTimeString() : ''}</span>
-            <span className="text-[10px] text-slate-600">{timelineData.length > 0 ? new Date(timelineData[timelineData.length - 1].time).toLocaleTimeString() : ''}</span>
+          <div className="flex justify-between mt-1.5">
+            <span className="text-[10px] text-slate-400">{timelineData.length > 0 ? new Date(timelineData[0].time).toLocaleTimeString() : ''}</span>
+            <span className="text-[10px] text-slate-400">{timelineData.length > 0 ? new Date(timelineData[timelineData.length - 1].time).toLocaleTimeString() : ''}</span>
           </div>
         </div>
       )}
-
-      {/* Gradient Divider */}
-      <div className="h-px bg-gradient-to-r from-transparent via-indigo-500/30 to-transparent" />
 
       {/* Infrastructure & Sync */}
       {infra && (
-        <div>
-          <div className="flex items-center gap-3 mb-5">
-            <div className="p-1.5 bg-indigo-500/10 rounded-lg border border-indigo-500/20">
-              <Container className="w-4 h-4 text-indigo-400" />
-            </div>
-            <h2 className="text-lg font-bold text-white tracking-tight">Infrastructure & Sync</h2>
-          </div>
-
+        <>
+          <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+            <Activity className="w-5 h-5 text-indigo-500" />
+            Infrastructure & Sync
+          </h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* Auto-Sync */}
-            <div className="group relative bg-slate-800/40 border border-slate-700/40 rounded-2xl p-5 backdrop-blur-sm transition-all duration-300 hover:scale-[1.03] hover:shadow-xl hover:shadow-indigo-500/10 hover:border-indigo-500/30 overflow-hidden">
-              <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/[0.03] to-transparent rounded-2xl pointer-events-none" />
-              <div className="relative">
-                <div className="flex items-center justify-between mb-4">
-                  <RefreshCcw className="w-5 h-5 text-indigo-400 group-hover:rotate-180 transition-transform duration-700" />
-                  <div className="flex items-center gap-2">
-                    <div className={`w-2.5 h-2.5 rounded-full ${infra.auto_sync.status === 'ok' ? 'bg-emerald-400 shadow-emerald-400/50' : 'bg-red-400 shadow-red-400/50'} shadow-lg animate-pulse`} />
-                    <span className={`text-xs font-bold uppercase tracking-widest ${infra.auto_sync.status === 'ok' ? 'text-emerald-400' : 'text-red-400'}`}>{infra.auto_sync.state}</span>
-                  </div>
+            <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 hover:shadow-sm transition-shadow">
+              <div className="flex items-center justify-between mb-3">
+                <div className="w-9 h-9 rounded-lg bg-indigo-500 flex items-center justify-center">
+                  <RefreshCcw className="w-4.5 h-4.5 text-white" />
                 </div>
-                <h3 className="text-white font-semibold text-sm mb-1">Auto-Sync</h3>
-                {infra.auto_sync.pid > 0 && <p className="text-xs text-slate-500">PID <span className="text-slate-300 font-mono">{infra.auto_sync.pid}</span></p>}
-                {infra.auto_sync.error && <p className="mt-2 text-xs text-red-400 bg-red-500/10 rounded-lg px-2.5 py-1.5 border border-red-500/20">{infra.auto_sync.error}</p>}
+                <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border ${infra.auto_sync.status === 'ok' ? statusBadge.ok : statusBadge.down}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${infra.auto_sync.status === 'ok' ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                  {infra.auto_sync.state}
+                </span>
               </div>
+              <p className="text-sm font-semibold text-slate-900 dark:text-white">Auto-Sync</p>
+              {infra.auto_sync.pid > 0 && <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">PID {infra.auto_sync.pid}</p>}
+              {infra.auto_sync.error && <p className="mt-2 text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-500/10 rounded-lg px-2 py-1">{infra.auto_sync.error}</p>}
             </div>
 
             {/* GitHub */}
-            <div className="group relative bg-slate-800/40 border border-slate-700/40 rounded-2xl p-5 backdrop-blur-sm transition-all duration-300 hover:scale-[1.03] hover:shadow-xl hover:shadow-emerald-500/10 hover:border-emerald-500/30 overflow-hidden">
-              <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/[0.03] to-transparent rounded-2xl pointer-events-none" />
-              <div className="relative">
-                <div className="flex items-center justify-between mb-4">
-                  <GitBranch className="w-5 h-5 text-emerald-400" />
-                  <div className="flex items-center gap-2">
-                    <div className={`w-2.5 h-2.5 rounded-full ${infra.github.status === 'ok' ? 'bg-emerald-400 shadow-emerald-400/50' : 'bg-red-400 shadow-red-400/50'} shadow-lg animate-pulse`} />
-                    <span className={`text-xs font-bold uppercase tracking-widest ${infra.github.status === 'ok' ? 'text-emerald-400' : 'text-red-400'}`}>{infra.github.status === 'ok' ? 'OK' : 'DOWN'}</span>
-                  </div>
+            <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 hover:shadow-sm transition-shadow">
+              <div className="flex items-center justify-between mb-3">
+                <div className="w-9 h-9 rounded-lg bg-emerald-500 flex items-center justify-center">
+                  <GitBranch className="w-4.5 h-4.5 text-white" />
                 </div>
-                <h3 className="text-white font-semibold text-sm mb-2">GitHub</h3>
-                <div className="flex items-center gap-1 text-xs text-slate-500 mb-1">
-                  <Clock className="w-3 h-3" />
-                  <span>{infra.github.response_ms} ms</span>
+                <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border ${infra.github.status === 'ok' ? statusBadge.ok : statusBadge.down}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${infra.github.status === 'ok' ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                  {infra.github.status === 'ok' ? 'OK' : 'DOWN'}
+                </span>
+              </div>
+              <p className="text-sm font-semibold text-slate-900 dark:text-white">GitHub</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{infra.github.response_ms} ms</p>
+              <p className="text-xs text-slate-400 dark:text-slate-500 mt-1 truncate" title={infra.github.last_message}>
+                <code className="text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-500/10 px-1 py-0.5 rounded text-[10px]">{infra.github.last_commit}</code>
+                <span className="ml-1">{infra.github.last_message}</span>
+              </p>
+              <p className="text-[10px] text-slate-400 mt-0.5">{infra.github.last_commit_time}</p>
+            </div>
+
+            {/* Docker */}
+            <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 hover:shadow-sm transition-shadow">
+              <div className="flex items-center justify-between mb-3">
+                <div className="w-9 h-9 rounded-lg bg-blue-500 flex items-center justify-center">
+                  <Server className="w-4.5 h-4.5 text-white" />
                 </div>
-                <p className="text-xs text-slate-500 truncate" title={infra.github.last_message}>
-                  <code className="text-indigo-300 bg-indigo-500/10 px-1.5 py-0.5 rounded font-mono text-[10px]">{infra.github.last_commit}</code>
-                  <span className="ml-1.5">{infra.github.last_message}</span>
-                </p>
-                <p className="text-[10px] text-slate-600 mt-1">{infra.github.last_commit_time}</p>
+                <span className={`text-sm font-bold ${infra.docker.all_healthy ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>{infra.docker.total}/{infra.docker.total}</span>
+              </div>
+              <p className="text-sm font-semibold text-slate-900 dark:text-white">Docker Containers</p>
+              <div className="flex flex-wrap gap-1 mt-2">
+                {infra.docker.containers.slice(0, 6).map((ct) => (
+                  <span key={ct.name} className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full border font-medium ${ct.state === 'running' ? 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-500/10 dark:border-emerald-500/20 dark:text-emerald-400' : 'bg-red-50 border-red-200 text-red-700 dark:bg-red-500/10 dark:border-red-500/20 dark:text-red-400'}`}>
+                    <span className={`w-1 h-1 rounded-full ${ct.state === 'running' ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                    {ct.name.replace('rpa-', '')}
+                  </span>
+                ))}
+                {infra.docker.containers.length > 6 && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 font-medium border border-slate-200 dark:border-slate-600">
+                    +{infra.docker.containers.length - 6} more
+                  </span>
+                )}
               </div>
             </div>
 
-            {/* Docker Containers */}
-            <div className="group relative bg-slate-800/40 border border-slate-700/40 rounded-2xl p-5 backdrop-blur-sm transition-all duration-300 hover:scale-[1.03] hover:shadow-xl hover:shadow-blue-500/10 hover:border-blue-500/30 overflow-hidden">
-              <div className="absolute inset-0 bg-gradient-to-br from-blue-500/[0.03] to-transparent rounded-2xl pointer-events-none" />
-              <div className="relative">
-                <div className="flex items-center justify-between mb-4">
-                  <Server className="w-5 h-5 text-blue-400" />
-                  <span className={`text-sm font-bold ${infra.docker.all_healthy ? 'text-emerald-400' : 'text-amber-400'}`}>{infra.docker.total}/{infra.docker.total}</span>
+            {/* Disk */}
+            <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 hover:shadow-sm transition-shadow">
+              <div className="flex items-center justify-between mb-3">
+                <div className="w-9 h-9 rounded-lg bg-purple-500 flex items-center justify-center">
+                  <HardDrive className="w-4.5 h-4.5 text-white" />
                 </div>
-                <h3 className="text-white font-semibold text-sm mb-3">Docker Containers</h3>
-                <div className="flex flex-wrap gap-1.5">
-                  {infra.docker.containers.slice(0, 6).map((ct) => (
-                    <span key={ct.name} className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border font-medium ${ct.state === 'running' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-red-500/10 border-red-500/20 text-red-300'}`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${ct.state === 'running' ? 'bg-emerald-400' : 'bg-red-400'}`} />
-                      {ct.name.replace('rpa-', '')}
-                    </span>
-                  ))}
-                  {infra.docker.containers.length > 6 && (
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-700/50 border border-slate-600/50 text-slate-400 font-medium">
-                      +{infra.docker.containers.length - 6} more
-                    </span>
-                  )}
-                </div>
+                <span className={`text-sm font-bold ${diskPct > 85 ? 'text-red-600 dark:text-red-400' : diskPct > 60 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{diskPct.toFixed(1)}%</span>
               </div>
-            </div>
-
-            {/* Disk Space */}
-            <div className="group relative bg-slate-800/40 border border-slate-700/40 rounded-2xl p-5 backdrop-blur-sm transition-all duration-300 hover:scale-[1.03] hover:shadow-xl hover:shadow-purple-500/10 hover:border-purple-500/30 overflow-hidden">
-              <div className="absolute inset-0 bg-gradient-to-br from-purple-500/[0.03] to-transparent rounded-2xl pointer-events-none" />
-              <div className="relative">
-                <div className="flex items-center justify-between mb-4">
-                  <HardDrive className="w-5 h-5 text-purple-400" />
-                  <span className={`text-sm font-bold ${diskPct > 85 ? 'text-red-400' : diskPct > 60 ? 'text-amber-400' : 'text-emerald-400'}`}>{diskPct.toFixed(1)}%</span>
-                </div>
-                <h3 className="text-white font-semibold text-sm mb-3">Disk Space</h3>
-                <div className="w-full bg-slate-700/50 rounded-full h-2.5 overflow-hidden mb-2">
-                  <div className={`h-full bg-gradient-to-r ${diskBarColor} rounded-full transition-all duration-1000 ease-out`} style={{ width: `${diskPct}%` }} />
-                </div>
-                <div className="flex justify-between text-[11px]">
-                  <span className="text-slate-400">{infra.disk.used_gb.toFixed(1)} GB used</span>
-                  <span className="text-slate-500">{infra.disk.free_gb.toFixed(0)} GB free</span>
-                </div>
-                <p className="text-[10px] text-slate-600 mt-1">Total: {infra.disk.total_gb.toFixed(1)} GB</p>
+              <p className="text-sm font-semibold text-slate-900 dark:text-white">Disk Space</p>
+              <div className="w-full bg-slate-100 dark:bg-slate-700 rounded-full h-2 mt-2">
+                <div className={`h-full rounded-full transition-all ${diskPct > 85 ? 'bg-red-500' : diskPct > 60 ? 'bg-amber-500' : 'bg-emerald-500'}`} style={{ width: `${diskPct}%` }} />
+              </div>
+              <div className="flex justify-between mt-1.5 text-xs text-slate-500 dark:text-slate-400">
+                <span>{infra.disk.used_gb.toFixed(1)} GB used</span>
+                <span>{infra.disk.free_gb.toFixed(0)} GB free</span>
               </div>
             </div>
           </div>
-        </div>
+        </>
       )}
 
-      {/* Gradient Divider */}
-      <div className="h-px bg-gradient-to-r from-transparent via-slate-700/50 to-transparent" />
-
       {/* Alerts */}
-      <div className="bg-slate-800/40 border border-slate-700/40 rounded-2xl backdrop-blur-sm overflow-hidden">
-        <div className="flex items-center gap-3 px-6 py-4 border-b border-slate-700/30">
-          <AlertTriangle className="w-4 h-4 text-amber-400" />
-          <h3 className="text-sm font-semibold text-white tracking-wide">Recent Alerts</h3>
-          <span className="text-xs text-slate-600 ml-auto font-medium">{alerts.length} alert{alerts.length !== 1 ? 's' : ''}</span>
+      <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-700">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-500" />
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Recent Alerts</h3>
+          </div>
+          <span className="text-xs text-slate-400">{alerts.length} alert{alerts.length !== 1 ? 's' : ''}</span>
         </div>
         {alerts.length === 0 ? (
-          <div className="px-6 py-10 text-center">
-            <CheckCircle2 className="w-8 h-8 text-emerald-500/30 mx-auto mb-2" />
-            <p className="text-slate-500 text-sm">No alerts — all services have been healthy.</p>
+          <div className="px-5 py-10 text-center">
+            <CheckCircle2 className="w-8 h-8 text-emerald-200 dark:text-emerald-500/20 mx-auto mb-2" />
+            <p className="text-sm text-slate-400">No alerts — all services have been healthy.</p>
           </div>
         ) : (
-          <div className="divide-y divide-slate-700/20 max-h-72 overflow-y-auto">
+          <div className="divide-y divide-slate-100 dark:divide-slate-700 max-h-72 overflow-y-auto">
             {alerts.map((alert, i) => (
-              <div key={i} className="px-6 py-3.5 flex items-center gap-4 hover:bg-slate-700/10 transition-colors duration-200">
-                <div className={`w-2 h-2 rounded-full flex-shrink-0 ${alert.status === 'down' ? 'bg-red-400' : alert.status === 'degraded' ? 'bg-amber-400' : 'bg-slate-400'}`} />
+              <div key={i} className="px-5 py-3 flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                <div className={`w-2 h-2 rounded-full flex-shrink-0 ${alert.status === 'down' ? 'bg-red-500' : alert.status === 'degraded' ? 'bg-amber-500' : 'bg-slate-300'}`} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-white">{alert.service}</span>
-                    <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full ${alert.status === 'down' ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'}`}>{alert.status}</span>
+                    <span className="text-sm font-medium text-slate-900 dark:text-white">{alert.service}</span>
+                    <span className={`text-[10px] font-medium uppercase px-2 py-0.5 rounded-full border ${statusBadge[alert.status] || statusBadge.down}`}>{alert.status}</span>
                   </div>
                   {alert.error && <p className="text-xs text-slate-500 truncate mt-0.5">{alert.error}</p>}
                 </div>
-                <span className="text-xs text-slate-600 flex-shrink-0 font-mono">{new Date(alert.timestamp).toLocaleString()}</span>
+                <span className="text-xs text-slate-400 flex-shrink-0">{new Date(alert.timestamp).toLocaleString()}</span>
               </div>
             ))}
           </div>
